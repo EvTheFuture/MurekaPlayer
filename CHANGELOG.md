@@ -1393,6 +1393,13 @@ In development.
 - **The chat's history read from the relay as the chat opens**, in case the room's stream missed it, joined before the relay had the chat say. A relay without the chat says it needs an update.
 - **Together shows both its swipes**: an arrow at its top for the menu and one at its foot for the chat, on the phone too. A button group's mark sits in the middle of the button, as the other arrows do.
 - **A double tap on the chat window's bar tucks it away**, into the nearest edge, instead of a button of its own between Dock and Close. The room's name in the chat's title is cyan. In the player and the web view.
+- **Changing your chat messages.** Edit on a message of your own puts it in the field to change, the up arrow in an empty field takes the last one, and Save sends the change to everyone; Escape leaves it as it was. A changed message says edited. Only the player that wrote a message can change it: each player has a key of its own for the chat, which the relay keeps as a hash. The relay needs the update.
+- **Mentions stand out.** Being mentioned while the chat is not open turns the count on Together and Chat pink with an @, and in the app it is also a notification of the phone's, Chat mentions, so it is seen with the app in the background. The toast says who mentioned you.
+- **A line where the new messages begin.** Opening the chat, a thin orange line marked New sits between the messages read before and the ones not read yet, and moves to what came while the window was tucked away.
+- **Each person in the chat has a colour of their own**, the same on every player, their messages tinted with it and their name in it, kept apart from your own cyan.
+- **Links in the chat open.** A link to a song on Mureka asks what to do: play it now, next, after the queued or last, see its info, or open it on Mureka, for a song in your library; others open on Mureka. In the web view the menu comes over a floating chat.
+- **Escape tucks the floating chat into its edge** instead of closing it, and closes it from there. Docked, it closes.
+- **Opening a set no longer takes the list to the playing song.** Going to the top of a list, or opening or folding a set, stops the list following the playing song, in the web view's lists and the player's.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it

@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.223";
+    const VERSION = "2.0.1.224";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -15017,19 +15017,6 @@
     // BEGIN SHARED chat
     // Written by embed-webview.sh from src/shared/chat.js. Change that
     // file and run make embed, never the lines up to END SHARED chat
-    // The chat of a room, as both the player and the web view show it: how
-    // long messages are kept, the messages with who and when, this
-    // player's own on the right, and a field to write in. Typing @ opens a
-    // list of the people to mention, which the arrows move through and Tab
-    // or Enter picks. Enter sends, Shift+Enter starts a new line. A
-    // mention of a name is lit, and a message mentioning this player gets
-    // an orange edge. Shared by the player and the web view's page,
-    // src/shared/chat.js, inlined into both by embed-webview.sh
-    //
-    // opts: accent and accentRgb, the colours; send(text), a promise of
-    // why it could not go or ""; onEscape(), Escape with no list open;
-    // toast(text), a word for the one writing. Answers the element, paint
-    // with { me, msgs, keepText, names, emptyText } and focus
     // The chat's title: Chat in and the room's name in the accent colour
     function chatTitleSet(el, room, accent) {
 
@@ -15041,6 +15028,27 @@
         el.appendChild(name);
     }
 
+    // The chat of a room, as both the player and the web view show it: how
+    // long messages are kept, the messages with who and when, this
+    // player's own on the right, and a field to write in. Typing @ opens a
+    // list of the people to mention, which the arrows move through and Tab
+    // or Enter picks. Enter sends, Shift+Enter starts a new line. A
+    // mention of a name is lit, and a message mentioning this player gets
+    // an orange edge. Shared by the player and the web view's page,
+    // src/shared/chat.js, inlined into both by embed-webview.sh
+    //
+    // opts: accent and accentRgb, the colours; send(text), a promise of
+    // why it could not go or ""; onEscape(), Escape with no list open;
+    // toast(text), a word for the one writing; onSongLink(key, url), a
+    // link to a song on Mureka pressed, its share key and the link;
+    // edit(id, text), a promise of why a change to one of this player's own
+    // messages could not go or "". Links open in a new window, and each of
+    // the others has a colour of their own. A message of this player's own
+    // is changed with its Edit, or with the up arrow in the empty field for
+    // the last one, the field then saving the change. Answers the element,
+    // paint with { me, msgs, keepText, names, emptyText, newAfter } and
+    // focus. newAfter, the time of the newest message read before the chat
+    // opened: a thin line with New marks where the messages not read begin
     function makeChatView(opts) {
 
         const accent = opts.accent || "#48e1eb";
@@ -15059,6 +15067,13 @@
         let pickAt = 0;
         let mentionFrom = -1;
         let sending = false;
+
+        // The message of this player's own being changed, and the bar
+        // above the field that says so
+        let editing = null;
+        const editBar = document.createElement("div");
+        const editText = document.createElement("span");
+        const editCancel = document.createElement("button");
 
         el.style.cssText = "flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:8px";
         note.style.cssText = "font-size:11px;color:#888;line-height:1.4";
@@ -15082,6 +15097,19 @@
         sendBtn.addEventListener("click", post);
         foot.appendChild(field);
         foot.appendChild(sendBtn);
+        editBar.style.cssText = "display:none;align-items:center;gap:8px;margin-bottom:6px;font-size:12px;color:#ffb454";
+        editText.textContent = "Changing your message, Escape to leave it as it was";
+        editText.style.cssText = "flex:1 1 auto;min-width:0";
+        editCancel.type = "button";
+        editCancel.textContent = "\u00d7";
+        editCancel.setAttribute("aria-label", "Leave it as it was");
+        editCancel.style.cssText = "border:none;background:none;color:#bbb;font-size:18px;line-height:1;cursor:pointer;padding:0 4px";
+        editCancel.addEventListener("click", function () {
+            stopEdit();
+        });
+        editBar.appendChild(editText);
+        editBar.appendChild(editCancel);
+        footWrap.appendChild(editBar);
         footWrap.appendChild(pop);
         footWrap.appendChild(foot);
         el.appendChild(note);
@@ -15118,10 +15146,30 @@
                 }
             }
 
+            // The up arrow in an empty field changes the last message of
+            // this player's own
+            if (ev.key === "ArrowUp" && !field.value && !editing && opts.edit) {
+
+                const own = last.msgs.filter(function (m) {
+                    return String(m.from) === last.me;
+                }).pop();
+
+                if (own) {
+
+                    ev.preventDefault();
+                    startEdit(own);
+                    return;
+                }
+            }
+
             if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
 
                 ev.preventDefault();
                 post();
+            } else if (ev.key === "Escape" && editing) {
+
+                ev.preventDefault();
+                stopEdit();
             } else if (ev.key === "Escape" && opts.onEscape) {
 
                 ev.preventDefault();
@@ -15223,11 +15271,62 @@
             closePop();
         }
 
+        // One of this player's own messages into the field to change
+        function startEdit(m) {
+
+            editing = { id: m.id, was: String(m.text || "") };
+            editBar.style.display = "flex";
+            sendBtn.textContent = "Save";
+            field.value = editing.was;
+            field.focus();
+            field.selectionStart = field.selectionEnd = field.value.length;
+        }
+
+        function stopEdit() {
+
+            editing = null;
+            editBar.style.display = "none";
+            sendBtn.textContent = "Send";
+            field.value = "";
+            closePop();
+        }
+
         function post() {
 
             const text = field.value.trim();
 
             if (!text || sending) {
+                return;
+            }
+
+            // Changed, or left as it was
+            if (editing) {
+
+                if (text === editing.was.trim()) {
+
+                    stopEdit();
+                    return;
+                }
+
+                sending = true;
+                sendBtn.disabled = true;
+                Promise.resolve(opts.edit(editing.id, text)).then(function (why) {
+
+                    sending = false;
+                    sendBtn.disabled = false;
+
+                    if (why) {
+
+                        if (opts.toast) {
+                            opts.toast(why);
+                        }
+
+                        return;
+                    }
+
+                    stopEdit();
+                    field.focus();
+                });
                 return;
             }
 
@@ -15263,9 +15362,62 @@
             }).sort(function (a, b) {
                 return b.length - a.length;
             });
-            let rest = String(text);
+            const all = String(text);
+            const urls = /https?:\/\/[^\s<>"']+/g;
+            let from = 0;
+            let found;
 
             box.style.cssText = "font-size:14px;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere;color:#eee";
+
+            // The links taken out, the text between them with its mentions
+            while ((found = urls.exec(all)) !== null) {
+
+                // A full stop, a comma or a bracket after a link is the
+                // sentence's, not the link's
+                const url = found[0].replace(/[.,;:!?)\]]+$/, "");
+
+                mentions(box, all.slice(from, found.index), known, me);
+                box.appendChild(linkNode(url));
+                from = found.index + url.length;
+                urls.lastIndex = from;
+            }
+
+            mentions(box, all.slice(from), known, me);
+
+            return box;
+        }
+
+        // A link to open in a new window. A song on Mureka asks what to do
+        // with it instead, where the view knows how
+        function linkNode(url) {
+
+            const a = document.createElement("a");
+            const song = /^https:\/\/(?:www\.)?mureka\.ai\/song-detail\/([A-Za-z0-9_-]{4,80})/.exec(url);
+
+            a.href = url;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.textContent = url;
+            a.style.cssText = "color:" + accent + ";text-decoration:underline;word-break:break-all";
+
+            if (song && opts.onSongLink) {
+
+                a.title = "A song on Mureka: play it, queue it or see it";
+                a.addEventListener("click", function (ev) {
+
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    opts.onSongLink(song[1], url);
+                });
+            }
+
+            return a;
+        }
+
+        // Text with the mentions of known names lit
+        function mentions(box, text, known, me) {
+
+            let rest = String(text);
 
             while (rest) {
 
@@ -15296,8 +15448,21 @@
                 box.appendChild(tag);
                 rest = rest.slice(at + who.length + 1);
             }
+        }
 
-            return box;
+        // A colour of each person's own, the same on every player: a hue
+        // from their name, kept away from the cyan of this player's own
+        function personHue(name) {
+
+            let h = 0x811c9dc5;
+
+            for (let i = 0; i < name.length; i++) {
+                h = Math.imul(h ^ name.charCodeAt(i), 0x01000193) >>> 0;
+            }
+
+            const hue = h % 300;
+
+            return hue >= 160 ? hue + 60 : hue;
         }
 
         // The clock time of a message on the 24 hour clock, with the day when
@@ -15317,8 +15482,11 @@
         function paint(data) {
 
             const msgs = Array.isArray(data.msgs) ? data.msgs : [];
-            const key = String(data.me) + "|" + msgs.length + "|" + (msgs.length ? msgs[msgs.length - 1].id + ":" + msgs[msgs.length - 1].at : "")
-                + "|" + (data.keepText || "") + "|" + (data.emptyText || "");
+            const edits = msgs.reduce(function (n, m) {
+                return Math.max(n, Number(m.edited) || 0);
+            }, 0);
+            const key = String(data.me) + "|" + msgs.length + "|" + edits + "|" + (msgs.length ? msgs[msgs.length - 1].id + ":" + msgs[msgs.length - 1].at : "")
+                + "|" + (data.keepText || "") + "|" + (data.emptyText || "") + "|" + (Number(data.newAfter) || 0);
 
             last = { me: String(data.me || ""), msgs: msgs, names: Array.isArray(data.names) ? data.names : [] };
 
@@ -15334,25 +15502,67 @@
             note.style.display = note.textContent ? "" : "none";
             listBox.textContent = "";
 
+            const newAfter = Number(data.newAfter) || 0;
+            let lined = false;
+
             for (const m of msgs) {
 
                 const mine = String(m.from) === last.me;
+
+                // Where the messages not read yet begin, after some read
+                if (!lined && newAfter > 0 && !mine && Number(m.at) > newAfter && listBox.children.length > 0) {
+
+                    const line = document.createElement("div");
+                    const left = document.createElement("span");
+                    const word = document.createElement("span");
+                    const right = document.createElement("span");
+
+                    lined = true;
+                    line.style.cssText = "flex:0 0 auto;display:flex;align-items:center;gap:8px;margin:4px 0;font-size:10px;color:#ffb454;"
+                        + "text-transform:uppercase;letter-spacing:0.08em";
+                    left.style.cssText = "flex:1 1 auto;height:1px;background:rgba(255,180,84,0.4)";
+                    right.style.cssText = left.style.cssText;
+                    word.textContent = "New";
+                    line.appendChild(left);
+                    line.appendChild(word);
+                    line.appendChild(right);
+                    listBox.appendChild(line);
+                }
                 const toMe = !mine && last.me && String(m.text).indexOf("@" + last.me) >= 0;
                 const box = document.createElement("div");
                 const top = document.createElement("div");
                 const who = document.createElement("span");
                 const when = document.createElement("span");
 
+                const hue = mine ? 0 : personHue(String(m.from || ""));
+
                 box.style.cssText = "flex:0 0 auto;max-width:85%;padding:6px 10px;border-radius:10px;display:flex;flex-direction:column;gap:2px;box-sizing:border-box;"
-                    + (mine ? "align-self:flex-end;background:rgba(" + accentRgb + ",0.16)" : "align-self:flex-start;background:#1c1c21")
+                    + (mine ? "align-self:flex-end;background:rgba(" + accentRgb + ",0.16)"
+                        : "align-self:flex-start;background:hsla(" + hue + ",45%,32%,0.45);border:1px solid hsla(" + hue + ",60%,55%,0.25)")
                     + (toMe ? ";border-left:3px solid #ffb454" : "");
                 top.style.cssText = "display:flex;gap:8px;align-items:baseline;font-size:11px";
                 who.textContent = mine ? "You" : String(m.from || "Someone");
-                who.style.cssText = "font-weight:600;color:" + (mine ? accent : "#ffb454");
-                when.textContent = whenText(Number(m.at) || 0);
+                who.style.cssText = "font-weight:600;color:" + (mine ? accent : "hsl(" + hue + ",85%,72%)");
+                when.textContent = whenText(Number(m.at) || 0) + (m.edited ? ", edited" : "");
                 when.style.cssText = "color:#888";
                 top.appendChild(who);
                 top.appendChild(when);
+
+                // This player's own: Edit puts it in the field to change
+                if (mine && opts.edit) {
+
+                    const change = document.createElement("button");
+
+                    change.type = "button";
+                    change.textContent = "Edit";
+                    change.title = "Change this message";
+                    change.style.cssText = "margin-left:auto;padding:0 2px;border:none;background:none;color:" + accent + ";font:inherit;font-size:11px;"
+                        + "cursor:pointer;opacity:0.8";
+                    change.addEventListener("click", function () {
+                        startEdit(m);
+                    });
+                    top.appendChild(change);
+                }
                 box.appendChild(top);
                 box.appendChild(textNode(String(m.text || ""), last.names, last.me));
                 listBox.appendChild(box);
@@ -28108,9 +28318,24 @@
 
             if (ev.key === "Escape") {
 
+                // The chat's field takes Escape itself: out of its list of
+                // names, out of a change, then the chat tucked away
+                if (chatUi && chatUi.has(target)) {
+
+                    shortcutTrace(ev, "the chat's own");
+                    return;
+                }
+
                 // Out of a field first, then the dialog around it if any
                 if (typing && panelEl.contains(target)) {
                     target.blur();
+                }
+
+                // With no dialog over it, the chat tucked away or closed
+                if (!dialogOpen() && chatUi && chatUi.escape()) {
+
+                    handled();
+                    return;
                 }
 
                 closeTopDialog();
@@ -37981,6 +38206,7 @@
             addChoice: settings.addChoice || "",
             togetherIn: syncInRoom(),
             togetherChatUnread: chatUnread(),
+            togetherChatMention: chatMentionsUnread() > 0,
             togetherChatSeq: syncChat.seq,
             pauseChoice: settings.syncPauseChoice || "",
             stopChoice: settings.syncStopChoice || "",
@@ -41527,7 +41753,7 @@
             ctl.title = title;
             paintCtrl(ctl, settings.syncOn === true ? "fill" : "plain");
             paintSyncCount(ctl, count, "#1d1d22", ACCENT);
-            paintChatCount(ctl, chatUnread());
+            paintChatCount(ctl, chatUnread(), chatMentionsUnread() > 0);
         }
 
         // The count on the tab of a chat tucked into an edge
@@ -41538,7 +41764,7 @@
         if (controlButtons && controlButtons.chat) {
 
             controlButtons.chat.title = syncInRoom() ? "Chat in " + syncRoomLabel() : "Chat, in a room";
-            paintChatCount(controlButtons.chat, chatUnread());
+            paintChatCount(controlButtons.chat, chatUnread(), chatMentionsUnread() > 0);
         }
 
         if (syncHeadBtn) {
@@ -41547,7 +41773,7 @@
             syncHeadBtn.style.color = settings.syncOn === true ? ACCENT : "#aaa";
             syncHeadBtn.title = title;
             paintSyncCount(syncHeadBtn, count, ACCENT, "#000");
-            paintChatCount(syncHeadBtn, chatUnread());
+            paintChatCount(syncHeadBtn, chatUnread(), chatMentionsUnread() > 0);
         }
     }
 
@@ -41646,6 +41872,43 @@
         }).length;
     }
 
+    // A message from another naming this player with @
+    function chatMentionsMe(m) {
+        return m.from !== syncName() && String(m.text).indexOf("@" + syncName()) >= 0;
+    }
+
+    // The unread messages that mention this player
+    function chatMentionsUnread() {
+
+        if (chatUnread() === 0) {
+            return 0;
+        }
+
+        const seen = chatSeen();
+
+        return syncChat.msgs.filter(function (m) {
+            return Number(m.at) > seen && chatMentionsMe(m);
+        }).length;
+    }
+
+    // This player's own key for the chat, kept, so only it may change what
+    // it wrote. The web view writes as the phone, with the same key
+    function chatKey() {
+
+        if (!/^[0-9a-f]{32}$/.test(String(settings.syncChatKey || ""))) {
+
+            const bytes = new Uint8Array(16);
+
+            crypto.getRandomValues(bytes);
+            settings.syncChatKey = Array.from(bytes).map(function (b) {
+                return b.toString(16).padStart(2, "0");
+            }).join("");
+            saveSettings();
+        }
+
+        return settings.syncChatKey;
+    }
+
     // One message as the lists show it
     function chatMsgOf(m) {
 
@@ -41653,7 +41916,8 @@
             id: Number(m && m.id) || 0,
             at: Number(m && m.at) || 0,
             from: String(m && m.from || "Someone").slice(0, 40),
-            text: String(m && m.text || "").slice(0, CHAT_TEXT_MAX)
+            text: String(m && m.text || "").slice(0, CHAT_TEXT_MAX),
+            edited: Number(m && m.edited) || 0
         };
     }
 
@@ -41674,6 +41938,20 @@
 
             syncChat.keep = Number(c.keep) || 0;
             syncChat.msgs = (Array.isArray(c.msgs) ? c.msgs : []).map(chatMsgOf);
+        } else if (kind === "chatedit") {
+
+            // A message changed by the one who wrote it
+            const m = chatMsgOf(data && data.msg);
+            const had = syncChat.msgs.find(function (x) {
+                return x.id === m.id && x.at === m.at;
+            });
+
+            if (!had) {
+                return;
+            }
+
+            had.text = m.text;
+            had.edited = m.edited || Date.now();
         } else {
 
             const m = chatMsgOf(data && data.msg);
@@ -41692,9 +41970,20 @@
 
             if (!chatShown() && Date.now() - chatWebAt > 5000 && m.from !== syncName()) {
 
-                const toMe = m.text.indexOf("@" + syncName()) >= 0;
+                const toMe = chatMentionsMe(m);
 
                 showToast(m.from + (toMe ? " mentioned you: " : ": ") + (m.text.length > 120 ? m.text.slice(0, 120) + "..." : m.text), true);
+
+                // A mention also as a notification of the app's, seen with
+                // the phone in a pocket or the app in the background
+                if (toMe && window.MurekaHost && typeof window.MurekaHost.chatMention === "function") {
+
+                    try {
+                        window.MurekaHost.chatMention(m.from, m.text);
+                    } catch (e) {
+                        // The app without it
+                    }
+                }
             }
         }
 
@@ -41731,7 +42020,30 @@
             return "The app needs an update for the chat";
         }
 
-        window.MurekaHost.syncChat(syncRelay(), syncRoomName(), JSON.stringify({ from: syncName(), text: t }));
+        window.MurekaHost.syncChat(syncRelay(), syncRoomName(), JSON.stringify({ from: syncName(), text: t, key: chatKey() }));
+
+        return "";
+    }
+
+    // A change to a message of this player's own. It shows when the relay
+    // sends it back. Answers why it could not go, or ""
+    function chatEdit(id, text) {
+
+        const t = String(text || "").trim().slice(0, CHAT_TEXT_MAX);
+
+        if (!t) {
+            return "Nothing to save";
+        }
+
+        if (!syncInRoom()) {
+            return "Join a room first";
+        }
+
+        if (!window.MurekaHost || typeof window.MurekaHost.syncChatEdit !== "function") {
+            return "The app needs an update to change messages";
+        }
+
+        window.MurekaHost.syncChatEdit(syncRelay(), syncRoomName(), JSON.stringify({ id: Number(id) || 0, text: t, key: chatKey() }));
 
         return "";
     }
@@ -41769,7 +42081,7 @@
 
     // A small orange pill with the unread count on a Together button's
     // upper corner
-    function paintChatCount(btn, n) {
+    function paintChatCount(btn, n, mention) {
 
         let pill = btn.querySelector(".mp-chat-count");
 
@@ -41784,9 +42096,10 @@
             }
         }
 
-        pill.textContent = n > 0 ? String(n > 99 ? "99+" : n) : "";
+        // A mention among them: pink, with an @
+        pill.textContent = n > 0 ? (mention ? "@" : "") + String(n > 99 ? "99+" : n) : "";
         pill.style.cssText = "position:absolute;top:2px;right:2px;min-width:14px;height:14px;padding:0 3px;box-sizing:border-box;border-radius:7px;"
-            + "background:#ffb454;color:#000;font-size:9px;font-weight:700;line-height:14px;text-align:center;pointer-events:none;"
+            + "background:" + (mention ? "#ff6b9a" : "#ffb454") + ";color:#000;font-size:9px;font-weight:700;line-height:14px;text-align:center;pointer-events:none;"
             + (n > 0 ? "" : "display:none");
     }
 
@@ -41815,8 +42128,48 @@
         });
     }
 
+    // A link in the chat to a song on Mureka: one in this library to play
+    // now, next, after the queued or last, or to see its info, any of them
+    // to open on Mureka
+    function chatSongLink(key, url) {
+
+        const song = (cache.songs || []).find(function (s) {
+            return s && s.share_key === key;
+        });
+        const open = { label: "Open on Mureka", fn: function () {
+            window.open(url, "_blank", "noopener");
+        } };
+
+        if (!song) {
+
+            askChoices("A song on Mureka\nNot in this library.", [open], null, false, true);
+            return;
+        }
+
+        askChoices(((song.title || "").trim() || "Untitled") + "\nA song from the chat", [
+            { label: "Play now", fn: function () {
+                playFromTapped(song.song_id);
+            } },
+            { label: "Play next", fn: function () {
+                addNext(song);
+            } },
+            { label: "Play after the queued", fn: function () {
+                addAfterQueued(song);
+            } },
+            { label: "Play last", fn: function () {
+                addLast(song);
+            } },
+            { label: "Song info", fn: function () {
+                openInfo(song);
+            } },
+            open
+        ], null, false, true);
+    }
+
     function chatViewData() {
-        return { me: syncName(), msgs: syncChat.msgs, keepText: chatKeepText(), names: chatNames() };
+
+        return { me: syncName(), msgs: syncChat.msgs, keepText: chatKeepText(), names: chatNames(),
+            newAfter: chatUi ? chatUi.newAfter : 0 };
     }
 
     function openSyncChat(mode) {
@@ -41842,8 +42195,18 @@
             send: function (text) {
                 return chatSend(text);
             },
+            onSongLink: chatSongLink,
+            edit: function (id, text) {
+                return chatEdit(id, text);
+            },
             onEscape: function () {
-                done();
+
+                // A floating window is tucked into its edge, docked it closes
+                if (win && !win.folded()) {
+                    win.fold();
+                } else {
+                    done();
+                }
             },
             toast: function (text) {
                 showToast(text, false);
@@ -41862,7 +42225,7 @@
         });
         let win = null;
         let dock = null;
-        const ui = { close: null, win: null };
+        const ui = { close: null, win: null, newAfter: chatSeen() };
         const done = function () {
 
             if (chatUi !== ui) {
@@ -41885,6 +42248,29 @@
         };
 
         ui.close = done;
+
+        // Whether an element is the chat's, and Escape for it: a floating
+        // window tucked into its edge, docked it closes. False when there
+        // is nothing to do, tucked away already
+        ui.has = function (node) {
+            return !!node && ((win && win.el.contains(node)) || (dock && dock.contains(node)));
+        };
+        ui.escape = function () {
+
+            if (win && !win.folded()) {
+
+                win.fold();
+                return true;
+            }
+
+            if (dock) {
+
+                done();
+                return true;
+            }
+
+            return false;
+        };
         head.classList.add("mp-row8");
         chatTitleSet(title, syncRoomLabel(), ACCENT);
         title.style.cssText = "font-weight:600;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
@@ -41907,9 +42293,11 @@
 
             // A window floating over the player, moved by its bar, sized
             // from its edges, tucked into the nearest edge and back
+            // In the panel, over its content and under its dialogs, so a
+            // question asked from the chat comes over it
             win = makeFloatWindow({
                 key: "chat",
-                z: 2147483644,
+                z: 9,
                 minW: 240,
                 minH: 220,
                 tabIcon: iconChat(18),
@@ -41917,6 +42305,8 @@
 
                     if (!folded) {
 
+                        // The line moves to what came while tucked away
+                        ui.newAfter = chatSeen();
                         syncChatRepaint();
                         view.atEnd();
                         chatMarkSeen();
@@ -41943,7 +42333,7 @@
         };
 
         if (win) {
-            win.show(document.body);
+            win.show(panelEl);
         }
 
         syncChatRepaint();
@@ -43311,7 +43701,7 @@
         }
 
         // The room's chat, on whichever stream this player reads
-        if ((m.type === "chat" || m.type === "chatlog") && m.data) {
+        if ((m.type === "chat" || m.type === "chatlog" || m.type === "chatedit") && m.data) {
 
             chatHeard(m.type, m.data);
             return;
@@ -43321,6 +43711,15 @@
 
             if (m.ok === false) {
                 showToast("Message not sent: " + String(m.error || "no answer"), false);
+            }
+
+            return;
+        }
+
+        if (m.type === "chatEdited") {
+
+            if (m.ok === false) {
+                showToast("Message not changed: " + String(m.error || "no answer"), false);
             }
 
             return;
@@ -51139,6 +51538,8 @@
                 openSets.add(set.id);
             }
 
+            // Looking around the list: it no longer follows the playing song
+            listFollow = false;
             renderList();
 
             if (listEl) {
@@ -72773,6 +73174,9 @@
             }, failed);
         } else if (op === "chatList") {
 
+            // The newest read before, for the line where the new ones begin
+            const seenBefore = chatSeen();
+
             // The web view's chat open: what is read there counts as read
             if (a.seen === true) {
 
@@ -72783,7 +73187,22 @@
             chatLoad();
 
             reply({ ok: true, room: syncRoomLabel(), inRoom: syncInRoom(), me: syncName(), keep: syncChat.keep,
-                keepText: chatKeepText(), seq: syncChat.seq, msgs: syncChat.msgs, names: chatNames() });
+                keepText: chatKeepText(), seq: syncChat.seq, msgs: syncChat.msgs, names: chatNames(), seenBefore: seenBefore });
+        } else if (op === "chatSong") {
+
+            // A song link from the web view's chat: the song it is, when
+            // it is in this library
+            const key = String(a.key || "");
+            const song = (cache.songs || []).find(function (s) {
+                return s && s.share_key === key;
+            });
+
+            reply(song ? { ok: true, id: String(song.song_id), title: (song.title || "").trim() || "Untitled" } : { ok: false });
+        } else if (op === "chatEdit") {
+
+            const why = chatEdit(Number(a.id) || 0, String(a.text || ""));
+
+            reply(why ? { ok: false, why: why } : { ok: true });
         } else if (op === "chatSend") {
 
             const why = chatSend(String(a.text || ""));
@@ -77141,6 +77560,10 @@
         pointer-events: none;
     }
 
+    .ctlChat.mention {
+        background: #ff6b9a;
+    }
+
     /* The chat docked where the song list is: the list's own rows
        hidden while it shows */
     #mini.chatting > :not(.chatDock),
@@ -80640,6 +81063,11 @@
         display: none;
         align-items: center;
         justify-content: center;
+    }
+
+    /* The menus over a floating window, the chat's, which sits at 45 */
+    #songMenu {
+        z-index: 46;
     }
 
     #menuBox,
@@ -87653,19 +88081,6 @@
     // BEGIN SHARED chat
     // Written by embed-webview.sh from src/shared/chat.js. Change that
     // file and run make embed, never the lines up to END SHARED chat
-    // The chat of a room, as both the player and the web view show it: how
-    // long messages are kept, the messages with who and when, this
-    // player's own on the right, and a field to write in. Typing @ opens a
-    // list of the people to mention, which the arrows move through and Tab
-    // or Enter picks. Enter sends, Shift+Enter starts a new line. A
-    // mention of a name is lit, and a message mentioning this player gets
-    // an orange edge. Shared by the player and the web view's page,
-    // src/shared/chat.js, inlined into both by embed-webview.sh
-    //
-    // opts: accent and accentRgb, the colours; send(text), a promise of
-    // why it could not go or ""; onEscape(), Escape with no list open;
-    // toast(text), a word for the one writing. Answers the element, paint
-    // with { me, msgs, keepText, names, emptyText } and focus
     // The chat's title: Chat in and the room's name in the accent colour
     function chatTitleSet(el, room, accent) {
 
@@ -87677,6 +88092,27 @@
         el.appendChild(name);
     }
 
+    // The chat of a room, as both the player and the web view show it: how
+    // long messages are kept, the messages with who and when, this
+    // player's own on the right, and a field to write in. Typing @ opens a
+    // list of the people to mention, which the arrows move through and Tab
+    // or Enter picks. Enter sends, Shift+Enter starts a new line. A
+    // mention of a name is lit, and a message mentioning this player gets
+    // an orange edge. Shared by the player and the web view's page,
+    // src/shared/chat.js, inlined into both by embed-webview.sh
+    //
+    // opts: accent and accentRgb, the colours; send(text), a promise of
+    // why it could not go or ""; onEscape(), Escape with no list open;
+    // toast(text), a word for the one writing; onSongLink(key, url), a
+    // link to a song on Mureka pressed, its share key and the link;
+    // edit(id, text), a promise of why a change to one of this player's own
+    // messages could not go or "". Links open in a new window, and each of
+    // the others has a colour of their own. A message of this player's own
+    // is changed with its Edit, or with the up arrow in the empty field for
+    // the last one, the field then saving the change. Answers the element,
+    // paint with { me, msgs, keepText, names, emptyText, newAfter } and
+    // focus. newAfter, the time of the newest message read before the chat
+    // opened: a thin line with New marks where the messages not read begin
     function makeChatView(opts) {
 
         const accent = opts.accent || "#48e1eb";
@@ -87695,6 +88131,13 @@
         let pickAt = 0;
         let mentionFrom = -1;
         let sending = false;
+
+        // The message of this player's own being changed, and the bar
+        // above the field that says so
+        let editing = null;
+        const editBar = document.createElement("div");
+        const editText = document.createElement("span");
+        const editCancel = document.createElement("button");
 
         el.style.cssText = "flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:8px";
         note.style.cssText = "font-size:11px;color:#888;line-height:1.4";
@@ -87718,6 +88161,19 @@
         sendBtn.addEventListener("click", post);
         foot.appendChild(field);
         foot.appendChild(sendBtn);
+        editBar.style.cssText = "display:none;align-items:center;gap:8px;margin-bottom:6px;font-size:12px;color:#ffb454";
+        editText.textContent = "Changing your message, Escape to leave it as it was";
+        editText.style.cssText = "flex:1 1 auto;min-width:0";
+        editCancel.type = "button";
+        editCancel.textContent = "\u00d7";
+        editCancel.setAttribute("aria-label", "Leave it as it was");
+        editCancel.style.cssText = "border:none;background:none;color:#bbb;font-size:18px;line-height:1;cursor:pointer;padding:0 4px";
+        editCancel.addEventListener("click", function () {
+            stopEdit();
+        });
+        editBar.appendChild(editText);
+        editBar.appendChild(editCancel);
+        footWrap.appendChild(editBar);
         footWrap.appendChild(pop);
         footWrap.appendChild(foot);
         el.appendChild(note);
@@ -87754,10 +88210,30 @@
                 }
             }
 
+            // The up arrow in an empty field changes the last message of
+            // this player's own
+            if (ev.key === "ArrowUp" && !field.value && !editing && opts.edit) {
+
+                const own = last.msgs.filter(function (m) {
+                    return String(m.from) === last.me;
+                }).pop();
+
+                if (own) {
+
+                    ev.preventDefault();
+                    startEdit(own);
+                    return;
+                }
+            }
+
             if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
 
                 ev.preventDefault();
                 post();
+            } else if (ev.key === "Escape" && editing) {
+
+                ev.preventDefault();
+                stopEdit();
             } else if (ev.key === "Escape" && opts.onEscape) {
 
                 ev.preventDefault();
@@ -87859,11 +88335,62 @@
             closePop();
         }
 
+        // One of this player's own messages into the field to change
+        function startEdit(m) {
+
+            editing = { id: m.id, was: String(m.text || "") };
+            editBar.style.display = "flex";
+            sendBtn.textContent = "Save";
+            field.value = editing.was;
+            field.focus();
+            field.selectionStart = field.selectionEnd = field.value.length;
+        }
+
+        function stopEdit() {
+
+            editing = null;
+            editBar.style.display = "none";
+            sendBtn.textContent = "Send";
+            field.value = "";
+            closePop();
+        }
+
         function post() {
 
             const text = field.value.trim();
 
             if (!text || sending) {
+                return;
+            }
+
+            // Changed, or left as it was
+            if (editing) {
+
+                if (text === editing.was.trim()) {
+
+                    stopEdit();
+                    return;
+                }
+
+                sending = true;
+                sendBtn.disabled = true;
+                Promise.resolve(opts.edit(editing.id, text)).then(function (why) {
+
+                    sending = false;
+                    sendBtn.disabled = false;
+
+                    if (why) {
+
+                        if (opts.toast) {
+                            opts.toast(why);
+                        }
+
+                        return;
+                    }
+
+                    stopEdit();
+                    field.focus();
+                });
                 return;
             }
 
@@ -87899,9 +88426,62 @@
             }).sort(function (a, b) {
                 return b.length - a.length;
             });
-            let rest = String(text);
+            const all = String(text);
+            const urls = /https?:\/\/[^\s<>"']+/g;
+            let from = 0;
+            let found;
 
             box.style.cssText = "font-size:14px;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere;color:#eee";
+
+            // The links taken out, the text between them with its mentions
+            while ((found = urls.exec(all)) !== null) {
+
+                // A full stop, a comma or a bracket after a link is the
+                // sentence's, not the link's
+                const url = found[0].replace(/[.,;:!?)\]]+$/, "");
+
+                mentions(box, all.slice(from, found.index), known, me);
+                box.appendChild(linkNode(url));
+                from = found.index + url.length;
+                urls.lastIndex = from;
+            }
+
+            mentions(box, all.slice(from), known, me);
+
+            return box;
+        }
+
+        // A link to open in a new window. A song on Mureka asks what to do
+        // with it instead, where the view knows how
+        function linkNode(url) {
+
+            const a = document.createElement("a");
+            const song = /^https:\/\/(?:www\.)?mureka\.ai\/song-detail\/([A-Za-z0-9_-]{4,80})/.exec(url);
+
+            a.href = url;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.textContent = url;
+            a.style.cssText = "color:" + accent + ";text-decoration:underline;word-break:break-all";
+
+            if (song && opts.onSongLink) {
+
+                a.title = "A song on Mureka: play it, queue it or see it";
+                a.addEventListener("click", function (ev) {
+
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    opts.onSongLink(song[1], url);
+                });
+            }
+
+            return a;
+        }
+
+        // Text with the mentions of known names lit
+        function mentions(box, text, known, me) {
+
+            let rest = String(text);
 
             while (rest) {
 
@@ -87932,8 +88512,21 @@
                 box.appendChild(tag);
                 rest = rest.slice(at + who.length + 1);
             }
+        }
 
-            return box;
+        // A colour of each person's own, the same on every player: a hue
+        // from their name, kept away from the cyan of this player's own
+        function personHue(name) {
+
+            let h = 0x811c9dc5;
+
+            for (let i = 0; i < name.length; i++) {
+                h = Math.imul(h ^ name.charCodeAt(i), 0x01000193) >>> 0;
+            }
+
+            const hue = h % 300;
+
+            return hue >= 160 ? hue + 60 : hue;
         }
 
         // The clock time of a message on the 24 hour clock, with the day when
@@ -87953,8 +88546,11 @@
         function paint(data) {
 
             const msgs = Array.isArray(data.msgs) ? data.msgs : [];
-            const key = String(data.me) + "|" + msgs.length + "|" + (msgs.length ? msgs[msgs.length - 1].id + ":" + msgs[msgs.length - 1].at : "")
-                + "|" + (data.keepText || "") + "|" + (data.emptyText || "");
+            const edits = msgs.reduce(function (n, m) {
+                return Math.max(n, Number(m.edited) || 0);
+            }, 0);
+            const key = String(data.me) + "|" + msgs.length + "|" + edits + "|" + (msgs.length ? msgs[msgs.length - 1].id + ":" + msgs[msgs.length - 1].at : "")
+                + "|" + (data.keepText || "") + "|" + (data.emptyText || "") + "|" + (Number(data.newAfter) || 0);
 
             last = { me: String(data.me || ""), msgs: msgs, names: Array.isArray(data.names) ? data.names : [] };
 
@@ -87970,25 +88566,67 @@
             note.style.display = note.textContent ? "" : "none";
             listBox.textContent = "";
 
+            const newAfter = Number(data.newAfter) || 0;
+            let lined = false;
+
             for (const m of msgs) {
 
                 const mine = String(m.from) === last.me;
+
+                // Where the messages not read yet begin, after some read
+                if (!lined && newAfter > 0 && !mine && Number(m.at) > newAfter && listBox.children.length > 0) {
+
+                    const line = document.createElement("div");
+                    const left = document.createElement("span");
+                    const word = document.createElement("span");
+                    const right = document.createElement("span");
+
+                    lined = true;
+                    line.style.cssText = "flex:0 0 auto;display:flex;align-items:center;gap:8px;margin:4px 0;font-size:10px;color:#ffb454;"
+                        + "text-transform:uppercase;letter-spacing:0.08em";
+                    left.style.cssText = "flex:1 1 auto;height:1px;background:rgba(255,180,84,0.4)";
+                    right.style.cssText = left.style.cssText;
+                    word.textContent = "New";
+                    line.appendChild(left);
+                    line.appendChild(word);
+                    line.appendChild(right);
+                    listBox.appendChild(line);
+                }
                 const toMe = !mine && last.me && String(m.text).indexOf("@" + last.me) >= 0;
                 const box = document.createElement("div");
                 const top = document.createElement("div");
                 const who = document.createElement("span");
                 const when = document.createElement("span");
 
+                const hue = mine ? 0 : personHue(String(m.from || ""));
+
                 box.style.cssText = "flex:0 0 auto;max-width:85%;padding:6px 10px;border-radius:10px;display:flex;flex-direction:column;gap:2px;box-sizing:border-box;"
-                    + (mine ? "align-self:flex-end;background:rgba(" + accentRgb + ",0.16)" : "align-self:flex-start;background:#1c1c21")
+                    + (mine ? "align-self:flex-end;background:rgba(" + accentRgb + ",0.16)"
+                        : "align-self:flex-start;background:hsla(" + hue + ",45%,32%,0.45);border:1px solid hsla(" + hue + ",60%,55%,0.25)")
                     + (toMe ? ";border-left:3px solid #ffb454" : "");
                 top.style.cssText = "display:flex;gap:8px;align-items:baseline;font-size:11px";
                 who.textContent = mine ? "You" : String(m.from || "Someone");
-                who.style.cssText = "font-weight:600;color:" + (mine ? accent : "#ffb454");
-                when.textContent = whenText(Number(m.at) || 0);
+                who.style.cssText = "font-weight:600;color:" + (mine ? accent : "hsl(" + hue + ",85%,72%)");
+                when.textContent = whenText(Number(m.at) || 0) + (m.edited ? ", edited" : "");
                 when.style.cssText = "color:#888";
                 top.appendChild(who);
                 top.appendChild(when);
+
+                // This player's own: Edit puts it in the field to change
+                if (mine && opts.edit) {
+
+                    const change = document.createElement("button");
+
+                    change.type = "button";
+                    change.textContent = "Edit";
+                    change.title = "Change this message";
+                    change.style.cssText = "margin-left:auto;padding:0 2px;border:none;background:none;color:" + accent + ";font:inherit;font-size:11px;"
+                        + "cursor:pointer;opacity:0.8";
+                    change.addEventListener("click", function () {
+                        startEdit(m);
+                    });
+                    top.appendChild(change);
+                }
                 box.appendChild(top);
                 box.appendChild(textNode(String(m.text || ""), last.names, last.me));
                 listBox.appendChild(box);
@@ -90722,8 +91360,10 @@
                 $(id).appendChild(chat);
             }
 
-            chat.textContent = unread > 99 ? "99+" : unread > 0 ? String(unread) : "";
+            // A mention among them: pink, with an @
+            chat.textContent = unread > 0 ? (s.togetherChatMention ? "@" : "") + (unread > 99 ? "99+" : String(unread)) : "";
             chat.style.display = unread > 0 ? "" : "none";
+            chat.classList.toggle("mention", !!(s && s.togetherChatMention));
         }
 
         $("chatBtn").title = s && s.togetherIn ? "Chat in " + String(s.togetherRoom || "the room") : "Chat, in a room";
@@ -94664,6 +95304,9 @@
                 easeScroll(box, box.scrollHeight);
             });
         } else {
+
+            // Up to the top by hand: no longer following the playing song
+            setFollow(false);
             easeScroll(box, 0);
         }
     });
@@ -95576,6 +96219,11 @@
     // first, folded they are taken out again, in both lists where it shows,
     // each list's count moving with them so its next page follows on
     function toggleFold(head, kind) {
+
+        // Opening or folding a set is looking around the list: the lists
+        // stop following the playing song, which would take them away
+        miniFollow = false;
+        setFollow(false);
 
         const isSet = kind === "set";
         const opened = isSet ? openSets : openRuns;
@@ -101681,6 +102329,9 @@
             });
         } else {
 
+            // Up to the top by hand: no longer following the playing song,
+            // so opening a set up there does not take the list back down
+            miniFollow = false;
             miniQuietUntil = Date.now() + 1400;
             easeScroll(box, 0);
         }
@@ -109024,10 +109675,23 @@
                 });
             },
             onEscape: function () {
-                close();
+                escape();
             },
             toast: function (text) {
                 toast(text, "bad");
+            },
+            onSongLink: chatSongLink,
+            edit: function (id, text) {
+
+                return crAsk({ op: "chatEdit", id: id, text: text }).then(function (r) {
+
+                    if (r && r.ok) {
+                        setTimeout(load, 500);
+                        return "";
+                    }
+
+                    return "Message not changed" + (r && r.why ? ": " + r.why : "");
+                });
             }
         });
         const head = document.createElement("div");
@@ -109040,6 +109704,9 @@
         let unBack = null;
         let shownSeq = -1;
         let asking = false;
+
+        // The newest read when the chat opened, or came back from the edge
+        let newAfter = null;
         const timer = setInterval(function () {
             load();
         }, 3000);
@@ -109122,7 +109789,7 @@
             // away, what comes is not read yet and counts on its tab
             win = makeFloatWindow({
                 key: "chat",
-                z: 70,
+                z: 45,
                 minW: 260,
                 minH: 220,
                 tabIcon: icon("chat"),
@@ -109130,6 +109797,7 @@
 
                     if (!folded) {
 
+                        newAfter = null;
                         load();
                         view.atEnd();
                     }
@@ -109145,8 +109813,19 @@
             win.show(document.body);
         }
 
+        // Escape or Back: a floating window is tucked into its edge, and
+        // closes from there; docked it closes
+        const escape = function () {
+
+            if (win && !win.folded()) {
+                win.fold();
+            } else {
+                close();
+            }
+        };
+
         chatClose = close;
-        unBack = onBack(close);
+        unBack = onBack(escape);
 
         function load() {
 
@@ -109164,8 +109843,13 @@
                 }
 
                 shownSeq = Number(r.seq);
+
+                if (newAfter === null && !(win && win.folded())) {
+                    newAfter = Number(r.seenBefore) || 0;
+                }
+
                 chatTitleSet(title, String(r.room || ""), "var(--accent)");
-                view.paint({ me: r.me, msgs: r.msgs, keepText: r.keepText, names: r.names,
+                view.paint({ me: r.me, msgs: r.msgs, keepText: r.keepText, names: r.names, newAfter: newAfter || 0,
                     emptyText: r.inRoom === false ? "Not in a room now. Join one to chat." : "" });
             });
         }
@@ -109187,6 +109871,56 @@
         if (window.matchMedia && window.matchMedia("(pointer: fine)").matches) {
             view.focus();
         }
+    }
+
+    // A link in the chat to a song on Mureka: one in the phone's library to
+    // play now, next, after the queued or last, or to see in its menu, any
+    // of them to open on Mureka
+    function chatSongLink(key, url) {
+
+        const open = { icon: "link", label: "Open on Mureka", fn: function () {
+
+            closeSongMenu();
+            window.open(url, "_blank", "noopener");
+        } };
+
+        crAsk({ op: "chatSong", key: key }).then(function (r) {
+
+            if (!r || !r.ok) {
+
+                openChoice("A song on Mureka, not in this library", [open]);
+                return;
+            }
+
+            openChoice(String(r.title), [
+                { icon: "play", label: "Play now", cls: "accent", fn: function () {
+
+                    closeSongMenu();
+                    send("playId", r.id);
+                } },
+                { icon: "listPlusTop", label: "Play next", fn: function () {
+
+                    closeSongMenu();
+                    send("playNext", r.id);
+                } },
+                { icon: "listPlusTop", label: "Play after the queued", fn: function () {
+
+                    closeSongMenu();
+                    send("songAction", { id: r.id, action: "playAfterQueued", value: null });
+                } },
+                { icon: "listPlus", label: "Play last", fn: function () {
+
+                    closeSongMenu();
+                    send("playLast", r.id);
+                } },
+                { icon: "info", label: "Song info", fn: function () {
+
+                    closeSongMenu();
+                    openSongMenu(r.id);
+                } },
+                open
+            ]);
+        });
     }
 
     // Mureka's notifications, newest first, read through the Android

@@ -86,6 +86,12 @@ example `http://10.0.0.1:8095`.
   `{"t": ..., "at": ..., "msg": {"id", "at", "from", "text"}}`, and is
   kept. 409 when the room is not open, 403 with the chat turned off, at
   most 20 a second a room, together with the commands.
+- `PUT /room/<room>/chat`: a change to a message by the one who wrote it,
+  `{"id": ..., "key": "...", "text": "..."}`. The `key` must be the one the
+  message was written with (`key` in its POST, 16 to 200 characters, kept
+  as a SHA-256 hash and never sent on). It goes out as `event: chatedit`
+  with the message and its `edited` time. 403 for another key, 404 for a
+  message gone.
 - `GET /room/<room>/chat`: the messages kept,
   `{"t": ..., "chat": {"keep": <ms>, "msgs": [...]}}`, oldest first. A
   player coming into the room gets the same at once on its stream, as

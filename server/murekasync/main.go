@@ -108,12 +108,16 @@ type room struct {
 }
 
 // A chat message as it is kept and sent: its number, when the relay got
-// it, who wrote it and what
+// it, who wrote it and what, and when it was last changed. The writer's
+// key is kept as a hash and never sent: only the same key may change it
 type chatMsg struct {
-    ID   int64  `json:"id"`
-    At   int64  `json:"at"`
-    From string `json:"from"`
-    Text string `json:"text"`
+    ID     int64  `json:"id"`
+    At     int64  `json:"at"`
+    From   string `json:"from"`
+    Text   string `json:"text"`
+    Edited int64  `json:"edited,omitempty"`
+    keyHash [32]byte
+    keyed   bool
 }
 
 type relay struct {
@@ -318,8 +322,8 @@ func (r *relay) handleRooms(w http.ResponseWriter, req *http.Request) {
 // (DELETE), /room/<name>/events is the stream to listen to,
 // /room/<name>/cmd takes a command from one listening along (POST),
 // /room/<name>/cmds is the sharing player's stream of them and
-// /room/<name>/chat takes a chat message (POST) or gives the messages kept
-// (GET)
+// /room/<name>/chat takes a chat message (POST), a change to one (PUT)
+// or gives the messages kept (GET)
 func (r *relay) handleRoom(w http.ResponseWriter, req *http.Request) {
 
     rest := strings.TrimPrefix(req.URL.Path, "/room/")
@@ -359,6 +363,8 @@ func (r *relay) handleRoom(w http.ResponseWriter, req *http.Request) {
 
         if req.Method == http.MethodPost {
             r.chat(w, req, name)
+        } else if req.Method == http.MethodPut {
+            r.chatEdit(w, req, name)
         } else if req.Method == http.MethodGet {
 
             r.mu.Lock()
@@ -369,7 +375,7 @@ func (r *relay) handleRoom(w http.ResponseWriter, req *http.Request) {
             w.Header().Set("Cache-Control", "no-store")
             _, _ = fmt.Fprintf(w, "{\"t\":%d,\"chat\":%s}\n", nowMs(), body)
         } else {
-            fail(w, http.StatusMethodNotAllowed, "GET or POST")
+            fail(w, http.StatusMethodNotAllowed, "GET, POST or PUT")
         }
 
         return
@@ -574,6 +580,7 @@ func (r *relay) chat(w http.ResponseWriter, req *http.Request, name string) {
     var in struct {
         From string `json:"from"`
         Text string `json:"text"`
+        Key  string `json:"key"`
     }
 
     if json.Unmarshal(body, &in) != nil {
@@ -633,6 +640,12 @@ func (r *relay) chat(w http.ResponseWriter, req *http.Request, name string) {
 
     r.chatNext++
     msg := chatMsg{ID: r.chatNext, At: at, From: from, Text: text}
+
+    // The writer's own key, so only they may change it later
+    if len(in.Key) >= 16 && len(in.Key) <= 200 {
+        msg.keyHash = hashKey(in.Key)
+        msg.keyed = true
+    }
     msgs = append(msgs, msg)
 
     if len(msgs) > r.chatMax {
@@ -647,6 +660,80 @@ func (r *relay) chat(w http.ResponseWriter, req *http.Request, name string) {
     sendTo(rm.listeners, ev)
     sendTo(rm.owners, ev)
     writeJSON(w, http.StatusOK, map[string]interface{}{"t": at, "id": msg.ID})
+}
+
+// A change to a chat message by the one who wrote it, known by the key it
+// was written with: the new text goes out to everyone in the room as
+// event chatedit
+func (r *relay) chatEdit(w http.ResponseWriter, req *http.Request, name string) {
+
+    body, err := io.ReadAll(io.LimitReader(req.Body, maxChatBody+1))
+
+    if err != nil || len(body) > maxChatBody {
+        fail(w, http.StatusRequestEntityTooLarge, "message too large")
+        return
+    }
+
+    var in struct {
+        ID   int64  `json:"id"`
+        Text string `json:"text"`
+        Key  string `json:"key"`
+    }
+
+    if json.Unmarshal(body, &in) != nil {
+        fail(w, http.StatusBadRequest, "change is not JSON")
+        return
+    }
+
+    text := strings.TrimSpace(in.Text)
+
+    if text == "" {
+        fail(w, http.StatusBadRequest, "empty message")
+        return
+    }
+
+    if utf8.RuneCountInString(text) > maxChatText {
+        fail(w, http.StatusRequestEntityTooLarge, "message too long")
+        return
+    }
+
+    at := nowMs()
+
+    r.mu.Lock()
+    defer r.mu.Unlock()
+
+    msgs := r.chatFresh(name)
+
+    for i := range msgs {
+
+        if msgs[i].ID != in.ID {
+            continue
+        }
+
+        h := hashKey(in.Key)
+
+        if !msgs[i].keyed || subtle.ConstantTimeCompare(h[:], msgs[i].keyHash[:]) != 1 {
+            fail(w, http.StatusForbidden, "only the one who wrote it may change it")
+            return
+        }
+
+        msgs[i].Text = text
+        msgs[i].Edited = at
+
+        if rm := r.rooms[name]; rm != nil {
+
+            out, _ := json.Marshal(msgs[i])
+            ev := eventOf("chatedit", "msg", out, at)
+
+            sendTo(rm.listeners, ev)
+            sendTo(rm.owners, ev)
+        }
+
+        writeJSON(w, http.StatusOK, map[string]interface{}{"t": at, "id": in.ID})
+        return
+    }
+
+    fail(w, http.StatusNotFound, "no such message, it may have gone")
 }
 
 // The stream of a room: the last state at once, then every new one, a

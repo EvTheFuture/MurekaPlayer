@@ -84,8 +84,10 @@ public class PlayerService extends Service implements Hub.Listener {
 
     private static final String CHANNEL = "playback";
     private static final String CHANNEL_SIGNIN = "signin";
+    private static final String CHANNEL_CHAT = "chat";
     private static final int NOTIFICATION_ID = 1;
     private static final int SIGNIN_ID = 2;
+    private static final int CHAT_ID = 3;
 
     // Started by BootReceiver, the phone just started or the app was updated
     static final String ACTION_BOOT = "boot";
@@ -230,6 +232,10 @@ public class PlayerService extends Service implements Hub.Listener {
             NotificationManager.IMPORTANCE_HIGH);
 
         nm.createNotificationChannel(signin);
+
+        // Being mentioned in the room's chat, a heads up as well
+        nm.createNotificationChannel(new NotificationChannel(CHANNEL_CHAT, "Chat mentions",
+            NotificationManager.IMPORTANCE_HIGH));
 
         // The phone's media volume, so the web view can show and move it
         SysVolume.start(this);
@@ -1014,6 +1020,38 @@ public class PlayerService extends Service implements Hub.Listener {
             signinShown = false;
             nm.cancel(SIGNIN_ID);
         }
+    }
+
+    // Mentioned in the room's chat while the chat is not open: who and what,
+    // a tap opens the app. A newer mention takes the place of the last
+    static void chatMention(String who, String text) {
+
+        MAIN.post(() -> {
+
+            PlayerService self = instance;
+
+            if (self == null) {
+                return;
+            }
+
+            String name = who == null || who.isEmpty() ? "Someone" : who.length() > 40 ? who.substring(0, 40) : who;
+            String said = text == null ? "" : text.length() > 300 ? text.substring(0, 300) : text;
+
+            try {
+
+                self.getSystemService(NotificationManager.class).notify(CHAT_ID, new Notification.Builder(self, CHANNEL_CHAT)
+                    .setSmallIcon(R.drawable.ic_note)
+                    .setContentTitle(name + " mentioned you")
+                    .setContentText(said)
+                    .setStyle(new Notification.BigTextStyle().bigText(said))
+                    .setContentIntent(self.openAppIntent())
+                    .setAutoCancel(true)
+                    .setCategory(Notification.CATEGORY_MESSAGE)
+                    .build());
+            } catch (RuntimeException e) {
+                Hub.note("Chat", "the mention could not be shown: " + e.getClass().getSimpleName());
+            }
+        });
     }
 
     // Send the song when something about it changed

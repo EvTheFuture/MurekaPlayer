@@ -711,6 +711,41 @@ final class Sync {
         });
     }
 
+    // A change to one of this player's own chat messages, JSON with id,
+    // key and text. It comes back on the stream as event chatedit
+    static void chatEdit(String url, String room, String json) {
+
+        Relay r = parse(url);
+
+        if (r == null || !roomOk(room) || json == null) {
+
+            tell("chatEdited", "ok", false, "error", "The address or the room is not right");
+            return;
+        }
+
+        ASK.execute(() -> {
+
+            try {
+
+                JSONObject change = new JSONObject(json);
+                Answer a = exchange(r, "PUT", "/room/" + room + "/chat", null, change.toString().getBytes(StandardCharsets.UTF_8));
+
+                if (a.status == 200) {
+                    tell("chatEdited", "ok", true, null, null);
+                    return;
+                }
+
+                JSONObject answer = new JSONObject(a.body.isEmpty() ? "{}" : a.body);
+                String why = a.status == 405 ? "The relay cannot change messages yet, it needs an update"
+                    : answer.optString("error", "HTTP " + a.status);
+
+                tell("chatEdited", "ok", false, "error", why);
+            } catch (Exception e) {
+                tell("chatEdited", "ok", false, "error", "The relay could not be reached");
+            }
+        });
+    }
+
     // The chat the relay keeps for the room, read when the chat opens, in
     // case the stream's own copy was missed. It reaches the page as the
     // stream's does
@@ -894,7 +929,8 @@ final class Sync {
                             return "end";
                         }
 
-                        if ("state".equals(kind) || "cmd".equals(kind) || "chat".equals(kind) || "chatlog".equals(kind)) {
+                        if ("state".equals(kind) || "cmd".equals(kind) || "chat".equals(kind) || "chatlog".equals(kind)
+                            || "chatedit".equals(kind)) {
                             streamEvent(kind, data.toString());
                         }
                     }

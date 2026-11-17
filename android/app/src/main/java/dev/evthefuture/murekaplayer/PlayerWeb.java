@@ -1427,6 +1427,24 @@ final class PlayerWeb {
         }
 
         @JavascriptInterface
+        public void syncChatEdit(String url, String room, String json) {
+
+            if (onMureka) {
+                Sync.chatEdit(url, room, json);
+            }
+        }
+
+        // Mentioned in the room's chat while it is not open: a notification
+        // with who and what, a tap opens the app
+        @JavascriptInterface
+        public void chatMention(String who, String text) {
+
+            if (onMureka) {
+                PlayerService.chatMention(who, text);
+            }
+        }
+
+        @JavascriptInterface
         public void syncChatLoad(String url, String room) {
 
             if (onMureka) {
