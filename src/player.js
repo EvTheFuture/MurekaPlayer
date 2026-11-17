@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.224";
+    const VERSION = "2.0.1.225";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -42074,9 +42074,10 @@
         }
 
         const h = ms / 3600000;
+        const d = h / 24;
 
-        return "Messages go after " + (h >= 1 ? (Math.round(h * 10) / 10) + " h" : Math.max(1, Math.round(ms / 60000)) + " min")
-            + ", for everyone.";
+        return "Messages go after " + (h >= 48 ? (Math.round(d * 10) / 10) + (d === 1 ? " day" : " days")
+            : h >= 1 ? (Math.round(h * 10) / 10) + " h" : Math.max(1, Math.round(ms / 60000)) + " min") + ", for everyone.";
     }
 
     // A small orange pill with the unread count on a Together button's
@@ -42980,6 +42981,22 @@
         syncStartFollow(syncRoomName(), "");
     }
 
+    // Out of the room with the shared queue and the song playing kept, to
+    // play on alone
+    function syncLeaveOnOwn() {
+
+        if (syncFollowing && syncMayControl()) {
+            syncSend({ cmd: "bye" });
+        }
+
+        settings.syncOn = false;
+        saveSettings();
+        syncStopFollow("", true);
+        syncSaved = null;
+        syncPaint();
+        publishHostSoon();
+    }
+
     // Leaving the room: the music goes on as this player's own. Holding
     // it, the queue and the filters stay as they are, and one of the others
     // takes the room over. Playing along, what was here before comes back
@@ -43225,6 +43242,39 @@
         }
 
         if (!syncPlayable(st)) {
+
+            // A song picked here, or Play pressed, waiting a moment for the
+            // one holding the room to take it up
+            if ((f.localSongId && now < f.localSongUntil) || (f.localPlaying === true && now < f.localPlayUntil)) {
+                return;
+            }
+
+            // Not taken up: the one holding the room does not act on the
+            // room's commands, its phone asleep or its player too old say.
+            // So the music is not stopped here again and again, this player
+            // leaves the room and plays on its own, the song picked or the
+            // queue it has
+            const late = (f.localSongId && now < f.localSongUntil + 10000) || (f.localPlaying === true && now < f.localPlayUntil + 10000);
+
+            if (late) {
+
+                const picked = f.localSongId;
+                const name = f.name;
+
+                f.localSongId = "";
+                f.localPlaying = null;
+                dbgLog("Sync", name + " did not take up " + (picked ? "the song picked here" : "Play") + ", leaving the room to play here");
+                syncLeaveOnOwn();
+                showToast(name + " did not start the music, playing here on your own. Join again from Together.", false);
+
+                if (!audio || !audio.src) {
+                    startPlay();
+                } else if (audio.paused) {
+                    startAudioPlayback();
+                }
+
+                return;
+            }
 
             // Stopped in the room: stopped here too
             if ((now > f.localPlayUntil || f.localPlaying === false) && !st.id && audio && audio.src) {

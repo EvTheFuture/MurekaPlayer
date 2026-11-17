@@ -16,6 +16,7 @@ description="Mureka Player listening together relay"
 : ${MUREKASYNC_GROUP:="nobody"}
 : ${MUREKASYNC_CHAT_KEEP:="24h"}
 : ${MUREKASYNC_CHAT_MAX:="200"}
+: ${MUREKASYNC_CHAT_FILE="/var/lib/murekasync/chat.json"}
 
 command="/usr/local/bin/murekasync"
 
@@ -26,6 +27,11 @@ else
 fi
 
 command_args="${command_args} -chat-keep ${MUREKASYNC_CHAT_KEEP} -chat-max ${MUREKASYNC_CHAT_MAX}"
+
+# The chat written to a file, so it is there again after a restart
+if [ -n "${MUREKASYNC_CHAT_FILE}" ]; then
+    command_args="${command_args} -chat-file ${MUREKASYNC_CHAT_FILE}"
+fi
 
 command_user="${MUREKASYNC_USER}:${MUREKASYNC_GROUP}"
 supervisor="supervise-daemon"
@@ -41,4 +47,8 @@ depend() {
 
 start_pre() {
     checkpath --file --owner "${MUREKASYNC_USER}:${MUREKASYNC_GROUP}" --mode 0640 "${output_log}"
+
+    if [ -n "${MUREKASYNC_CHAT_FILE}" ]; then
+        checkpath --directory --owner "${MUREKASYNC_USER}:${MUREKASYNC_GROUP}" --mode 0750 "$(dirname "${MUREKASYNC_CHAT_FILE}")"
+    fi
 }

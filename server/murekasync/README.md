@@ -11,7 +11,8 @@ and its web view stays closed to everyone else. Meant to run on a VPN
 server, reachable only over the VPN. The traffic is plain HTTP, the VPN
 carries it encrypted.
 
-No dependencies beyond the Go standard library, nothing kept on disk.
+No dependencies beyond the Go standard library. Only the chat is kept on
+disk, so it survives a restart.
 
 ## Build and install (Alpine)
 
@@ -100,13 +101,17 @@ example `http://10.0.0.1:8095`.
   from the state's `room`), the holding player's name, the song and
   whether it plays, for picking one to join.
 
-The chat of a room is kept in memory only, for 24 hours by default, and
-outlives the room, so it is there again when the room opens again by the
-same name. `MUREKASYNC_CHAT_KEEP` in `murekasync.confd` (`-chat-keep`,
-24h, 12h, 30m and the like) sets how long, 0 turns the chat off, and
+The chat of a room is kept for 24 hours by default, and outlives the room,
+so it is there again when the room opens again by the same name. It is
+written to `/var/lib/murekasync/chat.json` (`MUREKASYNC_CHAT_FILE`,
+`-chat-file`) two seconds after a change and as the relay stops, the
+writers' keys as hashes, and read back as it starts, so it survives a
+restart. An empty `MUREKASYNC_CHAT_FILE` keeps it in memory only.
+
+`MUREKASYNC_CHAT_KEEP` in `murekasync.confd` (`-chat-keep`: 7d, 24h, 12h,
+30m and the like) sets how long, 0 turns the chat off, and
 `MUREKASYNC_CHAT_MAX` (`-chat-max`, 200) how many messages a room keeps at
-most, the oldest going first. A restart of the relay clears it. At most
-128 rooms with chat.
+most, the oldest going first. At most 128 rooms with chat.
 
 A room whose player posted nothing for 20 s may be taken over by another
 player with its own key, so the others carry on when the player holding it

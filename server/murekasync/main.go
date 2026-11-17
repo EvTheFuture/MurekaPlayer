@@ -26,7 +26,8 @@
 // them and the state that follows goes out to all. Everyone in a room may
 // also chat: a message goes out to all at once, and is kept for those who
 // come later, for a day by default, then it goes. Nothing connects to a
-// player, and the relay keeps nothing on disk. Every answer carries the
+// player. The chat is written to a file when one is given, so it is there
+// again after a restart, and nothing else is kept on disk. Every answer carries the
 // relay's own time in milliseconds, which the players use as their common
 // clock
 package main
@@ -35,6 +36,7 @@ import (
     "context"
     "crypto/sha256"
     "crypto/subtle"
+    "encoding/hex"
     "encoding/json"
     "flag"
     "fmt"
@@ -42,10 +44,14 @@ import (
     "log"
     "net"
     "net/http"
+    "os"
+    "os/signal"
+    "path/filepath"
     "regexp"
     "sort"
     "strings"
     "sync"
+    "syscall"
     "time"
     "unicode/utf8"
 )
@@ -131,6 +137,154 @@ type relay struct {
     chatKeep time.Duration
     chatMax  int
     chatNext int64
+
+    // Where the chat is written, so it outlives a restart, and whether it
+    // changed since it was last written
+    chatFile  string
+    chatDirty bool
+}
+
+// A chat message as it is written to the file, its writer's key hash
+// with it
+type storedMsg struct {
+    ID     int64  `json:"id"`
+    At     int64  `json:"at"`
+    From   string `json:"from"`
+    Text   string `json:"text"`
+    Edited int64  `json:"edited,omitempty"`
+    Key    string `json:"key,omitempty"`
+}
+
+// The chat read back from its file, the messages too old to keep left
+// out. A file missing is no chat yet
+func (r *relay) chatRead() {
+
+    if r.chatFile == "" {
+        return
+    }
+
+    body, err := os.ReadFile(r.chatFile)
+
+    if err != nil {
+
+        if !os.IsNotExist(err) {
+            log.Printf("chat file not read: %v", err)
+        }
+
+        return
+    }
+
+    var stored map[string][]storedMsg
+
+    if json.Unmarshal(body, &stored) != nil {
+        log.Printf("chat file not read: not JSON")
+        return
+    }
+
+    oldest := nowMs() - r.chatKeep.Milliseconds()
+    count := 0
+
+    for name, list := range stored {
+
+        if !roomName.MatchString(name) {
+            continue
+        }
+
+        var msgs []chatMsg
+
+        for _, m := range list {
+
+            if m.At < oldest || m.Text == "" {
+                continue
+            }
+
+            msg := chatMsg{ID: m.ID, At: m.At, From: m.From, Text: m.Text, Edited: m.Edited}
+
+            if raw, err := hex.DecodeString(m.Key); err == nil && len(raw) == 32 {
+                copy(msg.keyHash[:], raw)
+                msg.keyed = true
+            }
+
+            msgs = append(msgs, msg)
+
+            if m.ID > r.chatNext {
+                r.chatNext = m.ID
+            }
+        }
+
+        if len(msgs) > r.chatMax {
+            msgs = msgs[len(msgs)-r.chatMax:]
+        }
+
+        if len(msgs) > 0 && len(r.chats) < maxChats {
+            r.chats[name] = msgs
+            count += len(msgs)
+        }
+    }
+
+    log.Printf("chat read back, %d messages in %d rooms", count, len(r.chats))
+}
+
+// The chat written to its file, as a new file put in place of the old, so
+// a stop halfway never leaves half a file. Called with the lock held
+func (r *relay) chatWrite() {
+
+    if r.chatFile == "" || !r.chatDirty {
+        return
+    }
+
+    stored := map[string][]storedMsg{}
+
+    for name, msgs := range r.chats {
+
+        list := make([]storedMsg, 0, len(msgs))
+
+        for _, m := range msgs {
+
+            s := storedMsg{ID: m.ID, At: m.At, From: m.From, Text: m.Text, Edited: m.Edited}
+
+            if m.keyed {
+                s.Key = hex.EncodeToString(m.keyHash[:])
+            }
+
+            list = append(list, s)
+        }
+
+        stored[name] = list
+    }
+
+    body, err := json.Marshal(stored)
+
+    if err != nil {
+        log.Printf("chat not written: %v", err)
+        return
+    }
+
+    tmp := r.chatFile + ".new"
+
+    if err := os.WriteFile(tmp, body, 0600); err != nil {
+        log.Printf("chat not written: %v", err)
+        return
+    }
+
+    if err := os.Rename(tmp, r.chatFile); err != nil {
+        log.Printf("chat not written: %v", err)
+        return
+    }
+
+    r.chatDirty = false
+}
+
+// The chat written a moment after each change, a few changes together
+func (r *relay) chatSaver() {
+
+    for {
+        time.Sleep(2 * time.Second)
+
+        r.mu.Lock()
+        r.chatWrite()
+        r.mu.Unlock()
+    }
 }
 
 func nowMs() int64 {
@@ -251,6 +405,10 @@ func (r *relay) chatFresh(name string) []chatMsg {
 
     for i < len(msgs) && msgs[i].At < oldest {
         i++
+    }
+
+    if i > 0 {
+        r.chatDirty = true
     }
 
     msgs = msgs[i:]
@@ -653,6 +811,7 @@ func (r *relay) chat(w http.ResponseWriter, req *http.Request, name string) {
     }
 
     r.chats[name] = msgs
+    r.chatDirty = true
 
     out, _ := json.Marshal(msg)
     ev := eventOf("chat", "msg", out, at)
@@ -719,6 +878,7 @@ func (r *relay) chatEdit(w http.ResponseWriter, req *http.Request, name string) 
 
         msgs[i].Text = text
         msgs[i].Edited = at
+        r.chatDirty = true
 
         if rm := r.rooms[name]; rm != nil {
 
@@ -838,6 +998,26 @@ func (r *relay) listen(w http.ResponseWriter, req *http.Request, name string, ow
     }
 }
 
+// How long the chat is kept, as Go writes a time, 24h or 30m, or in days,
+// 7d, which Go's own does not take
+func keepDuration(text string) (time.Duration, error) {
+
+    t := strings.TrimSpace(text)
+
+    if strings.HasSuffix(t, "d") {
+
+        var days float64
+
+        if _, err := fmt.Sscanf(strings.TrimSuffix(t, "d"), "%g", &days); err != nil || days < 0 {
+            return 0, fmt.Errorf("not a number of days")
+        }
+
+        return time.Duration(days * float64(24*time.Hour)), nil
+    }
+
+    return time.ParseDuration(t)
+}
+
 // The addresses of a network interface to listen on: its IPv4 ones and
 // its global IPv6 ones, not the link local ones
 func interfaceAddrs(name string) ([]string, error) {
@@ -921,9 +1101,18 @@ func main() {
     iface := flag.String("interface", "", "listen on the addresses of this network interface instead, wg0 for example")
     port := flag.Int("port", 8095, "the port to listen on with -interface")
     wait := flag.Duration("wait", 2*time.Minute, "how long to wait for the interface to get an address")
-    chatKeep := flag.Duration("chat-keep", 24*time.Hour, "how long a room's chat messages are kept, 0 turns the chat off")
+    chatKeepText := flag.String("chat-keep", "24h", "how long a room's chat messages are kept, 7d, 24h, 30m and the like, 0 turns the chat off")
     chatMax := flag.Int("chat-max", 200, "chat messages kept a room at most, the oldest going first")
+    chatFile := flag.String("chat-file", "", "a file the chat is written to, so it outlives a restart, none to keep it in memory only")
     flag.Parse()
+
+    keep, err := keepDuration(*chatKeepText)
+
+    if err != nil {
+        log.Fatalf("-chat-keep %q: %v", *chatKeepText, err)
+    }
+
+    chatKeep := &keep
 
     if *chatMax < 1 {
         *chatMax = 1
@@ -936,6 +1125,29 @@ func main() {
     }
 
     r := &relay{rooms: map[string]*room{}, chats: map[string][]chatMsg{}, chatKeep: *chatKeep, chatMax: *chatMax}
+
+    // The chat from before a restart, written again a moment after each
+    // change and as the relay stops
+    if *chatKeep > 0 && *chatFile != "" {
+
+        r.chatFile = filepath.Clean(*chatFile)
+        r.chatRead()
+
+        go r.chatSaver()
+
+        stop := make(chan os.Signal, 1)
+        signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
+
+        go func() {
+
+            <-stop
+            r.mu.Lock()
+            r.chatWrite()
+            r.mu.Unlock()
+            log.Printf("stopped, the chat written")
+            os.Exit(0)
+        }()
+    }
 
     if *chatKeep > 0 {
         log.Printf("chat messages kept for %s, %d a room at most", *chatKeep, *chatMax)

@@ -1400,6 +1400,9 @@ In development.
 - **Links in the chat open.** A link to a song on Mureka asks what to do: play it now, next, after the queued or last, see its info, or open it on Mureka, for a song in your library; others open on Mureka. In the web view the menu comes over a floating chat.
 - **Escape tucks the floating chat into its edge** instead of closing it, and closes it from there. Docked, it closes.
 - **Opening a set no longer takes the list to the playing song.** Going to the top of a list, or opening or folding a set, stops the list following the playing song, in the web view's lists and the player's.
+- **Music starts when the room's holder does not answer.** Playing along in a room that had stopped, a song picked or Play was stopped again at once by the room's stopped state, every time, and when the one holding the room did not take it up (its phone asleep, or a player too old) nothing ever played. A pick or Play now waits a moment for the room, and when it is not taken up this player leaves the room, keeps the queue and plays on its own, saying so; Together joins again.
+- **The chat survives a restart of the relay.** It is written to /var/lib/murekasync/chat.json (MUREKASYNC_CHAT_FILE, -chat-file) two seconds after each change and as the relay stops, and read back as it starts, the writers' keys with it so they can still change their messages. Empty keeps it in memory only.
+- **The chat can be kept for days.** MUREKASYNC_CHAT_KEEP takes days too, 7d, besides 24h, 30m and the like, and the chat says how long in days from two days up.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
