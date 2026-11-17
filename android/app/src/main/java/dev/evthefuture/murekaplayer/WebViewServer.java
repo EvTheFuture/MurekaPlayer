@@ -862,8 +862,11 @@ final class WebViewServer {
             }
 
             // A large upload only one at a time, and while there is room for
-            // it in memory
-            if (big && length > 0) {
+            // it in memory. Not a question to the player (/create): those
+            // are small, and one waiting on the player held the turn, so
+            // the chat, the notifications and making songs in a web view
+            // were refused as busy while another question was answered
+            if (big && length > 0 && !"/create".equals(path)) {
 
                 if (!BIG_ONE.tryAcquire()) {
 

@@ -711,6 +711,37 @@ final class Sync {
         });
     }
 
+    // The chat the relay keeps for the room, read when the chat opens, in
+    // case the stream's own copy was missed. It reaches the page as the
+    // stream's does
+    static void chatLoad(String url, String room) {
+
+        Relay r = parse(url);
+
+        if (r == null || !roomOk(room)) {
+            return;
+        }
+
+        ASK.execute(() -> {
+
+            try {
+
+                Answer a = exchange(r, "GET", "/room/" + room + "/chat", null, null);
+
+                if (a.status == 200) {
+
+                    tell("chatlog", "data", new JSONObject(a.body), null, null);
+                    return;
+                }
+
+                tell("chatSent", "ok", false, "error", a.status == 404 ? "The relay has no chat yet, it needs an update"
+                    : "The chat could not be read, HTTP " + a.status);
+            } catch (Exception e) {
+                tell("chatSent", "ok", false, "error", "The relay could not be reached");
+            }
+        });
+    }
+
     // How this device stands with the relay, measured afresh: the round
     // trip at best and at the middle of eight tries, and the clock
     static void timing(String url) {

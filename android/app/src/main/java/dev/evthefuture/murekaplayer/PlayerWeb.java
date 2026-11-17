@@ -1427,6 +1427,14 @@ final class PlayerWeb {
         }
 
         @JavascriptInterface
+        public void syncChatLoad(String url, String room) {
+
+            if (onMureka) {
+                Sync.chatLoad(url, room);
+            }
+        }
+
+        @JavascriptInterface
         public void syncTiming(String url) {
 
             if (onMureka) {
