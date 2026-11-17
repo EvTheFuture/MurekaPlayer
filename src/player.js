@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.227";
+    const VERSION = "2.0.1.228";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -34107,6 +34107,13 @@
 
                 const at = line.indexOf(": ");
 
+                // The note for those marked *
+                if (line.indexOf("* ") === 0) {
+
+                    sub("*", line.slice(2));
+                    continue;
+                }
+
                 sub(at > 0 ? line.slice(0, at) : line, at > 0 ? line.slice(at + 2) : "In the room");
             }
         }
@@ -42506,11 +42513,27 @@
         const list = syncMembersOf(syncFollowing.state);
         const me = syncName();
 
+        // Not listed after a couple of hellos: the one holding the room
+        // does not hear this player
         if (!list.some(function (m) { return !m.owner && String(m.name || "").slice(0, 40) === me; })) {
-            list.push({ name: me, rtt: syncClock.rtt, out: syncOutMs() });
+
+            const f = syncFollowing;
+            const unheard = f.status === "listening" && f.listeningAt > 0 && Date.now() - f.listeningAt > 2 * SYNC_HELLO_MS + 5000;
+
+            list.push({ name: me, rtt: syncClock.rtt, out: syncOutMs(), unheard: unheard });
         }
 
         return list;
+    }
+
+    // The note for a player marked * as not heard by the one holding the room
+    function syncUnheardText(list) {
+
+        if (!syncFollowing || !list.some(function (m) { return m.unheard; })) {
+            return "";
+        }
+
+        return "\n* Not heard by " + syncFollowing.name + ", whose player may need the latest version";
     }
 
     // Those the relay counts in the room that are not known by name
@@ -42549,8 +42572,8 @@
                 bits.push("off by " + Math.abs(m.drift / 1000).toFixed(2) + " s");
             }
 
-            return String(m.name || "Someone").slice(0, 40) + (bits.length ? ": " + bits.join(", ") : "");
-        }).join("\n") + syncUnnamedText(list);
+            return String(m.name || "Someone").slice(0, 40) + (m.unheard ? " *" : "") + (bits.length ? ": " + bits.join(", ") : "");
+        }).join("\n") + syncUnnamedText(list) + syncUnheardText(list);
     }
 
     // The sharing player and those who said hello lately
@@ -43962,7 +43985,9 @@
             }
 
             if (status === "listening" && f.status !== "listening") {
+
                 syncHelloAt = 0;
+                f.listeningAt = Date.now();
             }
 
             f.status = status;
@@ -44225,8 +44250,9 @@
 
             const name = String(m.name || "Someone").slice(0, 40);
 
-            return name + (m.owner ? " (holds the queue)" : "") + (name === me && (m.owner ? syncHolding : !syncHolding) ? " (you)" : "");
-        }).join("\n") + syncUnnamedText(list);
+            return name + (m.owner ? " (holds the queue)" : "") + (name === me && (m.owner ? syncHolding : !syncHolding) ? " (you)" : "")
+                + (m.unheard ? " *" : "");
+        }).join("\n") + syncUnnamedText(list) + syncUnheardText(list);
     }
 
     // A room on the relay in a line: its name, who holds it and what plays
