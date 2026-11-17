@@ -60,7 +60,7 @@
         tab.style.cssText = "position:fixed;z-index:" + (opts.z || 70) + ";display:none;align-items:center;justify-content:center;gap:4px;"
             + "box-sizing:border-box;background:rgba(30,30,36,0.9);border:1px solid rgba(255,255,255,0.18);color:#48e1eb;cursor:pointer;"
             + "-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 4px 16px rgba(0,0,0,0.5);touch-action:none";
-        tab.title = "Open it again";
+        tab.title = "Open it again, or drag it along the edges";
         tab.setAttribute("role", "button");
         tabCount.style.cssText = "display:none;min-width:16px;height:16px;padding:0 4px;box-sizing:border-box;border-radius:8px;background:#ffb454;"
             + "color:#000;font-size:10px;font-weight:700;line-height:16px;text-align:center";
@@ -70,19 +70,68 @@
         }
 
         tab.appendChild(tabCount);
-        tab.addEventListener("click", function (ev) {
+        // A tap opens it again. Dragged, the tab follows the finger and
+        // settles on the edge nearest to where it is let go, anywhere along
+        // it, and stays there, remembered
+        tab.addEventListener("pointerdown", function (ev) {
 
+            ev.preventDefault();
             ev.stopPropagation();
-            unfold();
+
+            const start = { x: ev.clientX, y: ev.clientY };
+            const box = tab.getBoundingClientRect();
+            const grab = { x: ev.clientX - box.left, y: ev.clientY - box.top };
+            let moved = false;
+
+            try {
+                tab.setPointerCapture(ev.pointerId);
+            } catch (e) {
+            }
+
+            const move = function (e) {
+
+                if (!moved && Math.abs(e.clientX - start.x) < 6 && Math.abs(e.clientY - start.y) < 6) {
+                    return;
+                }
+
+                moved = true;
+                tab.style.left = Math.round(e.clientX - grab.x) + "px";
+                tab.style.top = Math.round(e.clientY - grab.y) + "px";
+            };
+            const up = function (e) {
+
+                tab.removeEventListener("pointermove", move);
+                tab.removeEventListener("pointerup", up);
+                tab.removeEventListener("pointercancel", up);
+
+                if (!moved) {
+
+                    if (e.type === "pointerup") {
+                        unfold();
+                    }
+
+                    return;
+                }
+
+                rect.tabAt = { x: e.clientX, y: e.clientY };
+                keep();
+                placeTab();
+            };
+
+            tab.addEventListener("pointermove", move);
+            tab.addEventListener("pointerup", up);
+            tab.addEventListener("pointercancel", up);
         });
 
-        // The nearest edge to the window's middle, and the tab on it there
+        // The tab on the edge nearest to where it was put, or else to the
+        // window's middle, at that place along the edge
         function placeTab() {
 
             const vw = window.innerWidth;
             const vh = window.innerHeight;
-            const cx = rect.x + rect.w / 2;
-            const cy = rect.y + rect.h / 2;
+            const at = rect.tabAt && typeof rect.tabAt.x === "number" ? rect.tabAt : null;
+            const cx = at ? Math.max(0, Math.min(vw, at.x)) : rect.x + rect.w / 2;
+            const cy = at ? Math.max(0, Math.min(vh, at.y)) : rect.y + rect.h / 2;
             const near = [["l", cx], ["r", vw - cx], ["t", cy], ["b", vh - cy]].sort(function (a, b) {
                 return a[1] - b[1];
             })[0][0];

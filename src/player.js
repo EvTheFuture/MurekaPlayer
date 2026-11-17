@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.226";
+    const VERSION = "2.0.1.227";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -15660,7 +15660,7 @@
         tab.style.cssText = "position:fixed;z-index:" + (opts.z || 70) + ";display:none;align-items:center;justify-content:center;gap:4px;"
             + "box-sizing:border-box;background:rgba(30,30,36,0.9);border:1px solid rgba(255,255,255,0.18);color:#48e1eb;cursor:pointer;"
             + "-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 4px 16px rgba(0,0,0,0.5);touch-action:none";
-        tab.title = "Open it again";
+        tab.title = "Open it again, or drag it along the edges";
         tab.setAttribute("role", "button");
         tabCount.style.cssText = "display:none;min-width:16px;height:16px;padding:0 4px;box-sizing:border-box;border-radius:8px;background:#ffb454;"
             + "color:#000;font-size:10px;font-weight:700;line-height:16px;text-align:center";
@@ -15670,19 +15670,68 @@
         }
 
         tab.appendChild(tabCount);
-        tab.addEventListener("click", function (ev) {
+        // A tap opens it again. Dragged, the tab follows the finger and
+        // settles on the edge nearest to where it is let go, anywhere along
+        // it, and stays there, remembered
+        tab.addEventListener("pointerdown", function (ev) {
 
+            ev.preventDefault();
             ev.stopPropagation();
-            unfold();
+
+            const start = { x: ev.clientX, y: ev.clientY };
+            const box = tab.getBoundingClientRect();
+            const grab = { x: ev.clientX - box.left, y: ev.clientY - box.top };
+            let moved = false;
+
+            try {
+                tab.setPointerCapture(ev.pointerId);
+            } catch (e) {
+            }
+
+            const move = function (e) {
+
+                if (!moved && Math.abs(e.clientX - start.x) < 6 && Math.abs(e.clientY - start.y) < 6) {
+                    return;
+                }
+
+                moved = true;
+                tab.style.left = Math.round(e.clientX - grab.x) + "px";
+                tab.style.top = Math.round(e.clientY - grab.y) + "px";
+            };
+            const up = function (e) {
+
+                tab.removeEventListener("pointermove", move);
+                tab.removeEventListener("pointerup", up);
+                tab.removeEventListener("pointercancel", up);
+
+                if (!moved) {
+
+                    if (e.type === "pointerup") {
+                        unfold();
+                    }
+
+                    return;
+                }
+
+                rect.tabAt = { x: e.clientX, y: e.clientY };
+                keep();
+                placeTab();
+            };
+
+            tab.addEventListener("pointermove", move);
+            tab.addEventListener("pointerup", up);
+            tab.addEventListener("pointercancel", up);
         });
 
-        // The nearest edge to the window's middle, and the tab on it there
+        // The tab on the edge nearest to where it was put, or else to the
+        // window's middle, at that place along the edge
         function placeTab() {
 
             const vw = window.innerWidth;
             const vh = window.innerHeight;
-            const cx = rect.x + rect.w / 2;
-            const cy = rect.y + rect.h / 2;
+            const at = rect.tabAt && typeof rect.tabAt.x === "number" ? rect.tabAt : null;
+            const cx = at ? Math.max(0, Math.min(vw, at.x)) : rect.x + rect.w / 2;
+            const cy = at ? Math.max(0, Math.min(vh, at.y)) : rect.y + rect.h / 2;
             const near = [["l", cx], ["r", vw - cx], ["t", cy], ["b", vh - cy]].sort(function (a, b) {
                 return a[1] - b[1];
             })[0][0];
@@ -34052,7 +34101,7 @@
                 sub("Last heard", syncFollowing.stateAt ? ((Date.now() - syncFollowing.stateAt) / 1000).toFixed(1) + " s ago" : "Not yet");
             }
 
-            add("Players", syncMembersText().split("\n").length);
+            add("Players", syncRoomCount());
 
             for (const line of syncMembersText().split("\n")) {
 
@@ -38214,8 +38263,7 @@
             togetherStatus: syncStatusText(),
             togetherRoom: syncRoomLabel(),
             togetherWho: settings.syncOn === true ? syncWhoText() : "",
-            togetherCount: settings.syncOn === true && (syncHolding || syncFollowing)
-                ? (syncFollowing ? syncMembersOf(syncFollowing.state) : syncMembersNow()).length : 0,
+            togetherCount: syncRoomCount(),
             togetherRooms: syncRoomsList.map(function (r) {
                 return { room: String(r.room), label: String(r.label || (String(r.room) === syncRoomName() ? syncRoomLabel() : r.room)), line: syncRoomLine(r),
                     title: syncRoomTitle(r), info: syncRoomInfo(r) };
@@ -41746,7 +41794,7 @@
         const inRoom = settings.syncOn === true && (syncHolding || !!syncFollowing);
         const who = inRoom ? syncWhoText() : "";
         const title = syncStatusText() + (who ? "\n\nIn the room:\n" + who : "");
-        const count = inRoom ? (syncFollowing ? syncMembersOf(syncFollowing.state) : syncMembersNow()).length : 0;
+        const count = inRoom ? syncRoomCount() : 0;
 
         if (ctl) {
 
@@ -42114,7 +42162,7 @@
 
         const me = syncName();
         const out = [];
-        const list = syncFollowing ? syncMembersOf(syncFollowing.state) : syncHolding ? syncMembersNow() : [];
+        const list = syncRoomPeople();
 
         for (const m of list) {
             out.push(String(m.name || "").slice(0, 40));
@@ -42353,6 +42401,22 @@
         }
     }
 
+    // How many players are in the room: those known by name, or those the
+    // relay counts listening along and the one holding it, whichever is
+    // more. A player whose hellos never reach the one holding the room,
+    // which then does not know it by name, is counted all the same
+    function syncRoomCount() {
+
+        if (settings.syncOn !== true || (!syncHolding && !syncFollowing)) {
+            return 0;
+        }
+
+        const named = syncRoomPeople().length;
+        const listening = syncFollowing ? Number(syncFollowing.state && syncFollowing.state.listeners) || 0 : Number(syncLeadInfo.listeners) || 0;
+
+        return Math.max(named, listening > 0 ? listening + 1 : 0);
+    }
+
     // How listening together stands, in one line
     function syncStatusText() {
 
@@ -42366,7 +42430,7 @@
 
         // The others in the room: all but the one holding it, and playing
         // along, all but this player too
-        const n = syncHolding ? syncMembersNow().length - 1 : syncFollowing ? syncMembersOf(syncFollowing.state).length - 2 : 0;
+        const n = syncHolding ? syncRoomCount() - 1 : syncFollowing ? syncRoomCount() - 2 : 0;
         const room = "in the room " + syncRoomLabel();
 
         if (syncHolding) {
@@ -42426,9 +42490,40 @@
         return st && Array.isArray(st.members) ? st.members.slice(0, 40) : [];
     }
 
+    // The room as this player sees it. Playing along, this player is in it
+    // even when the one holding the room never heard its hellos and so does
+    // not list it
+    function syncRoomPeople() {
+
+        if (syncHolding) {
+            return syncMembersNow();
+        }
+
+        if (!syncFollowing) {
+            return [];
+        }
+
+        const list = syncMembersOf(syncFollowing.state);
+        const me = syncName();
+
+        if (!list.some(function (m) { return !m.owner && String(m.name || "").slice(0, 40) === me; })) {
+            list.push({ name: me, rtt: syncClock.rtt, out: syncOutMs() });
+        }
+
+        return list;
+    }
+
+    // Those the relay counts in the room that are not known by name
+    function syncUnnamedText(list) {
+
+        const more = syncRoomCount() - list.length;
+
+        return more > 0 ? "\n" + more + " more, not known by name" : "";
+    }
+
     function syncMembersText() {
 
-        const list = syncFollowing ? syncMembersOf(syncFollowing.state) : syncHolding ? syncMembersNow() : [];
+        const list = syncRoomPeople();
 
         if (list.length === 0) {
             return "Nobody in the room.";
@@ -42455,7 +42550,7 @@
             }
 
             return String(m.name || "Someone").slice(0, 40) + (bits.length ? ": " + bits.join(", ") : "");
-        }).join("\n");
+        }).join("\n") + syncUnnamedText(list);
     }
 
     // The sharing player and those who said hello lately
@@ -42574,6 +42669,10 @@
             moveTo: syncMoveTo || undefined,
             filters: syncFiltersNow(),
             up: up,
+
+            // How many listen along by the relay's count, which also counts
+            // a player whose hellos do not get here
+            listeners: Number(syncLeadInfo.listeners) || 0,
             members: members.map(function (m) {
                 return { name: m.name, owner: m.owner === true, rtt: Math.round(Number(m.rtt) / 10) * 10,
                     out: Math.round(Number(m.out) / 10) * 10, drift: typeof m.drift === "number" ? Math.round(m.drift / 50) * 50 : undefined };
@@ -43799,6 +43898,17 @@
 
             dbgLog("Sync", "a command did not get through, " + String(m.error || "no answer"));
 
+            // The one holding the room not reading the room's requests at
+            // all: told once while playing along with it, as nothing asked
+            // of it will happen
+            if (syncFollowing && !syncFollowing.deafTold && /not reachable/i.test(String(m.error || ""))) {
+
+                syncFollowing.deafTold = true;
+                showToast(syncFollowing.name + "'s player does not hear the room, so pausing, skipping and picks do not reach it. "
+                    + "It may need the latest version of the app.", false);
+                return;
+            }
+
             if (Date.now() - syncAskedAt < 5000 && Date.now() - syncNotSentAt > 10000) {
 
                 syncNotSentAt = Date.now();
@@ -44108,11 +44218,15 @@
     // The names in the room, one to a line, for the menu
     function syncWhoText() {
 
-        const list = syncFollowing ? syncMembersOf(syncFollowing.state) : syncHolding ? syncMembersNow() : [];
+        const list = syncRoomPeople();
+        const me = syncName();
 
         return list.map(function (m) {
-            return String(m.name || "Someone").slice(0, 40) + (m.owner ? " (holds the queue)" : "");
-        }).join("\n");
+
+            const name = String(m.name || "Someone").slice(0, 40);
+
+            return name + (m.owner ? " (holds the queue)" : "") + (name === me && (m.owner ? syncHolding : !syncHolding) ? " (you)" : "");
+        }).join("\n") + syncUnnamedText(list);
     }
 
     // A room on the relay in a line: its name, who holds it and what plays
@@ -88794,7 +88908,7 @@
         tab.style.cssText = "position:fixed;z-index:" + (opts.z || 70) + ";display:none;align-items:center;justify-content:center;gap:4px;"
             + "box-sizing:border-box;background:rgba(30,30,36,0.9);border:1px solid rgba(255,255,255,0.18);color:#48e1eb;cursor:pointer;"
             + "-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 4px 16px rgba(0,0,0,0.5);touch-action:none";
-        tab.title = "Open it again";
+        tab.title = "Open it again, or drag it along the edges";
         tab.setAttribute("role", "button");
         tabCount.style.cssText = "display:none;min-width:16px;height:16px;padding:0 4px;box-sizing:border-box;border-radius:8px;background:#ffb454;"
             + "color:#000;font-size:10px;font-weight:700;line-height:16px;text-align:center";
@@ -88804,19 +88918,68 @@
         }
 
         tab.appendChild(tabCount);
-        tab.addEventListener("click", function (ev) {
+        // A tap opens it again. Dragged, the tab follows the finger and
+        // settles on the edge nearest to where it is let go, anywhere along
+        // it, and stays there, remembered
+        tab.addEventListener("pointerdown", function (ev) {
 
+            ev.preventDefault();
             ev.stopPropagation();
-            unfold();
+
+            const start = { x: ev.clientX, y: ev.clientY };
+            const box = tab.getBoundingClientRect();
+            const grab = { x: ev.clientX - box.left, y: ev.clientY - box.top };
+            let moved = false;
+
+            try {
+                tab.setPointerCapture(ev.pointerId);
+            } catch (e) {
+            }
+
+            const move = function (e) {
+
+                if (!moved && Math.abs(e.clientX - start.x) < 6 && Math.abs(e.clientY - start.y) < 6) {
+                    return;
+                }
+
+                moved = true;
+                tab.style.left = Math.round(e.clientX - grab.x) + "px";
+                tab.style.top = Math.round(e.clientY - grab.y) + "px";
+            };
+            const up = function (e) {
+
+                tab.removeEventListener("pointermove", move);
+                tab.removeEventListener("pointerup", up);
+                tab.removeEventListener("pointercancel", up);
+
+                if (!moved) {
+
+                    if (e.type === "pointerup") {
+                        unfold();
+                    }
+
+                    return;
+                }
+
+                rect.tabAt = { x: e.clientX, y: e.clientY };
+                keep();
+                placeTab();
+            };
+
+            tab.addEventListener("pointermove", move);
+            tab.addEventListener("pointerup", up);
+            tab.addEventListener("pointercancel", up);
         });
 
-        // The nearest edge to the window's middle, and the tab on it there
+        // The tab on the edge nearest to where it was put, or else to the
+        // window's middle, at that place along the edge
         function placeTab() {
 
             const vw = window.innerWidth;
             const vh = window.innerHeight;
-            const cx = rect.x + rect.w / 2;
-            const cy = rect.y + rect.h / 2;
+            const at = rect.tabAt && typeof rect.tabAt.x === "number" ? rect.tabAt : null;
+            const cx = at ? Math.max(0, Math.min(vw, at.x)) : rect.x + rect.w / 2;
+            const cy = at ? Math.max(0, Math.min(vh, at.y)) : rect.y + rect.h / 2;
             const near = [["l", cx], ["r", vw - cx], ["t", cy], ["b", vh - cy]].sort(function (a, b) {
                 return a[1] - b[1];
             })[0][0];
