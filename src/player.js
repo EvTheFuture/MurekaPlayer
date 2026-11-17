@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.235";
+    const VERSION = "2.0.1.236";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -15635,12 +15635,15 @@
     // Shared by the player and the web view's page, src/shared/floatwin.js,
     // inlined into both by embed-webview.sh
     //
-    // opts: key, where to remember it; z, its z-index; width and height,
+    // opts: key, where to remember it; z, its z-index under the dialogs it
+    // opens; zTop, its z-index over every dialog and wait, where it starts
+    // and goes back to when touched, the tab always there; width and height,
     // its first size; minW and minH; tabIcon, an element for the tab;
     // onFold(folded), told as it tucks away and comes back. Answers the
     // element, head (the bar it is moved by, for a title and buttons),
     // body, close(),
-    // fold(), unfold(), folded() and badge(n), a count on the tab
+    // fold(), unfold(), folded(), badge(n), a count on the tab, lower(),
+    // under a dialog it opens, and raise(), over everything again
     function makeFloatWindow(opts) {
 
         const el = document.createElement("div");
@@ -15655,8 +15658,10 @@
         let lastTap = 0;
         const tab = document.createElement("div");
         const tabCount = document.createElement("span");
+        const zLow = opts.z || 70;
+        const zTop = opts.zTop || zLow;
 
-        el.style.cssText = "position:fixed;z-index:" + (opts.z || 70) + ";display:flex;flex-direction:column;gap:8px;padding:10px 12px 12px;"
+        el.style.cssText = "position:fixed;z-index:" + zTop + ";display:flex;flex-direction:column;gap:8px;padding:10px 12px 12px;"
             + "box-sizing:border-box;border-radius:12px;border:1px solid rgba(255,255,255,0.14);background:rgba(30,30,36,0.82);"
             + "-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 10px 34px rgba(0,0,0,0.55);color:#fff";
         head.style.cssText = "flex:0 0 auto;display:flex;align-items:center;gap:8px;cursor:move;touch-action:none;user-select:none;-webkit-user-select:none";
@@ -15685,7 +15690,7 @@
 
         // The tab it tucks into: a small rounded handle on the edge, with
         // the icon given and a count
-        tab.style.cssText = "position:fixed;z-index:" + (opts.z || 70) + ";display:none;align-items:center;justify-content:center;gap:4px;"
+        tab.style.cssText = "position:fixed;z-index:" + zTop + ";display:none;align-items:center;justify-content:center;gap:4px;"
             + "box-sizing:border-box;background:rgba(30,30,36,0.9);border:1px solid rgba(255,255,255,0.18);color:#48e1eb;cursor:pointer;"
             + "-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 4px 16px rgba(0,0,0,0.5);touch-action:none";
         tab.title = "Open it again, or drag it along the edges";
@@ -15976,6 +15981,12 @@
         window.addEventListener("resize", onResize);
         place();
 
+        // Over every dialog and wait again as soon as it is touched, after
+        // being put under a dialog it opened
+        el.addEventListener("pointerdown", function () {
+            el.style.zIndex = String(zTop);
+        }, true);
+
         return {
             el: el,
             tab: tab,
@@ -15985,6 +15996,12 @@
             unfold: unfold,
             folded: function () {
                 return rect.folded === true;
+            },
+            lower: function () {
+                el.style.zIndex = String(zLow);
+            },
+            raise: function () {
+                el.style.zIndex = String(zTop);
             },
             badge: function (n) {
 
@@ -42234,6 +42251,11 @@
     // to open on Mureka
     function chatSongLink(key, url) {
 
+        // The question comes over the chat, which comes up again when touched
+        if (chatUi && chatUi.win) {
+            chatUi.win.lower();
+        }
+
         const song = (cache.songs || []).find(function (s) {
             return s && s.share_key === key;
         });
@@ -42371,6 +42393,7 @@
         const win = makeFloatWindow({
             key: "chat",
             z: 9,
+            zTop: 100000,
             minW: 240,
             minH: 220,
             tabIcon: iconChat(18),
@@ -43085,6 +43108,8 @@
 
         if (!keep) {
             syncRestore();
+        } else {
+            syncQueueWhole();
         }
 
         dbgLog("Sync", "stopped playing along with " + f.name + (why ? ", " + why : ""));
@@ -43096,6 +43121,35 @@
         syncLeadSent = "";
         syncLeadInfo = { ok: null, listeners: 0, error: "" };
         syncPaint();
+    }
+
+    // The shared queue kept, on taking the room over or playing on alone,
+    // holds only the songs the room shared, no more than SYNC_UP_MAX ahead.
+    // The rest of the list goes on after them, shuffled with shuffle on,
+    // so the music neither stops nor goes round those few songs
+    function syncQueueWhole() {
+
+        if (queuePos < 0 || queue.length === 0) {
+            return;
+        }
+
+        const have = new Set(queue.map(function (x) {
+            return String(x.song_id);
+        }));
+        const more = queueOrder().filter(function (x) {
+            return !have.has(String(x.song_id)) && queueable(x) && !queueSkipIds.has(String(x.song_id));
+        });
+
+        if (more.length === 0) {
+            return;
+        }
+
+        queue = queue.concat(shuffleMode ? shuffleCopy(more) : more);
+        dbgLog("Sync", "the shared queue kept, " + more.length + " more songs of the list after its "
+            + (queue.length - more.length) + (shuffleMode ? ", shuffled" : ""));
+        renderList();
+        saveQueue();
+        prefetchNext();
     }
 
     // What was here before joining, back again: the queue and the filters
@@ -89028,12 +89082,15 @@
     // Shared by the player and the web view's page, src/shared/floatwin.js,
     // inlined into both by embed-webview.sh
     //
-    // opts: key, where to remember it; z, its z-index; width and height,
+    // opts: key, where to remember it; z, its z-index under the dialogs it
+    // opens; zTop, its z-index over every dialog and wait, where it starts
+    // and goes back to when touched, the tab always there; width and height,
     // its first size; minW and minH; tabIcon, an element for the tab;
     // onFold(folded), told as it tucks away and comes back. Answers the
     // element, head (the bar it is moved by, for a title and buttons),
     // body, close(),
-    // fold(), unfold(), folded() and badge(n), a count on the tab
+    // fold(), unfold(), folded(), badge(n), a count on the tab, lower(),
+    // under a dialog it opens, and raise(), over everything again
     function makeFloatWindow(opts) {
 
         const el = document.createElement("div");
@@ -89048,8 +89105,10 @@
         let lastTap = 0;
         const tab = document.createElement("div");
         const tabCount = document.createElement("span");
+        const zLow = opts.z || 70;
+        const zTop = opts.zTop || zLow;
 
-        el.style.cssText = "position:fixed;z-index:" + (opts.z || 70) + ";display:flex;flex-direction:column;gap:8px;padding:10px 12px 12px;"
+        el.style.cssText = "position:fixed;z-index:" + zTop + ";display:flex;flex-direction:column;gap:8px;padding:10px 12px 12px;"
             + "box-sizing:border-box;border-radius:12px;border:1px solid rgba(255,255,255,0.14);background:rgba(30,30,36,0.82);"
             + "-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 10px 34px rgba(0,0,0,0.55);color:#fff";
         head.style.cssText = "flex:0 0 auto;display:flex;align-items:center;gap:8px;cursor:move;touch-action:none;user-select:none;-webkit-user-select:none";
@@ -89078,7 +89137,7 @@
 
         // The tab it tucks into: a small rounded handle on the edge, with
         // the icon given and a count
-        tab.style.cssText = "position:fixed;z-index:" + (opts.z || 70) + ";display:none;align-items:center;justify-content:center;gap:4px;"
+        tab.style.cssText = "position:fixed;z-index:" + zTop + ";display:none;align-items:center;justify-content:center;gap:4px;"
             + "box-sizing:border-box;background:rgba(30,30,36,0.9);border:1px solid rgba(255,255,255,0.18);color:#48e1eb;cursor:pointer;"
             + "-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 4px 16px rgba(0,0,0,0.5);touch-action:none";
         tab.title = "Open it again, or drag it along the edges";
@@ -89369,6 +89428,12 @@
         window.addEventListener("resize", onResize);
         place();
 
+        // Over every dialog and wait again as soon as it is touched, after
+        // being put under a dialog it opened
+        el.addEventListener("pointerdown", function () {
+            el.style.zIndex = String(zTop);
+        }, true);
+
         return {
             el: el,
             tab: tab,
@@ -89378,6 +89443,12 @@
             unfold: unfold,
             folded: function () {
                 return rect.folded === true;
+            },
+            lower: function () {
+                el.style.zIndex = String(zLow);
+            },
+            raise: function () {
+                el.style.zIndex = String(zTop);
             },
             badge: function (n) {
 
@@ -110084,6 +110155,7 @@
     // it into its edge, Close closes it
     let chatPaint = null;
     let chatClose = null;
+    let chatWin = null;
 
     // The chat goes with the phone's room: joining one it comes, tucked
     // into its edge, and leaving it goes too
@@ -110176,6 +110248,7 @@
             }
 
             chatClose = null;
+            chatWin = null;
             chatPaint = null;
             clearInterval(timer);
 
@@ -110217,6 +110290,7 @@
         win = makeFloatWindow({
             key: "chat",
             z: 45,
+            zTop: 2147483600,
             minW: 260,
             minH: 220,
             tabIcon: icon("chat"),
@@ -110251,6 +110325,7 @@
         }
 
         chatClose = close;
+        chatWin = win;
         backWhileOpen();
 
         function load() {
@@ -110303,6 +110378,11 @@
     // play now, next, after the queued or last, or to see in its menu, any
     // of them to open on Mureka
     function chatSongLink(key, url) {
+
+        // The question comes over the chat, which comes up again when touched
+        if (chatWin) {
+            chatWin.lower();
+        }
 
         const open = { icon: "link", label: "Open on Mureka", fn: function () {
 

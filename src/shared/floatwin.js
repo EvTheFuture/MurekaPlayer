@@ -7,12 +7,15 @@
     // Shared by the player and the web view's page, src/shared/floatwin.js,
     // inlined into both by embed-webview.sh
     //
-    // opts: key, where to remember it; z, its z-index; width and height,
+    // opts: key, where to remember it; z, its z-index under the dialogs it
+    // opens; zTop, its z-index over every dialog and wait, where it starts
+    // and goes back to when touched, the tab always there; width and height,
     // its first size; minW and minH; tabIcon, an element for the tab;
     // onFold(folded), told as it tucks away and comes back. Answers the
     // element, head (the bar it is moved by, for a title and buttons),
     // body, close(),
-    // fold(), unfold(), folded() and badge(n), a count on the tab
+    // fold(), unfold(), folded(), badge(n), a count on the tab, lower(),
+    // under a dialog it opens, and raise(), over everything again
     function makeFloatWindow(opts) {
 
         const el = document.createElement("div");
@@ -27,8 +30,10 @@
         let lastTap = 0;
         const tab = document.createElement("div");
         const tabCount = document.createElement("span");
+        const zLow = opts.z || 70;
+        const zTop = opts.zTop || zLow;
 
-        el.style.cssText = "position:fixed;z-index:" + (opts.z || 70) + ";display:flex;flex-direction:column;gap:8px;padding:10px 12px 12px;"
+        el.style.cssText = "position:fixed;z-index:" + zTop + ";display:flex;flex-direction:column;gap:8px;padding:10px 12px 12px;"
             + "box-sizing:border-box;border-radius:12px;border:1px solid rgba(255,255,255,0.14);background:rgba(30,30,36,0.82);"
             + "-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 10px 34px rgba(0,0,0,0.55);color:#fff";
         head.style.cssText = "flex:0 0 auto;display:flex;align-items:center;gap:8px;cursor:move;touch-action:none;user-select:none;-webkit-user-select:none";
@@ -57,7 +62,7 @@
 
         // The tab it tucks into: a small rounded handle on the edge, with
         // the icon given and a count
-        tab.style.cssText = "position:fixed;z-index:" + (opts.z || 70) + ";display:none;align-items:center;justify-content:center;gap:4px;"
+        tab.style.cssText = "position:fixed;z-index:" + zTop + ";display:none;align-items:center;justify-content:center;gap:4px;"
             + "box-sizing:border-box;background:rgba(30,30,36,0.9);border:1px solid rgba(255,255,255,0.18);color:#48e1eb;cursor:pointer;"
             + "-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 4px 16px rgba(0,0,0,0.5);touch-action:none";
         tab.title = "Open it again, or drag it along the edges";
@@ -348,6 +353,12 @@
         window.addEventListener("resize", onResize);
         place();
 
+        // Over every dialog and wait again as soon as it is touched, after
+        // being put under a dialog it opened
+        el.addEventListener("pointerdown", function () {
+            el.style.zIndex = String(zTop);
+        }, true);
+
         return {
             el: el,
             tab: tab,
@@ -357,6 +368,12 @@
             unfold: unfold,
             folded: function () {
                 return rect.folded === true;
+            },
+            lower: function () {
+                el.style.zIndex = String(zLow);
+            },
+            raise: function () {
+                el.style.zIndex = String(zTop);
             },
             badge: function (n) {
 
