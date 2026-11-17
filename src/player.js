@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.220";
+    const VERSION = "2.0.1.221";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -28458,7 +28458,7 @@
     // The web view has two more: Songs, which opens the whole song list with
     // a tap and the small one over the main page with a swipe up, and List,
     // which opens the small one with a tap. Either or both can be used
-    const WEB_CONTROL_NAMES = CONTROL_NAMES.concat(["together", "songs", "minilist"]);
+    const WEB_CONTROL_NAMES = CONTROL_NAMES.concat(["together", "chat", "songs", "minilist"]);
 
     // The buttons a bar can hold, by its setting or by mobile or web. The
     // bars take the button groups as well, a group holds buttons only, every
@@ -28471,8 +28471,9 @@
 
         const base = which === "webControlOrder" || which === "web" ? WEB_CONTROL_NAMES : CONTROL_NAMES;
 
-        // Listening together is the app's own, the web view has it as well
-        const own = base === CONTROL_NAMES && syncAvailable() ? ["together"] : [];
+        // Listening together is the app's own, the web view has it as well,
+        // and the room's chat, a button left out until it is put in a bar
+        const own = base === CONTROL_NAMES && syncAvailable() ? ["together", "chat"] : [];
 
         return base.concat(own, ctlGroups().map(function (g) {
             return g.id;
@@ -28650,6 +28651,10 @@
 
         if (name === "together") {
             return iconTogether();
+        }
+
+        if (name === "chat") {
+            return iconChat();
         }
 
         if (name === "playlists") {
@@ -29899,21 +29904,27 @@
                     if (ctrlHoldTimer) {
 
                         // Together swiped upwards opens its menu: the rooms,
-                        // a new room, who is in it. Going up is not a slip
-                        // there until the swipe is long enough
+                        // a new room, who is in it. Swiped downwards, the
+                        // room's chat. Going up or down is not a slip there
+                        // until the swipe is long enough
                         const dx = e.clientX - ctrlStartX;
                         const dy = e.clientY - ctrlStartY;
 
-                        if (name === "together" && dy < -8 && Math.abs(dy) > Math.abs(dx) * 1.5) {
+                        if (name === "together" && Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx) * 1.5) {
 
-                            if (dy <= -30) {
+                            if (Math.abs(dy) >= 30) {
 
                                 endControlRowDrag();
                                 ctrlSuppressClick = true;
                                 setTimeout(function () {
                                     ctrlSuppressClick = false;
                                 }, 400);
-                                openSyncLongMenu();
+
+                                if (dy < 0) {
+                                    openSyncLongMenu();
+                                } else {
+                                    openSyncChat();
+                                }
                             }
 
                             return;
@@ -41147,6 +41158,12 @@
             paintChatCount(ctl, chatUnread());
         }
 
+        if (controlButtons && controlButtons.chat) {
+
+            controlButtons.chat.title = syncInRoom() ? "Chat in " + syncRoomLabel() : "Chat, in a room";
+            paintChatCount(controlButtons.chat, chatUnread());
+        }
+
         if (syncHeadBtn) {
 
             syncHeadBtn.style.display = syncAvailable() ? "inline-flex" : "none";
@@ -46195,7 +46212,13 @@
 
         // Listening together on or off, in the app
         if (syncAvailable()) {
+
             controlButtons.together = makeIconButton(iconTogether(), "Listening together", syncControlTap);
+
+            // The room's chat, with the count of new messages on its corner
+            controlButtons.chat = makeIconButton(iconChat(), "Chat in the room", function () {
+                openSyncChat();
+            });
         }
 
         updateFeedButton();
@@ -49226,6 +49249,16 @@
             ["path", { d: "M12 8v8" }],
             ["path", { d: "M8 12h8" }]
         ]);
+    }
+
+    // A speech bubble, the room's chat
+    function iconChat(size) {
+
+        return makeSvgIcon([
+            ["path", { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }],
+            ["line", { x1: "8", y1: "9", x2: "16", y2: "9" }],
+            ["line", { x1: "8", y1: "13", x2: "13", y2: "13" }]
+        ], size);
     }
 
     function iconBell(size) {
@@ -83652,6 +83685,7 @@
         <button class="ctl" id="toPlBtn" type="button" title="Add the playing song to a playlist" data-label="To playlist" aria-label="Add the playing song to a playlist" data-icon="queueAdd"></button>
         <button class="ctl" id="createBtn" type="button" title="Create songs" data-label="Create" aria-label="Create songs" data-icon="create"></button>
         <button class="ctl" id="togetherBtn" type="button" title="Listening together" data-label="Together" aria-label="Listening together" data-icon="together"></button>
+        <button class="ctl" id="chatBtn" type="button" title="Chat in the room" data-label="Chat" aria-label="Chat in the room" data-icon="chat"></button>
         <button class="ctl" id="browseBtn" type="button" data-label="Songs" aria-label="Songs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/><circle cx="18" cy="18" r="3"/></svg>
         </button>
@@ -84289,6 +84323,11 @@
         comment: [
             ["path", { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }]
         ],
+        chat: [
+            ["path", { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }],
+            ["line", { x1: "8", y1: "9", x2: "16", y2: "9" }],
+            ["line", { x1: "8", y1: "13", x2: "13", y2: "13" }]
+        ],
         bell: [
             ["path", { d: "M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" }],
             ["path", { d: "M13.73 21a2 2 0 0 1-3.46 0" }]
@@ -84689,10 +84728,11 @@
         toplaylist: { label: "To playlist", icon: "queueAdd", el: "toPlBtn" },
         create: { label: "Create", icon: "create", el: "createBtn" },
         together: { label: "Together", icon: "together", el: "togetherBtn" },
+        chat: { label: "Chat", icon: "chat", el: "chatBtn" },
         songs: { label: "Songs", icon: "songs", el: "browseBtn" },
         minilist: { label: "List", icon: "miniList", el: "miniBtn" }
     };
-    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "playlists", "toplaylist", "create", "together", "songs", "minilist"];
+    const CONTROL_ORDER = ["prev", "play", "stop", "next", "shuffle", "repeat", "published", "vocals", "rate", "sets", "night", "eq", "filters", "playlists", "toplaylist", "create", "together", "chat", "songs", "minilist"];
 
     function icon(name) {
 
@@ -89873,18 +89913,25 @@
         count.style.display = n > 0 ? "" : "none";
 
         // Chat messages from the others not read yet, on the upper corner
-        let chat = $("togetherBtn").querySelector(".ctlChat");
+        // of Together and of Chat
         const unread = s && Number(s.togetherChatUnread) > 0 ? Number(s.togetherChatUnread) : 0;
 
-        if (!chat) {
+        for (const id of ["togetherBtn", "chatBtn"]) {
 
-            chat = document.createElement("span");
-            chat.className = "ctlChat";
-            $("togetherBtn").appendChild(chat);
+            let chat = $(id).querySelector(".ctlChat");
+
+            if (!chat) {
+
+                chat = document.createElement("span");
+                chat.className = "ctlChat";
+                $(id).appendChild(chat);
+            }
+
+            chat.textContent = unread > 99 ? "99+" : unread > 0 ? String(unread) : "";
+            chat.style.display = unread > 0 ? "" : "none";
         }
 
-        chat.textContent = unread > 99 ? "99+" : unread > 0 ? String(unread) : "";
-        chat.style.display = unread > 0 ? "" : "none";
+        $("chatBtn").title = s && s.togetherIn ? "Chat in " + String(s.togetherRoom || "the room") : "Chat, in a room";
 
         if (chatPaint) {
             chatPaint(s);
@@ -101824,6 +101871,8 @@
     const GROUP_SWIPES = {
         together: { up: function () {
             togetherMenu();
+        }, down: function () {
+            openChatHere();
         } },
         songs: { up: function () {
 
@@ -102276,19 +102325,24 @@
             // move the button and waits for the swipe to be long enough
             const swipeBtn = holdStart.btn.id === "browseBtn" || holdStart.btn.id === "miniBtn";
 
-            // Together swiped upwards opens its menu
-            if (holdStart.btn.id === "togetherBtn" && dy < -8 && Math.abs(dy) > Math.abs(dx) * 1.5) {
+            // Together swiped upwards opens its menu, downwards the chat
+            if (holdStart.btn.id === "togetherBtn" && Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx) * 1.5) {
 
                 clearTimeout(holdTimer);
 
-                if (dy <= -SWIPE_UP) {
+                if (Math.abs(dy) >= SWIPE_UP) {
 
                     endHold();
                     swallowClick = true;
                     setTimeout(function () {
                         swallowClick = false;
                     }, 400);
-                    togetherMenu();
+
+                    if (dy < 0) {
+                        togetherMenu();
+                    } else {
+                        openChatHere();
+                    }
                 }
 
                 return;
@@ -102903,6 +102957,25 @@
 
     // Listening together on and off on the phone. Not set up yet, said so,
     // with the way to the phone's Listening together settings, shown here
+    // The chat, while in a room
+    function openChatHere() {
+
+        if (state && state.togetherIn) {
+            openTogetherChat();
+        } else {
+            toast("Join a room first, the chat is the room's", "bad");
+        }
+    }
+
+    $("chatBtn").addEventListener("click", function () {
+
+        if (swallowClick) {
+            return;
+        }
+
+        openChatHere();
+    });
+
     $("togetherBtn").addEventListener("click", function () {
 
         if (state && state.togetherReady === false) {

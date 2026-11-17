@@ -1387,6 +1387,7 @@ In development.
 - **The chat where the song list is.** The chat opens docked in the list's place, in the small list beside the song in the web view (opened for it), in the list under the song on a phone and over the song list in the player, with Float to have it in a window of its own and Dock to bring it back, remembered. The chat's look and its mentions are one shared part of both views now, src/shared/chat.js.
 - **The web view's waveform runs smoothly.** Each word from the phone is off by some tens of milliseconds, and the position shown took in each difference quickly, so the waveform hitched a little a couple of times a second, running up to a fifth fast or slow for a moment. A small difference is now made up at most 3 percent fast or slow, which does not show, with the same accuracy.
 - **Times on the 24 hour clock.** The chat's times, the playlist order's date and the debug log's reload line show 15:07, not 3:07 PM, whatever the device's own setting.
+- **The chat from the Together button, and a Chat button.** Swiping down on Together opens the room's chat, as swiping up opens its menu. A Chat button can be put in the bar too, left out until it is placed (Settings > Control buttons), with the count of new messages on its corner. In the player and the web view.
 - **The lyrics roll away after the last line.** They stayed up until the
   song ended, also with half a minute of music to go.
 - **Previous goes back a song up to 5 minutes in.** Seconds before it
