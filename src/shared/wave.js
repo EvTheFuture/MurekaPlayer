@@ -37,12 +37,15 @@
 
     // A thin play head across the waveform at x in its color, down to the
     // thin progress line when zoomed in and the full height when not
-    function drawPlayHead(ctx, w, h, x, dpr, foot, fill) {
+    function drawPlayHead(ctx, w, h, x, dpr, foot, fill, width) {
+
+        // As thick as asked, in screen pixels, centered on its place
+        const px = Math.max(1, Math.round((Number(width) > 0 ? Number(width) : 1) * dpr));
 
         if (x >= 0 && x < w) {
 
             ctx.fillStyle = fill;
-            ctx.fillRect(Math.min(x, w - Math.max(1, Math.round(dpr))), 0, Math.max(1, Math.round(dpr)), h - foot);
+            ctx.fillRect(Math.max(0, Math.min(x - Math.floor(px / 2), w - px)), 0, px, h - foot);
         }
     }
 
@@ -138,7 +141,8 @@
         const GLIDE_MS = 350;
 
         // A page turn slower than a glide back after a move, eased in and
-        // out over two seconds, so the waveform sets off and arrives gently
+        // out, so the waveform sets off and arrives gently. How long it
+        // takes is a setting
         const PAGE_GLIDE_MS = 2000;
         const DOUBLE_TAP_MS = 300;
         const TAP_MOVE = 6;
@@ -166,11 +170,33 @@
 
         // Turning pages: the view stands still while the play head runs
         // across it, and turns to the next part when the play head nears
-        // its right edge, at four fifths of the way across, so it has room
-        // to set off slowly, or to wherever the song is when it is out of
-        // view. The play head lands this far in from the left
+        // its right edge, or to wherever the song is when it is out of
+        // view. By default it turns as far from the right edge as the play
+        // head lands from the left. Both are settings, in percent of the
+        // view, as is how long the turn takes
         const PAGE_TURN = 0.82;
-        const PAGE_LEAD = 0.03;
+        const PAGE_LEAD = 0.18;
+
+        function pageSetting(name, fallback, lo, hi) {
+
+            const v = hooks[name] ? Number(hooks[name]()) : NaN;
+
+            return isFinite(v) ? Math.max(lo, Math.min(hi, v)) : fallback;
+        }
+
+        function pageTurn() {
+            return pageSetting("pageTurn", PAGE_TURN * 100, 50, 98) / 100;
+        }
+
+        // The landing kept well before the turn, or the page would turn
+        // again at once
+        function pageLead() {
+            return Math.min(pageSetting("pageLand", PAGE_LEAD * 100, 0, 45) / 100, pageTurn() - 0.1);
+        }
+
+        function pageGlide() {
+            return pageSetting("pageGlide", PAGE_GLIDE_MS, 200, 6000);
+        }
 
         // How long the play head's pace is measured over, and how far ahead
         // of it a page turn may count on it getting, as part of the view
@@ -220,17 +246,17 @@
 
                 if (p === null || z.pageSpan !== s) {
 
-                    z.page = clampStart(f - s * PAGE_LEAD);
+                    z.page = clampStart(f - s * pageLead());
                     z.turnFrac = null;
                     z.pageSpan = s;
-                } else if ((f < p && !(z.turnFrac !== null && f >= z.turnFrac)) || f > p + s * PAGE_TURN) {
+                } else if ((f < p && !(z.turnFrac !== null && f >= z.turnFrac)) || f > p + s * pageTurn()) {
 
                     // Where the play head will be once the page has turned,
                     // so it lands close to the left edge rather than where
                     // it was as the turn began. Not ahead of where the song
                     // is when it is out of view, say after a seek
-                    const ahead = f > p && f < p + s && isFinite(z.pace) ? (z.pace || 0) * PAGE_GLIDE_MS : 0;
-                    const next = clampStart(f + Math.min(s * PAGE_AHEAD_MAX, ahead) - s * PAGE_LEAD);
+                    const ahead = f > p && f < p + s && isFinite(z.pace) ? (z.pace || 0) * pageGlide() : 0;
+                    const next = clampStart(f + Math.min(s * PAGE_AHEAD_MAX, ahead) - s * pageLead());
 
                     // Glides there, as after a seek. Landing ahead of the
                     // play head, the page waits for it to come into view
@@ -238,7 +264,7 @@
                     // further than where the turn began
                     if (Math.abs(next - p) > 1e-6) {
 
-                        z.glide = { from: p, at: performance.now(), ms: PAGE_GLIDE_MS, inOut: true };
+                        z.glide = { from: p, at: performance.now(), ms: pageGlide(), inOut: true };
                         z.page = next;
                         z.turnFrac = next > f ? f : null;
                     }

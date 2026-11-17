@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.197";
+    const VERSION = "2.0.1.198";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -469,6 +469,20 @@
         { value: "travel", label: "Drifts along the song" },
         { value: "page", label: "Runs across, page by page" }
     ];
+    const PAGE_TURN_HINT = "Turning pages, the page turns when the play head is that far across the waveform, in percent of its width, "
+        + "and the play head lands that far in from the left, so the turn goes the distance between the two. By default "
+        + "it turns as far from the right edge as the play head lands from the left. The turn eases in and out over the "
+        + "time given, longer is slower and gentler.";
+    const PLAY_HEAD_WIDTH_HINT = "How thick the play head's line is, in pixels.";
+    const PAGE_COLOR_CHOICES = [
+        { label: "Up to the whole song's progress", value: "song" },
+        { label: "Up to the play head", value: "head" }
+    ];
+    const PAGE_COLOR_HINT = "Turning pages, how far the waveform is in the played colors: as far across as the whole song has "
+        + "come, as a progress bar, wherever the play head is, or up to the play head, as when it drifts along, with the "
+        + "thin line at the foot alone showing the whole song's progress. Each place of the play head keeps its own "
+        + "colors, so turning pages can have a color left of the play head of its own.";
+
     const PLAY_HEAD_MODE_HINT = "Zoomed in, the play head either stays in the middle while the waveform slides "
         + "under it, with the whole song as a thin line at its foot; or drifts along: at the left edge at the start, "
         + "in the middle halfway and at the right edge at the end, as zoomed out, so in the middle of a song it moves "
@@ -520,12 +534,15 @@
 
     // A thin play head across the waveform at x in its color, down to the
     // thin progress line when zoomed in and the full height when not
-    function drawPlayHead(ctx, w, h, x, dpr, foot, fill) {
+    function drawPlayHead(ctx, w, h, x, dpr, foot, fill, width) {
+
+        // As thick as asked, in screen pixels, centered on its place
+        const px = Math.max(1, Math.round((Number(width) > 0 ? Number(width) : 1) * dpr));
 
         if (x >= 0 && x < w) {
 
             ctx.fillStyle = fill;
-            ctx.fillRect(Math.min(x, w - Math.max(1, Math.round(dpr))), 0, Math.max(1, Math.round(dpr)), h - foot);
+            ctx.fillRect(Math.max(0, Math.min(x - Math.floor(px / 2), w - px)), 0, px, h - foot);
         }
     }
 
@@ -621,7 +638,8 @@
         const GLIDE_MS = 350;
 
         // A page turn slower than a glide back after a move, eased in and
-        // out over two seconds, so the waveform sets off and arrives gently
+        // out, so the waveform sets off and arrives gently. How long it
+        // takes is a setting
         const PAGE_GLIDE_MS = 2000;
         const DOUBLE_TAP_MS = 300;
         const TAP_MOVE = 6;
@@ -649,11 +667,33 @@
 
         // Turning pages: the view stands still while the play head runs
         // across it, and turns to the next part when the play head nears
-        // its right edge, at four fifths of the way across, so it has room
-        // to set off slowly, or to wherever the song is when it is out of
-        // view. The play head lands this far in from the left
+        // its right edge, or to wherever the song is when it is out of
+        // view. By default it turns as far from the right edge as the play
+        // head lands from the left. Both are settings, in percent of the
+        // view, as is how long the turn takes
         const PAGE_TURN = 0.82;
-        const PAGE_LEAD = 0.03;
+        const PAGE_LEAD = 0.18;
+
+        function pageSetting(name, fallback, lo, hi) {
+
+            const v = hooks[name] ? Number(hooks[name]()) : NaN;
+
+            return isFinite(v) ? Math.max(lo, Math.min(hi, v)) : fallback;
+        }
+
+        function pageTurn() {
+            return pageSetting("pageTurn", PAGE_TURN * 100, 50, 98) / 100;
+        }
+
+        // The landing kept well before the turn, or the page would turn
+        // again at once
+        function pageLead() {
+            return Math.min(pageSetting("pageLand", PAGE_LEAD * 100, 0, 45) / 100, pageTurn() - 0.1);
+        }
+
+        function pageGlide() {
+            return pageSetting("pageGlide", PAGE_GLIDE_MS, 200, 6000);
+        }
 
         // How long the play head's pace is measured over, and how far ahead
         // of it a page turn may count on it getting, as part of the view
@@ -703,17 +743,17 @@
 
                 if (p === null || z.pageSpan !== s) {
 
-                    z.page = clampStart(f - s * PAGE_LEAD);
+                    z.page = clampStart(f - s * pageLead());
                     z.turnFrac = null;
                     z.pageSpan = s;
-                } else if ((f < p && !(z.turnFrac !== null && f >= z.turnFrac)) || f > p + s * PAGE_TURN) {
+                } else if ((f < p && !(z.turnFrac !== null && f >= z.turnFrac)) || f > p + s * pageTurn()) {
 
                     // Where the play head will be once the page has turned,
                     // so it lands close to the left edge rather than where
                     // it was as the turn began. Not ahead of where the song
                     // is when it is out of view, say after a seek
-                    const ahead = f > p && f < p + s && isFinite(z.pace) ? (z.pace || 0) * PAGE_GLIDE_MS : 0;
-                    const next = clampStart(f + Math.min(s * PAGE_AHEAD_MAX, ahead) - s * PAGE_LEAD);
+                    const ahead = f > p && f < p + s && isFinite(z.pace) ? (z.pace || 0) * pageGlide() : 0;
+                    const next = clampStart(f + Math.min(s * PAGE_AHEAD_MAX, ahead) - s * pageLead());
 
                     // Glides there, as after a seek. Landing ahead of the
                     // play head, the page waits for it to come into view
@@ -721,7 +761,7 @@
                     // further than where the turn began
                     if (Math.abs(next - p) > 1e-6) {
 
-                        z.glide = { from: p, at: performance.now(), ms: PAGE_GLIDE_MS, inOut: true };
+                        z.glide = { from: p, at: performance.now(), ms: pageGlide(), inOut: true };
                         z.page = next;
                         z.turnFrac = next > f ? f : null;
                     }
@@ -4360,6 +4400,16 @@
             webWaveProgressLook: "wave",
             waveLooks: {},
             webWaveLooks: {},
+            wavePageTurn: 82,
+            wavePageLand: 18,
+            wavePageGlide: 2000,
+            wavePlayHeadWidth: 1,
+            wavePageColorTo: "song",
+            webWavePageColorTo: "song",
+            webWavePageTurn: 82,
+            webWavePageLand: 18,
+            webWavePageGlide: 2000,
+            webWavePlayHeadWidth: 1,
             wavePlayHeadMode: "center",
             webWavePlayHeadMode: "center",
             waveColor: WAVE_PLAYED_COLOR,
@@ -4644,6 +4694,16 @@
                     waveLooks: parsed.waveLooks && typeof parsed.waveLooks === "object" && !Array.isArray(parsed.waveLooks) ? parsed.waveLooks : {},
                     webWaveLooks: parsed.webWaveLooks && typeof parsed.webWaveLooks === "object" && !Array.isArray(parsed.webWaveLooks)
                         ? parsed.webWaveLooks : {},
+                    wavePageTurn: numberIn(parsed.wavePageTurn, 50, 98, 82),
+                    wavePageLand: numberIn(parsed.wavePageLand, 0, 45, 18),
+                    wavePageGlide: numberIn(parsed.wavePageGlide, 200, 6000, 2000),
+                    wavePlayHeadWidth: numberIn(parsed.wavePlayHeadWidth, 1, 8, 1),
+                    wavePageColorTo: parsed.wavePageColorTo === "head" ? "head" : "song",
+                    webWavePageColorTo: parsed.webWavePageColorTo === "head" ? "head" : "song",
+                    webWavePageTurn: numberIn(parsed.webWavePageTurn, 50, 98, 82),
+                    webWavePageLand: numberIn(parsed.webWavePageLand, 0, 45, 18),
+                    webWavePageGlide: numberIn(parsed.webWavePageGlide, 200, 6000, 2000),
+                    webWavePlayHeadWidth: numberIn(parsed.webWavePlayHeadWidth, 1, 8, 1),
                     waveColor: progressColor(parsed.waveColor, WAVE_PLAYED_COLOR),
                     webWaveColor: progressColor(parsed.webWaveColor, WEB_WAVE_PLAYED_COLOR),
                     waveAlpha: progressAlpha(parsed.waveAlpha, 100),
@@ -35228,9 +35288,12 @@
         // Turning pages, the waveform shows the whole song's progress as a
         // progress bar would: played and colored up to as far across as the
         // song has come, wherever the play head is on the page
-        const progressFrac = travel && !pageMode ? Math.max(0, Math.min(1, headX / w)) : frac;
-        const splitX = pageMode ? Math.round(Math.max(0, Math.min(1, frac)) * w) : headX;
-        const waveFrac = pageMode ? start + Math.max(0, Math.min(1, frac)) * span : frac;
+        // Or, as chosen, played up to the play head as when drifting, the
+        // thin line at the foot alone showing the whole song's progress
+        const pageWhole = pageMode && settings.wavePageColorTo !== "head";
+        const progressFrac = travel && !pageWhole ? Math.max(0, Math.min(1, headX / w)) : frac;
+        const splitX = pageWhole ? Math.round(Math.max(0, Math.min(1, frac)) * w) : headX;
+        const waveFrac = pageWhole ? start + Math.max(0, Math.min(1, frac)) * span : frac;
 
         if (look === "under") {
             drawWaveProgress(ctx, w, h, progressFrac, fill, ahead, splitX);
@@ -35262,7 +35325,7 @@
             drawWaveOverview(ctx, w, h, frac, dpr, wave ? fill : rgbaFade(playedFill, 0.75));
         }
 
-        drawPlayHead(ctx, w, h, headX, dpr, foot ? waveFootHeight(dpr) : 0, headFill);
+        drawPlayHead(ctx, w, h, headX, dpr, foot ? waveFootHeight(dpr) : 0, headFill, settings.wavePlayHeadWidth);
     }
 
     // Drawn every frame while zoomed in and playing, while dragging and
@@ -37112,6 +37175,11 @@
             waveZoomKeep: settings.webWaveZoomKeep === true,
             waveZoomProgressLook: progressLook(settings.webWaveProgressLook),
             waveZoomPlayHead: playHeadMode(settings.webWavePlayHeadMode),
+            wavePageTurn: settings.webWavePageTurn,
+            wavePageLand: settings.webWavePageLand,
+            wavePageGlide: settings.webWavePageGlide,
+            wavePlayHeadWidth: settings.webWavePlayHeadWidth,
+            wavePageColorTo: settings.webWavePageColorTo,
             waveZoomProgressFill: progressFill(settings.webWaveZoomProgressColor, settings.webWaveZoomProgressAlpha),
             waveZoomProgressAhead: progressFill(settings.webWaveZoomProgressAheadColor, settings.webWaveZoomProgressAheadAlpha),
             wavePlayedFill: progressFill(settings.webWaveColor, progressAlpha(settings.webWaveAlpha, 100)),
@@ -44971,6 +45039,15 @@
             },
             pages: function () {
                 return playHeadMode(settings.wavePlayHeadMode) === "page";
+            },
+            pageTurn: function () {
+                return settings.wavePageTurn;
+            },
+            pageLand: function () {
+                return settings.wavePageLand;
+            },
+            pageGlide: function () {
+                return settings.wavePageGlide;
             },
             zoomable: function () {
                 return !!waveData && waveCanvas.style.display !== "none";
@@ -53150,6 +53227,24 @@
                 paintMobileWave();
             });
 
+        // Turning pages: where the page turns, where the play head lands
+        // and how long the turn takes, and how thick the play head is
+        const wavePageTurnRow = makeStepperRow("Turn the page at, % across",
+            function () { return settings.wavePageTurn; },
+            function (v) { settings.wavePageTurn = v; drawWave(); }, 50, 98, 1);
+        const wavePageLandRow = makeStepperRow("Play head lands at, % in",
+            function () { return settings.wavePageLand; },
+            function (v) { settings.wavePageLand = v; drawWave(); }, 0, 45, 1);
+        const wavePageColorRow = makeDropRow("Played colors turning pages", PAGE_COLOR_CHOICES,
+            function () { return settings.wavePageColorTo === "head" ? "head" : "song"; },
+            function (v) { settings.wavePageColorTo = v; drawWave(); });
+        const wavePageGlideRow = makeStepperRow("Page turn time, ms",
+            function () { return settings.wavePageGlide; },
+            function (v) { settings.wavePageGlide = v; drawWave(); }, 200, 6000, 100);
+        const wavePlayHeadWidthRow = makeStepperRow("Play head width, px",
+            function () { return settings.wavePlayHeadWidth; },
+            function (v) { settings.wavePlayHeadWidth = v; drawWave(); }, 1, 8, 1);
+
         const waveProgressRow = makeDropRow("Song's progress on the waveform", PROGRESS_LOOK_CHOICES,
             function () { return progressLook(settings.waveProgressLook); },
             function (v) {
@@ -53191,8 +53286,11 @@
             withHint(wavePlayHeadRow, PLAY_HEAD_MODE_HINT),
             withHint(waveColorRow, WAVE_COLOR_HINT),
             withHint(waveRestColorRow, WAVE_REST_HINT),
-            withHint(playHeadColorRow, PLAY_HEAD_HINT)
+            withHint(playHeadColorRow, PLAY_HEAD_HINT),
+            withHint(wavePlayHeadWidthRow, PLAY_HEAD_WIDTH_HINT)
         ];
+        const mobileWavePages = [wavePageTurnRow, wavePageLandRow, withHint(wavePageGlideRow, PAGE_TURN_HINT),
+            withHint(wavePageColorRow, PAGE_COLOR_HINT)];
         const mobileWaveLook = withHint(waveProgressRow, PROGRESS_LOOK_HINT + " The play head comes first when the two are close together.");
         const mobileWaveProgress = [
             withHint(waveProgressColorRow, PROGRESS_COLOR_HINT),
@@ -53214,6 +53312,9 @@
             mobileWave.forEach(function (el) {
                 showSettingsRow(el, on);
             });
+            mobileWavePages.forEach(function (el) {
+                showSettingsRow(el, on && playHeadMode(settings.wavePlayHeadMode) === "page");
+            });
             showSettingsRow(mobileWaveLook, on);
             showSettingsRow(mobileWaveProgress[0], on && progress);
             showSettingsRow(mobileWaveProgress[1], on && progress && center);
@@ -53222,7 +53323,7 @@
 
         mobilePage.appendChild(makeLabel("Waveform"));
         mobilePage.appendChild(withHint(waveRow, "The seek bar shows the song's waveform instead of a plain line."));
-        mobileWave.concat([mobileWaveLook], mobileWaveProgress, [mobileWaveReset]).forEach(function (el) {
+        mobileWave.slice(0, 3).concat(mobileWavePages, mobileWave.slice(3), [mobileWaveLook], mobileWaveProgress, [mobileWaveReset]).forEach(function (el) {
             mobilePage.appendChild(el);
         });
         paintMobileWave();
@@ -53750,6 +53851,23 @@
                     publishHostSoon();
                 });
 
+            // Turning pages in the web view, and its play head's width
+            const webPageTurnRow = makeStepperRow("Turn the page at, % across",
+                function () { return settings.webWavePageTurn; },
+                function (v) { settings.webWavePageTurn = v; publishHostSoon(); }, 50, 98, 1);
+            const webPageLandRow = makeStepperRow("Play head lands at, % in",
+                function () { return settings.webWavePageLand; },
+                function (v) { settings.webWavePageLand = v; publishHostSoon(); }, 0, 45, 1);
+            const webPageColorRow = makeDropRow("Played colors turning pages", PAGE_COLOR_CHOICES,
+                function () { return settings.webWavePageColorTo === "head" ? "head" : "song"; },
+                function (v) { settings.webWavePageColorTo = v; publishHostSoon(); });
+            const webPageGlideRow = makeStepperRow("Page turn time, ms",
+                function () { return settings.webWavePageGlide; },
+                function (v) { settings.webWavePageGlide = v; publishHostSoon(); }, 200, 6000, 100);
+            const webPlayHeadWidthRow = makeStepperRow("Play head width, px",
+                function () { return settings.webWavePlayHeadWidth; },
+                function (v) { settings.webWavePlayHeadWidth = v; publishHostSoon(); }, 1, 8, 1);
+
             const webWaveProgressRow = makeDropRow("Song's progress on the waveform", PROGRESS_LOOK_CHOICES,
                 function () { return progressLook(settings.webWaveProgressLook); },
                 function (v) {
@@ -53830,9 +53948,14 @@
             webPage.appendChild(withHint(webWaveSourceRow, "Mureka's is 2000 values per song, drawn as bars. From the song is worked out from the song itself once it is cached, far more detailed. Until then Mureka's shows."));
             webPage.appendChild(withHint(webWaveZoomKeepRow, "A web view opens with its waveform zoomed in as far as it was last time in that browser. Each browser keeps its own zoom, and can have this set for itself alone."));
             webPage.appendChild(withHint(webPlayHeadModeRow, PLAY_HEAD_MODE_HINT + " Each browser can have this set for itself."));
+            webPage.appendChild(webPageTurnRow);
+            webPage.appendChild(webPageLandRow);
+            webPage.appendChild(withHint(webPageGlideRow, PAGE_TURN_HINT));
+            webPage.appendChild(withHint(webPageColorRow, PAGE_COLOR_HINT));
             webPage.appendChild(withHint(webWaveColorRow, WAVE_COLOR_HINT));
             webPage.appendChild(withHint(webWaveRestColorRow, WAVE_REST_HINT));
             webPage.appendChild(withHint(webPlayHeadColorRow, PLAY_HEAD_HINT));
+            webPage.appendChild(withHint(webPlayHeadWidthRow, PLAY_HEAD_WIDTH_HINT));
             webPage.appendChild(withHint(webWaveProgressRow, PROGRESS_LOOK_HINT + " Each browser can have this set for itself."));
             webPage.appendChild(withHint(webWaveProgressColorRow, PROGRESS_COLOR_HINT));
             webPage.appendChild(withHint(webWaveProgressAheadRow, PROGRESS_AHEAD_HINT + " Not used with the play head moving along."));
@@ -81823,12 +81946,15 @@
 
     // A thin play head across the waveform at x in its color, down to the
     // thin progress line when zoomed in and the full height when not
-    function drawPlayHead(ctx, w, h, x, dpr, foot, fill) {
+    function drawPlayHead(ctx, w, h, x, dpr, foot, fill, width) {
+
+        // As thick as asked, in screen pixels, centered on its place
+        const px = Math.max(1, Math.round((Number(width) > 0 ? Number(width) : 1) * dpr));
 
         if (x >= 0 && x < w) {
 
             ctx.fillStyle = fill;
-            ctx.fillRect(Math.min(x, w - Math.max(1, Math.round(dpr))), 0, Math.max(1, Math.round(dpr)), h - foot);
+            ctx.fillRect(Math.max(0, Math.min(x - Math.floor(px / 2), w - px)), 0, px, h - foot);
         }
     }
 
@@ -81924,7 +82050,8 @@
         const GLIDE_MS = 350;
 
         // A page turn slower than a glide back after a move, eased in and
-        // out over two seconds, so the waveform sets off and arrives gently
+        // out, so the waveform sets off and arrives gently. How long it
+        // takes is a setting
         const PAGE_GLIDE_MS = 2000;
         const DOUBLE_TAP_MS = 300;
         const TAP_MOVE = 6;
@@ -81952,11 +82079,33 @@
 
         // Turning pages: the view stands still while the play head runs
         // across it, and turns to the next part when the play head nears
-        // its right edge, at four fifths of the way across, so it has room
-        // to set off slowly, or to wherever the song is when it is out of
-        // view. The play head lands this far in from the left
+        // its right edge, or to wherever the song is when it is out of
+        // view. By default it turns as far from the right edge as the play
+        // head lands from the left. Both are settings, in percent of the
+        // view, as is how long the turn takes
         const PAGE_TURN = 0.82;
-        const PAGE_LEAD = 0.03;
+        const PAGE_LEAD = 0.18;
+
+        function pageSetting(name, fallback, lo, hi) {
+
+            const v = hooks[name] ? Number(hooks[name]()) : NaN;
+
+            return isFinite(v) ? Math.max(lo, Math.min(hi, v)) : fallback;
+        }
+
+        function pageTurn() {
+            return pageSetting("pageTurn", PAGE_TURN * 100, 50, 98) / 100;
+        }
+
+        // The landing kept well before the turn, or the page would turn
+        // again at once
+        function pageLead() {
+            return Math.min(pageSetting("pageLand", PAGE_LEAD * 100, 0, 45) / 100, pageTurn() - 0.1);
+        }
+
+        function pageGlide() {
+            return pageSetting("pageGlide", PAGE_GLIDE_MS, 200, 6000);
+        }
 
         // How long the play head's pace is measured over, and how far ahead
         // of it a page turn may count on it getting, as part of the view
@@ -82006,17 +82155,17 @@
 
                 if (p === null || z.pageSpan !== s) {
 
-                    z.page = clampStart(f - s * PAGE_LEAD);
+                    z.page = clampStart(f - s * pageLead());
                     z.turnFrac = null;
                     z.pageSpan = s;
-                } else if ((f < p && !(z.turnFrac !== null && f >= z.turnFrac)) || f > p + s * PAGE_TURN) {
+                } else if ((f < p && !(z.turnFrac !== null && f >= z.turnFrac)) || f > p + s * pageTurn()) {
 
                     // Where the play head will be once the page has turned,
                     // so it lands close to the left edge rather than where
                     // it was as the turn began. Not ahead of where the song
                     // is when it is out of view, say after a seek
-                    const ahead = f > p && f < p + s && isFinite(z.pace) ? (z.pace || 0) * PAGE_GLIDE_MS : 0;
-                    const next = clampStart(f + Math.min(s * PAGE_AHEAD_MAX, ahead) - s * PAGE_LEAD);
+                    const ahead = f > p && f < p + s && isFinite(z.pace) ? (z.pace || 0) * pageGlide() : 0;
+                    const next = clampStart(f + Math.min(s * PAGE_AHEAD_MAX, ahead) - s * pageLead());
 
                     // Glides there, as after a seek. Landing ahead of the
                     // play head, the page waits for it to come into view
@@ -82024,7 +82173,7 @@
                     // further than where the turn began
                     if (Math.abs(next - p) > 1e-6) {
 
-                        z.glide = { from: p, at: performance.now(), ms: PAGE_GLIDE_MS, inOut: true };
+                        z.glide = { from: p, at: performance.now(), ms: pageGlide(), inOut: true };
                         z.page = next;
                         z.turnFrac = next > f ? f : null;
                     }
@@ -86782,7 +86931,7 @@
         const restFill = state && state.waveRestFill ? state.waveRestFill : "rgba(102, 102, 102, 1)";
         const headFill = state && state.playHeadFill ? state.playHeadFill : "rgba(255, 255, 255, 0.6)";
         const key = [played, Math.round(start / span * w), span, w, h, fine, !!loud, look, fill, ahead, done, playedFill,
-            restFill, headX, headFill, travel, pageMode].join(",");
+            restFill, headX, headFill, travel, pageMode, state ? state.wavePlayHeadWidth : 1, state ? state.wavePageColorTo : ""].join(",");
 
         if (w === 0 || h === 0 || key === waveShown) {
             return;
@@ -86805,9 +86954,12 @@
         // Turning pages, the waveform shows the whole song's progress as a
         // progress bar would: played and colored up to as far across as the
         // song has come, wherever the play head is on the page
-        const progressFrac = travel && !pageMode ? Math.max(0, Math.min(1, headX / w)) : frac;
-        const splitX = pageMode ? Math.round(Math.max(0, Math.min(1, frac)) * w) : headX;
-        const waveFrac = pageMode ? start + Math.max(0, Math.min(1, frac)) * span : frac;
+        // Or, as chosen, played up to the play head as when drifting, the
+        // thin line at the foot alone showing the whole song's progress
+        const pageWhole = pageMode && (state ? state.wavePageColorTo : "") !== "head";
+        const progressFrac = travel && !pageWhole ? Math.max(0, Math.min(1, headX / w)) : frac;
+        const splitX = pageWhole ? Math.round(Math.max(0, Math.min(1, frac)) * w) : headX;
+        const waveFrac = pageWhole ? start + Math.max(0, Math.min(1, frac)) * span : frac;
 
         if (look === "under") {
             drawWaveProgress(ctx, w, h, progressFrac, fill, ahead, splitX);
@@ -86837,7 +86989,7 @@
             drawWaveOverview(ctx, w, h, frac, dpr, wave ? fill : rgbaFade(playedFill, 0.75));
         }
 
-        drawPlayHead(ctx, w, h, headX, dpr, foot ? waveFootHeight(dpr) : 0, headFill);
+        drawPlayHead(ctx, w, h, headX, dpr, foot ? waveFootHeight(dpr) : 0, headFill, state ? state.wavePlayHeadWidth : 1);
     }
 
     // BEGIN SHARED lyrics
@@ -99766,6 +99918,15 @@
         },
         pages: function () {
             return !!state && playHeadMode(state.waveZoomPlayHead) === "page";
+        },
+        pageTurn: function () {
+            return state ? state.wavePageTurn : undefined;
+        },
+        pageLand: function () {
+            return state ? state.wavePageLand : undefined;
+        },
+        pageGlide: function () {
+            return state ? state.wavePageGlide : undefined;
         },
         zoomable: function () {
             return !!(state && state.wave && state.wave.length) && $("wave").style.display !== "none";
