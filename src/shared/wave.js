@@ -87,30 +87,31 @@
         const x0 = shown ? Math.round(Math.max(0, Math.min(1, from)) * w) : 0;
         const x1 = shown ? Math.max(x0 + 1, Math.round(Math.max(0, Math.min(1, from + span)) * w)) : 0;
 
-        // The part of the song in view, faintly lit above the line and a
-        // little brighter on it, so where the zoom is shows at a glance
-        if (shown) {
-
-            const bh = lh * 4;
-            const glow = ctx.createLinearGradient(0, h - lh - bh, 0, h - lh);
-
-            glow.addColorStop(0, "rgba(255, 255, 255, 0)");
-            glow.addColorStop(1, "rgba(255, 255, 255, 0.1)");
-            ctx.fillStyle = glow;
-            ctx.fillRect(x0, h - lh - bh, x1 - x0, bh);
-        }
-
         ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
         ctx.fillRect(done, h - lh, w - done, lh);
-
-        if (shown && x1 > done) {
-
-            ctx.fillStyle = "rgba(255, 255, 255, 0.14)";
-            ctx.fillRect(Math.max(x0, done), h - lh, x1 - Math.max(x0, done), lh);
-        }
-
         ctx.fillStyle = played;
         ctx.fillRect(0, h - lh, done, lh);
+
+        if (!shown) {
+            return;
+        }
+
+        // The part of the song in view, over the line whether played or
+        // not: lit above it, brighter on it and marked at both ends, so
+        // where the zoom is shows at a glance
+        const bh = lh * 5;
+        const glow = ctx.createLinearGradient(0, h - lh - bh, 0, h - lh);
+        const tick = Math.max(1, Math.round(dpr));
+
+        glow.addColorStop(0, "rgba(255, 255, 255, 0)");
+        glow.addColorStop(1, "rgba(255, 255, 255, 0.2)");
+        ctx.fillStyle = glow;
+        ctx.fillRect(x0, h - lh - bh, x1 - x0, bh);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
+        ctx.fillRect(x0, h - lh, x1 - x0, lh);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
+        ctx.fillRect(x0, h - lh - bh, tick, bh + lh);
+        ctx.fillRect(x1 - tick, h - lh - bh, tick, bh + lh);
     }
 
     // Zoomed in, how far into the whole song it is, from the left edge and
