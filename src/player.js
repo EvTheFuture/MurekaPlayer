@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.203";
+    const VERSION = "2.0.1.204";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -23392,8 +23392,9 @@
                     return "";
                 }
 
+                // Comments read too, to learn how Mureka lists them
                 if ((verb === "GET" || verb === "HEAD")
-                    && READ_ANSWERS.indexOf(u.pathname) < 0
+                    && READ_ANSWERS.indexOf(u.pathname) < 0 && !/comment/i.test(u.pathname)
                     && !(MAKING.test(u.pathname) && u.pathname !== "/api/pgc/feed/list")) {
                     return "";
                 }
@@ -24101,6 +24102,7 @@
     function notePlayCount(id, data) {
 
         noteLyricLength(id, data, false);
+        noteCommentCount(id, data);
 
         if (!data || typeof data.play_count !== "number") {
             return;
@@ -24740,6 +24742,36 @@
         }
     }
 
+    // How many comments each song has on Mureka, as far as known, from the
+    // details read of it: played, prepared, opened or read by the plays job.
+    // A song with comments gets a small speech bubble on its row
+    const commentCounts = new Map();
+
+    function noteCommentCount(id, data) {
+
+        if (!data || typeof data.comment_count !== "number") {
+            return;
+        }
+
+        const key = String(id);
+        const before = commentCounts.has(key) ? commentCounts.get(key) : 0;
+
+        commentCounts.set(key, data.comment_count);
+
+        // A song gaining, losing or changing its comments drawn again here
+        // and in the web view
+        if (before !== data.comment_count && (before > 0 || data.comment_count > 0)) {
+
+            hostListStamp += 1;
+            songDataStamp += 1;
+            renderList();
+        }
+    }
+
+    function songComments(song) {
+        return song ? commentCounts.get(String(song.song_id)) || 0 : 0;
+    }
+
     // Read the plays of every stored detail once, in the background
     async function loadPlayCounts() {
 
@@ -24764,6 +24796,10 @@
                 const at = entry && typeof entry.t === "number" ? entry.t : 0;
 
                 noteLyricLength(key, entry, true);
+
+                if (entry && typeof entry.comment_count === "number") {
+                    commentCounts.set(key, entry.comment_count);
+                }
 
                 // A count kept since then, or a newer one, stays
                 if (entry && typeof entry.play_count === "number" && (!playCountAt.has(key) || at > playCountAt.get(key))) {
@@ -24881,6 +24917,7 @@
                 play_count: d.play_count,
                 fav_count: d.fav_count,
                 share_count: d.share_count,
+                comment_count: d.comment_count,
                 lyrics: buildLyricRows(d.lyrics || (d.song && d.song.lyrics)),
                 t: Date.now()
             };
@@ -37062,6 +37099,7 @@
             songNew: song && !creatorSource ? song.is_played === false : null,
             songTrimmed: song && !creatorSource ? isTrimmed(song) : null,
             songNote: song && !creatorSource ? songNote(song).slice(0, 500) : "",
+            songComments: songComments(song),
 
             // Shared from another account, it may not be public, Mureka's
             // reply for it says nothing about that
@@ -39580,6 +39618,7 @@
                 playLast: isPlayLast(song.song_id),
                 queued: queuedTurns.get(String(song.song_id)) || 0,
                 plays: songPlays(song),
+                comments: songComments(song) || undefined,
                 greyed: e.greyed === true,
                 place: e.greyed ? 0 : (placeOf.get(String(song.song_id)) || 0),
 
@@ -39681,6 +39720,7 @@
                     playLast: isPlayLast(x.song_id),
                     queued: queuedTurns.get(String(x.song_id)) || 0,
                     plays: songPlays(x),
+                    comments: songComments(x) || undefined,
                     greyed: !setSongMatches(x),
                     place: 0,
                     setId: e.set.id,
@@ -39766,7 +39806,8 @@
                 rating: getRating(song),
                 liked: song.is_liked === true,
                 duration: (song.duration_milliseconds || 0) / 1000,
-                plays: songPlays(song)
+                plays: songPlays(song),
+                comments: songComments(song) || undefined
             });
         }
 
@@ -49424,6 +49465,21 @@
 
     // The small blue N of a song with a note, on the lower right corner of
     // the badge or of the heart, the note itself under the mouse
+    // A song with comments on Mureka, a small orange speech bubble with
+    // their count on the badge's lower left corner
+    function commentRowMark(n) {
+
+        const mark = document.createElement("span");
+
+        mark.textContent = n > 9 ? "9+" : String(n);
+        mark.title = n + (n === 1 ? " comment" : " comments") + " on Mureka";
+        mark.style.cssText = "position:absolute;bottom:-4px;left:-3px;min-width:9px;height:9px;padding:0 1px;box-sizing:border-box;"
+            + "border-radius:4px 4px 4px 0;background:#ffb454;color:#1d1d22;font-size:6.5px;line-height:9px;font-weight:700;"
+            + "text-align:center;opacity:0.95;pointer-events:none";
+
+        return mark;
+    }
+
     function noteRowMark(note) {
 
         const mark = document.createElement("span");
@@ -50088,6 +50144,13 @@
                 badge.title = (badge.title ? badge.title + "\n\n" : "") + "Note: " + note;
             }
 
+            // Comments on Mureka, a small speech bubble on the lower left
+            if (badgeShown && songComments(song) > 0) {
+
+                badge.style.position = "relative";
+                badge.appendChild(commentRowMark(songComments(song)));
+            }
+
             item.appendChild(badge);
         }
 
@@ -50117,7 +50180,7 @@
         // Without a badge, a trimmed song's T sits on the heart's corner
         // instead, so the row keeps the columns of the rows around it. The
         // heart is wrapped, as painting it sets its text
-        if (!badgeShown && (isTrimmed(song) || note)) {
+        if (!badgeShown && (isTrimmed(song) || note || songComments(song) > 0)) {
 
             const box = document.createElement("span");
 
@@ -50132,6 +50195,10 @@
 
                 box.appendChild(noteRowMark(note));
                 box.title = "Note: " + note;
+            }
+
+            if (songComments(song) > 0) {
+                box.appendChild(commentRowMark(songComments(song)));
             }
 
             item.appendChild(box);
@@ -79736,6 +79803,39 @@
         right: -0.4em;
     }
 
+    /* A song with comments on Mureka, a small orange speech bubble with
+       their count on the badge's lower left corner */
+    .rowComments {
+        position: absolute;
+        bottom: -0.4em;
+        left: -0.3em;
+        min-width: 1.05em;
+        height: 1.05em;
+        padding: 0 0.15em;
+        box-sizing: border-box;
+        border-radius: 0.45em 0.45em 0.45em 0;
+        background: #ffb454;
+        color: var(--bg);
+        font-size: 0.75em;
+        line-height: 1.05em;
+        font-weight: 700;
+        text-align: center;
+        opacity: 0.95;
+        pointer-events: none;
+    }
+
+    .rowHeart .rowComments {
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        font-size: 0.55em;
+        bottom: 0.6em;
+        left: 0.5em;
+    }
+
+    html.phone .rowHeart .rowComments {
+        bottom: -0.2em;
+        left: -0.4em;
+    }
+
     /* A song with a note of its own, a small blue N on the badge's lower
        corner. Its note shows on the badge under the mouse */
     .rowNote {
@@ -86682,6 +86782,7 @@
 
         if (pub !== null) {
             noteMarkOn($("pubBadge"), s.songNote);
+            commentMarkOn($("pubBadge"), s.songComments);
         }
 
         // And how many times it has been played
@@ -90626,6 +90727,7 @@
             }
 
             noteMarkOn(heart, song.note);
+            commentMarkOn(heart, song.comments);
         }
     }
 
@@ -90708,6 +90810,7 @@
             }
 
             noteMarkOn(badge, song.note);
+            commentMarkOn(badge, song.comments);
             return;
         }
 
@@ -90717,6 +90820,7 @@
             badge.textContent = "shared";
             badge.title = "Shared with you from another account, it may not be public";
             noteMarkOn(badge, song.note);
+            commentMarkOn(badge, song.comments);
             return;
         }
 
@@ -90729,6 +90833,25 @@
         }
 
         noteMarkOn(badge, song.note);
+        commentMarkOn(badge, song.comments);
+    }
+
+    // A song with comments on Mureka: a small orange speech bubble with
+    // their count on the badge's lower left corner
+    function commentMarkOn(badge, n) {
+
+        const count = Number(n) || 0;
+
+        if (count <= 0) {
+            return;
+        }
+
+        const mark = document.createElement("span");
+
+        mark.className = "rowComments";
+        mark.textContent = count > 9 ? "9+" : String(count);
+        badge.appendChild(mark);
+        badge.title = (badge.title ? badge.title + "\n\n" : "") + count + (count === 1 ? " comment" : " comments") + " on Mureka";
     }
 
     // A song's note on its badge: the N, and the note itself under the mouse

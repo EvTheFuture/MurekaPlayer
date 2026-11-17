@@ -5942,6 +5942,39 @@
         right: -0.4em;
     }
 
+    /* A song with comments on Mureka, a small orange speech bubble with
+       their count on the badge's lower left corner */
+    .rowComments {
+        position: absolute;
+        bottom: -0.4em;
+        left: -0.3em;
+        min-width: 1.05em;
+        height: 1.05em;
+        padding: 0 0.15em;
+        box-sizing: border-box;
+        border-radius: 0.45em 0.45em 0.45em 0;
+        background: #ffb454;
+        color: var(--bg);
+        font-size: 0.75em;
+        line-height: 1.05em;
+        font-weight: 700;
+        text-align: center;
+        opacity: 0.95;
+        pointer-events: none;
+    }
+
+    .rowHeart .rowComments {
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        font-size: 0.55em;
+        bottom: 0.6em;
+        left: 0.5em;
+    }
+
+    html.phone .rowHeart .rowComments {
+        bottom: -0.2em;
+        left: -0.4em;
+    }
+
     /* A song with a note of its own, a small blue N on the badge's lower
        corner. Its note shows on the badge under the mouse */
     .rowNote {
@@ -12888,6 +12921,7 @@
 
         if (pub !== null) {
             noteMarkOn($("pubBadge"), s.songNote);
+            commentMarkOn($("pubBadge"), s.songComments);
         }
 
         // And how many times it has been played
@@ -16832,6 +16866,7 @@
             }
 
             noteMarkOn(heart, song.note);
+            commentMarkOn(heart, song.comments);
         }
     }
 
@@ -16914,6 +16949,7 @@
             }
 
             noteMarkOn(badge, song.note);
+            commentMarkOn(badge, song.comments);
             return;
         }
 
@@ -16923,6 +16959,7 @@
             badge.textContent = "shared";
             badge.title = "Shared with you from another account, it may not be public";
             noteMarkOn(badge, song.note);
+            commentMarkOn(badge, song.comments);
             return;
         }
 
@@ -16935,6 +16972,25 @@
         }
 
         noteMarkOn(badge, song.note);
+        commentMarkOn(badge, song.comments);
+    }
+
+    // A song with comments on Mureka: a small orange speech bubble with
+    // their count on the badge's lower left corner
+    function commentMarkOn(badge, n) {
+
+        const count = Number(n) || 0;
+
+        if (count <= 0) {
+            return;
+        }
+
+        const mark = document.createElement("span");
+
+        mark.className = "rowComments";
+        mark.textContent = count > 9 ? "9+" : String(count);
+        badge.appendChild(mark);
+        badge.title = (badge.title ? badge.title + "\n\n" : "") + count + (count === 1 ? " comment" : " comments") + " on Mureka";
     }
 
     // A song's note on its badge: the N, and the note itself under the mouse
