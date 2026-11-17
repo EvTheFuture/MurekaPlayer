@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.206";
+    const VERSION = "2.0.1.207";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -70018,8 +70018,10 @@
     let msgBusy = false;
     let msgCheckedAt = 0;
 
-    // The songs a notification names, wherever it keeps them, the ones
-    // in the library only
+    // The songs a notification names, the ones in the library only. Mureka
+    // gives the thing it is about as object_id, the song for a like, a
+    // playlist add or a share (biz_code 1001, 1003, 1004), and the song of
+    // a comment as extra_object_id (1002, object_id the comment)
     function msgSongIds(item) {
 
         const found = new Set();
@@ -70033,7 +70035,7 @@
 
                 const v = o[key];
 
-                if (/^(song_id|biz_id|target_id|songId)$/.test(key) && (typeof v === "number" || /^\d+$/.test(String(v)))
+                if (/^(song_id|biz_id|target_id|songId|object_id|extra_object_id)$/.test(key) && (typeof v === "number" || /^\d+$/.test(String(v)))
                     && hostFindSong(String(v))) {
                     found.add(String(v));
                 } else if (key === "song" && v && typeof v === "object" && hostFindSong(String(v.song_id || v.id || ""))) {
@@ -70047,6 +70049,10 @@
         walk(item, 0);
 
         return Array.from(found);
+    }
+
+    function msgTime(item) {
+        return Number(item.update_time || item.created_at || item.create_time || item.time) || 0;
     }
 
     async function checkNotifications() {
@@ -70082,8 +70088,8 @@
 
             for (const item of list) {
 
-                // When it came, in seconds or milliseconds, else its id
-                const at = Number(item.created_at || item.create_time || item.send_time || item.time || item.id) || 0;
+                // When it came, in seconds, as Mureka gives it
+                const at = msgTime(item);
 
                 if (at <= seen) {
                     continue;
@@ -70106,7 +70112,7 @@
             }
 
             dbgLog("Notifications", list.filter(function (x) {
-                return (Number(x.created_at || x.create_time || x.send_time || x.time || x.id) || 0) > seen;
+                return msgTime(x) > seen;
             }).length + " new of " + list.length + ", songs to read again: " + (songs.size || "none"));
 
             // Each song read again a moment apart, its comments and plays
@@ -70210,13 +70216,14 @@
             body.last_id = Number(after) || after;
         }
 
+        // Mureka answers with the page, a last_id to ask after for the next,
+        // and the total of comments
         const data = await commentsApi("/api/comment/list", body);
         const list = (Array.isArray(data.list) ? data.list : []).map(commentOf);
-        const last = list.length > 0 ? list[list.length - 1].id : "";
-        const more = data.has_more === true || data.more === true
-            || (data.has_more === undefined && data.more === undefined && list.length >= COMMENT_PAGE);
+        const last = data.last_id ? String(data.last_id) : (list.length > 0 ? list[list.length - 1].id : "");
+        const total = Number(data.total) || 0;
 
-        return { list: list, more: more && !!last, last: last, total: Number(data.total || data.count) || 0 };
+        return { list: list, more: list.length >= COMMENT_PAGE && !!last, last: last, total: total };
     }
 
     // A comment written, or a reply to one, and the song's count after it
