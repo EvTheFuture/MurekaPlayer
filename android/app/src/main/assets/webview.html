@@ -883,6 +883,104 @@
         white-space: nowrap;
     }
 
+    /* Unread notifications on Mureka, a bell with their count, a tap
+       shows them */
+    #msgBadge {
+        display: none;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 0.25em;
+        margin-left: 0.4em;
+        padding: 0.05em 0.45em;
+        border: 1px solid rgba(255, 180, 84, 0.55);
+        border-radius: 0.6em;
+        background: none;
+        color: #ffb454;
+        font: inherit;
+        font-size: 0.75em;
+        font-weight: 600;
+        line-height: 1.5;
+        white-space: nowrap;
+        cursor: pointer;
+    }
+
+    #msgBadge .ico {
+        display: block;
+        width: 1.1em;
+        height: 1.1em;
+    }
+
+    html.phone #msgBadge {
+        margin-left: 6px;
+        font-size: 10px;
+        vertical-align: 1px;
+    }
+
+    /* A notification, lit while unread, the comment of a comment under it */
+    .nfItem {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 8px 10px;
+        border: none;
+        border-radius: 8px;
+        background: #1d1d22;
+        color: #aaa;
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+    }
+
+    .nfItem.unread {
+        background: #2a2f33;
+        color: #ddd;
+    }
+
+    .nfTop {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.8em;
+    }
+
+    .nfDot {
+        flex: 0 0 auto;
+        width: 0.5em;
+        height: 0.5em;
+        border-radius: 50%;
+    }
+
+    .nfItem.unread .nfDot {
+        background: var(--accent);
+    }
+
+    .nfWho {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 600;
+        color: #bbb;
+    }
+
+    .nfItem.unread .nfWho {
+        color: #fff;
+    }
+
+    .nfWhen {
+        flex: 0 0 auto;
+        margin-left: auto;
+        color: var(--muted, #888);
+    }
+
+    .nfSaid {
+        padding-left: 0.6em;
+        border-left: 2px solid #ffb454;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+    }
+
     /* A darker, quieter take on WireGuard's red, and a soft white */
     #wgBadge.on {
         border-color: #642326;
@@ -7280,6 +7378,7 @@
         <div id="midBar">
             <span id="badges">
                 <span id="whoName"></span>
+                <button id="msgBadge" type="button" aria-label="Notifications" title="Notifications"></button>
                 <span id="netBadge"></span>
                 <button id="heatBadge" type="button"></button>
                 <button id="batteryBadge" type="button"></button>
@@ -7896,6 +7995,10 @@
     const ICONS = {
         comment: [
             ["path", { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }]
+        ],
+        bell: [
+            ["path", { d: "M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" }],
+            ["path", { d: "M13.73 21a2 2 0 0 1-3.46 0" }]
         ],
         settings: [
             ["circle", { cx: "12", cy: "12", r: "3" }],
@@ -11879,7 +11982,7 @@
     // keeps no gap for it
     function syncBadges() {
 
-        const any = ["whoName", "netBadge", "hotspotBadge", "wgBadge", "heatBadge", "batteryBadge"].some(function (id) {
+        const any = ["whoName", "msgBadge", "netBadge", "hotspotBadge", "wgBadge", "heatBadge", "batteryBadge"].some(function (id) {
             return $(id).style.display !== "" && $(id).style.display !== "none";
         });
 
@@ -12686,6 +12789,32 @@
     // the badge is not shown
     let wgShown = null;
 
+    // The bell with the count of unread notifications, while there are some
+    let msgBadgeShown = -1;
+
+    function paintMsgBadge(s) {
+
+        const el = $("msgBadge");
+        const n = s && Number(s.msgUnread) > 0 ? Number(s.msgUnread) : 0;
+
+        if (!el || n === msgBadgeShown) {
+            return;
+        }
+
+        msgBadgeShown = n;
+        el.style.display = n > 0 ? "inline-flex" : "none";
+        el.textContent = "";
+        el.appendChild(icon("bell"));
+        el.appendChild(document.createTextNode(n >= 20 ? "20+" : String(n)));
+        el.title = n + (n === 1 ? " new notification" : " new notifications") + " on Mureka";
+    }
+
+    $("msgBadge").addEventListener("click", function (ev) {
+
+        ev.stopPropagation();
+        openNotifications();
+    });
+
     function paintWgBadge(s) {
 
         const el = $("wgBadge");
@@ -12885,6 +13014,7 @@
         paintNetBadge(s);
         paintHotspotBadge(s);
         paintWgBadge(s);
+        paintMsgBadge(s);
         paintHeatBadge(s);
         paintBatteryBadge(s);
         orderBadges(s);
@@ -31218,6 +31348,200 @@
         return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
     }
 
+    // Mureka's notifications, newest first, read through the Android
+    // device: who, what and when, the comment of a comment. A tap marks one
+    // read and plays its song, or opens the comments of a comment
+    function openNotifications() {
+
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const head = document.createElement("div");
+        const title = document.createElement("div");
+        const all = document.createElement("button");
+        const shut = document.createElement("button");
+        const listBox = document.createElement("div");
+        const note = document.createElement("div");
+        const more = document.createElement("button");
+        let items = [];
+        let last = "";
+        let busy = false;
+        let unBack = null;
+        const close = function () {
+
+            back.remove();
+
+            if (unBack) {
+                unBack();
+            }
+        };
+
+        back.className = "cmBack";
+        card.className = "cmCard";
+        head.className = "cmHead";
+        title.className = "cmTitle";
+        title.textContent = "Notifications";
+        all.type = "button";
+        all.className = "chip";
+        all.textContent = "Mark all read";
+        all.style.display = "none";
+        all.addEventListener("click", function () {
+
+            all.disabled = true;
+            crAsk({ op: "msgReadAll" }).then(function (r) {
+
+                all.disabled = false;
+
+                for (const m of items) {
+
+                    m.read = true;
+                    m.unreadThere = false;
+                }
+
+                paint();
+
+                if (!r || !r.ok) {
+                    toast("Marked read on the Android device, Mureka did not take it" + (r && r.why ? ": " + r.why : ""), "bad");
+                }
+            });
+        });
+        shut.type = "button";
+        shut.className = "chip";
+        shut.textContent = "Close";
+        shut.addEventListener("click", close);
+        listBox.className = "cmList";
+        note.className = "cmNote";
+        more.type = "button";
+        more.className = "chip";
+        more.textContent = "More notifications";
+        more.style.display = "none";
+        more.addEventListener("click", function () {
+            load(false);
+        });
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close();
+            }
+        });
+
+        head.appendChild(title);
+        head.appendChild(all);
+        head.appendChild(shut);
+        card.appendChild(head);
+        card.appendChild(listBox);
+        card.appendChild(more);
+        back.appendChild(card);
+        document.body.appendChild(back);
+        unBack = onBack(close);
+
+        function row(m) {
+
+            const box = document.createElement("button");
+            const top = document.createElement("div");
+            const dot = document.createElement("span");
+            const who = document.createElement("span");
+            const when = document.createElement("span");
+            const what = document.createElement("div");
+
+            box.type = "button";
+            box.className = "nfItem" + (m.read ? "" : " unread");
+            box.title = m.song ? (m.code === "1002" ? "Open the comments" : "Play the song") : "Mark read";
+            top.className = "nfTop";
+            dot.className = "nfDot";
+            who.className = "nfWho";
+            who.textContent = m.who;
+            when.className = "nfWhen";
+            when.textContent = m.at ? commentAge(m.at) : "";
+            what.textContent = m.what;
+            top.appendChild(dot);
+            top.appendChild(who);
+            top.appendChild(when);
+            box.appendChild(top);
+            box.appendChild(what);
+
+            if (m.text) {
+
+                const said = document.createElement("div");
+
+                said.className = "nfSaid";
+                said.textContent = m.text;
+                box.appendChild(said);
+            }
+
+            box.addEventListener("click", function () {
+
+                m.read = true;
+
+                if (m.song) {
+                    close();
+                } else {
+                    paint();
+                }
+
+                crAsk({ op: "msgOpen", id: m.id }).then(function (r) {
+
+                    if (r && r.ok && r.comments) {
+                        openComments(r.comments);
+                    }
+                });
+            });
+
+            return box;
+        }
+
+        function paint() {
+
+            listBox.textContent = "";
+
+            for (const m of items) {
+                listBox.appendChild(row(m));
+            }
+
+            if (!items.length) {
+
+                note.textContent = busy ? "Reading Mureka's notifications..." : "No notifications";
+                listBox.appendChild(note);
+            }
+
+            all.style.display = items.some(function (m) {
+                return !m.read || m.unreadThere;
+            }) ? "" : "none";
+            more.style.display = last ? "" : "none";
+        }
+
+        function load(first) {
+
+            if (busy) {
+                return;
+            }
+
+            busy = true;
+            more.disabled = true;
+            paint();
+            crAsk({ op: "msgList", after: first ? "" : last }).then(function (r) {
+
+                busy = false;
+                more.disabled = false;
+
+                if (!r || !r.ok) {
+
+                    note.textContent = "Could not read the notifications" + (r && r.why ? ": " + r.why : "");
+                    listBox.textContent = "";
+                    listBox.appendChild(note);
+                    return;
+                }
+
+                const list = Array.isArray(r.list) ? r.list : [];
+
+                items = first ? list : items.concat(list);
+                last = String(r.last || "");
+                paint();
+            });
+        }
+
+        load(true);
+    }
+
     function openComments(m) {
 
         const back = document.createElement("div");
@@ -34988,6 +35312,14 @@
             song.appendChild(icon("chevronRight"));
             box.appendChild(song);
         }
+
+        group("Mureka");
+
+        box.appendChild(menuItem("bell", "Notifications" + (Number(s.msgUnread) > 0 ? " (" + s.msgUnread + " new)" : ""), function () {
+
+            close();
+            openNotifications();
+        }));
 
         group("Library");
 

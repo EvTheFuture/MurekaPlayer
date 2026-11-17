@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.214";
+    const VERSION = "2.0.1.215";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -37116,6 +37116,7 @@
             songTrimmed: song && !creatorSource ? isTrimmed(song) : null,
             songNote: song && !creatorSource ? songNote(song).slice(0, 500) : "",
             songComments: songComments(song),
+            msgUnread: msgUnread,
 
             // Shared from another account, it may not be public, Mureka's
             // reply for it says nothing about that
@@ -38226,6 +38227,10 @@
     // The mark in the header while offline, and whether the real page is to
     // be loaded once the music stops, the internet being back
     let offlineBadgeEl = null;
+
+    // The bell in the header with the count of unread notifications
+    let msgBadgeEl = null;
+    let msgBadgeCountEl = null;
     let onlineReloadWaiting = false;
 
     // The internet at start, the app's view of it in the app and the
@@ -44408,6 +44413,22 @@
         headerTitle.appendChild(offlineBadgeEl);
         paintOfflineBadge();
 
+        // Unread notifications, a tap shows them. Shown only while there
+        // are some
+        msgBadgeEl = document.createElement("span");
+        msgBadgeCountEl = document.createElement("span");
+        msgBadgeEl.style.cssText = "display:none;align-items:center;gap:3px;margin-left:6px;padding:0 6px;border:1px solid rgba(255,180,84,0.55);"
+            + "border-radius:8px;color:#ffb454;font-weight:600;font-size:10px;line-height:15px;vertical-align:1px;cursor:pointer";
+        msgBadgeEl.appendChild(iconBell(11));
+        msgBadgeEl.appendChild(msgBadgeCountEl);
+        msgBadgeEl.addEventListener("click", function (ev) {
+
+            ev.stopPropagation();
+            openNotifications();
+        });
+        headerTitle.appendChild(msgBadgeEl);
+        paintMsgBadge();
+
         // Sub line under the title, the logged in user name then the active
         // source separated by a dash, for example: EvTheFuture - All feed
         const headerSub = document.createElement("div");
@@ -44629,6 +44650,16 @@
 
         createButton.title = "Make songs on Mureka: lyrics, style, voice or a remix";
         rowCreate.appendChild(createButton);
+
+        // Mureka's notifications, likes, comments and follows
+        const msgButton = makeActionButton(iconBell(), "Notifications", "#444", "#fff", function () {
+
+            closeDropdowns();
+            openNotifications();
+        });
+
+        msgButton.title = "Mureka's notifications: likes, comments, playlist adds and follows";
+        rowCreate.appendChild(msgButton);
 
         // Putting the audio on the device, for offline listening or for keeps
         const rowStorage = makeActionRow();
@@ -48402,6 +48433,14 @@
             ["path", { d: "M12 8v8" }],
             ["path", { d: "M8 12h8" }]
         ]);
+    }
+
+    function iconBell(size) {
+
+        return makeSvgIcon([
+            ["path", { d: "M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" }],
+            ["path", { d: "M13.73 21a2 2 0 0 1-3.46 0" }]
+        ], size);
     }
 
     function iconPlaylists() {
@@ -70072,11 +70111,25 @@
     // comment, a reply or a like. The songs of the new ones are read again,
     // so their comment counts and plays are fresh without reading every
     // song. Read as Mureka's page reads them, GET /api/msg/list, which does
-    // not mark them read; Mureka's own unread mark is left as it is
+    // not mark them read. They are shown too: one opened is marked read
+    // here, and once none shown is left unread, or with Mark all read,
+    // Mureka's own unread mark is cleared as its page clears it
     const MSG_SEEN_KEY = "mureka_msg_seen_v1";
+    const MSG_READ_KEY = "mureka_msg_read_v1";
     const MSG_EVERY_MS = 10 * 60000;
+    const MSG_PAGE = 20;
     let msgBusy = false;
     let msgCheckedAt = 0;
+
+    // The first page as shown, newest first, where its next page starts,
+    // and every one seen by its id, for opening one from a later page
+    let msgList = [];
+    let msgLast = "";
+    let msgUnread = 0;
+    const msgById = new Map();
+
+    // Redraws an open list when the notifications change
+    let msgRepaint = null;
 
     // The songs a notification names, the ones in the library only. Mureka
     // gives the thing it is about as object_id, the song for a like, a
@@ -70115,6 +70168,261 @@
         return Number(item.update_time || item.created_at || item.create_time || item.time) || 0;
     }
 
+    // The ids opened here, the last few hundred
+    function msgReadIds() {
+
+        try {
+
+            const a = JSON.parse(localStorage.getItem(MSG_READ_KEY) || "[]");
+
+            return new Set(Array.isArray(a) ? a.map(String) : []);
+        } catch (e) {
+            return new Set();
+        }
+    }
+
+    function msgSaveRead(ids) {
+
+        try {
+            localStorage.setItem(MSG_READ_KEY, JSON.stringify(Array.from(ids).slice(-400)));
+        } catch (e) {
+        }
+    }
+
+    // What happened, in words, from Mureka's kind of notification: a like
+    // (1001), a comment (1002, the comment last in trans), a playlist add
+    // (1003), a shared song looked at (1004) and a follow (2001). Others
+    // use Mureka's own text with its placeholders filled in
+    function msgWhat(code, item, trans, title) {
+
+        const q = title ? "\"" + title + "\"" : "your song";
+
+        if (code === "1001") {
+            return "liked " + q;
+        }
+
+        if (code === "1002") {
+            return "commented on " + q;
+        }
+
+        if (code === "1003") {
+            return "added " + q + " to a playlist";
+        }
+
+        if (code === "1004") {
+            return "checked " + q + ", a song you shared";
+        }
+
+        if (code === "2001") {
+            return "followed you";
+        }
+
+        return String(item.text || "").replace(/\{song_name\}/g, title).replace(/\{comment_content\}/g, trans[2] || "")
+            .replace(/\{[a-z_]+\}/g, "").trim();
+    }
+
+    // One notification as the lists show it
+    function msgOf(item, readIds) {
+
+        const user = item.user || {};
+        const trans = Array.isArray(item.trans) ? item.trans.map(function (t) {
+            return String(t && t.value !== undefined ? t.value : "");
+        }) : [];
+        const code = String(item.biz_code || "");
+        const title = String(item.object_name || trans[0] || "");
+        const songId = String((code === "1002" ? item.extra_object_id : item.object_id) || "");
+        const at = msgTime(item);
+        const id = String(item.msg_id || code + ":" + (item.object_id || "") + ":" + at);
+        const m = {
+            id: id,
+            code: code,
+            who: String(user.stage_name || trans[1] || "Someone"),
+            at: at * 1000,
+            what: msgWhat(code, item, trans, title),
+            text: code === "1002" ? trans[2] || "" : "",
+            song: hostFindSong(songId) ? songId : "",
+            title: title,
+            unreadThere: item.is_read === false,
+            read: item.is_read !== false || readIds.has(id)
+        };
+
+        msgById.set(id, m);
+
+        return m;
+    }
+
+    // A page of notifications, the first or the one after a cursor
+    async function fetchMsgPage(after) {
+
+        const now = Date.now();
+        const res = await murekaFetch("/api/msg/list?time=" + now + "&last_id=" + encodeURIComponent(after || String(now))
+            + "&page_size=" + MSG_PAGE, { credentials: "include" });
+        const json = res.ok ? await res.json() : null;
+        const data = json && json.code === 0 && json.data ? json.data : null;
+
+        if (!data || !Array.isArray(data.list)) {
+            throw new Error(json && json.msg ? json.msg : "HTTP " + res.status);
+        }
+
+        const last = data.last_id !== undefined && data.last_id !== null ? String(data.last_id) : "";
+
+        return { raw: data.list, last: data.list.length >= MSG_PAGE && last && last !== String(after || "") ? last : "" };
+    }
+
+    // The unread count, for the badges, and an open list redrawn
+    function msgCount() {
+
+        msgUnread = msgList.filter(function (m) {
+            return !m.read;
+        }).length;
+        paintMsgBadge();
+        publishHostSoon();
+
+        if (msgRepaint) {
+            msgRepaint();
+        }
+    }
+
+    function paintMsgBadge() {
+
+        if (!msgBadgeEl) {
+            return;
+        }
+
+        msgBadgeEl.style.display = msgUnread > 0 ? "inline-flex" : "none";
+        msgBadgeCountEl.textContent = msgUnread >= MSG_PAGE ? MSG_PAGE + "+" : String(msgUnread);
+        msgBadgeEl.title = msgUnread + (msgUnread === 1 ? " new notification" : " new notifications") + " on Mureka";
+    }
+
+    // Mureka's own unread mark cleared, as its page does after reading
+    async function msgClearThere() {
+
+        const res = await murekaFetch("/api/msg/unread/clear", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ time: Date.now() })
+        });
+        const json = res.ok ? await res.json().catch(function () {
+            return null;
+        }) : null;
+
+        if (!json || json.code !== 0) {
+            throw new Error(json && json.msg ? json.msg : "HTTP " + res.status);
+        }
+
+        for (const m of msgById.values()) {
+            m.unreadThere = false;
+        }
+
+        dbgLog("Notifications", "marked read on Mureka");
+    }
+
+    // One opened, marked read here, and on Mureka too once none shown is
+    // left unread
+    function msgMarkRead(id) {
+
+        const m = msgById.get(String(id));
+
+        if (!m || m.read) {
+            return;
+        }
+
+        const ids = msgReadIds();
+
+        ids.add(m.id);
+        msgSaveRead(ids);
+        m.read = true;
+        msgCount();
+
+        const left = Array.from(msgById.values()).some(function (x) {
+            return !x.read;
+        });
+        const there = Array.from(msgById.values()).some(function (x) {
+            return x.unreadThere;
+        });
+
+        if (!left && there) {
+
+            msgClearThere().catch(function (e) {
+                dbgLog("Notifications", "could not mark read on Mureka, " + errText(e));
+            });
+        }
+    }
+
+    // Every one marked read, here and on Mureka
+    async function msgMarkAllRead() {
+
+        const ids = msgReadIds();
+
+        for (const m of msgById.values()) {
+
+            m.read = true;
+            ids.add(m.id);
+        }
+
+        msgSaveRead(ids);
+        msgCount();
+        await msgClearThere();
+    }
+
+    // One tapped: marked read, and its song played, or its comments opened
+    // for a comment. Answers the song whose comments to open, for the web
+    // view to open them itself
+    function msgOpen(id, showComments) {
+
+        const m = msgById.get(String(id));
+
+        if (!m) {
+            return null;
+        }
+
+        msgMarkRead(m.id);
+
+        const song = m.song ? hostFindSong(m.song) : null;
+
+        if (!song) {
+            return null;
+        }
+
+        if (m.code === "1002") {
+
+            if (showComments) {
+                openComments(song);
+            }
+
+            return { id: String(song.song_id), title: song.title || "" };
+        }
+
+        playFromTapped(song.song_id);
+
+        return null;
+    }
+
+    // A later page, for More
+    async function moreNotifications(after) {
+
+        const page = await fetchMsgPage(after);
+        const readIds = msgReadIds();
+
+        return {
+            list: page.raw.map(function (item) {
+                return msgOf(item, readIds);
+            }),
+            last: page.last
+        };
+    }
+
+    // The first page read again now, waiting for a read already going
+    async function refreshNotifications() {
+
+        while (msgBusy) {
+            await sleep(150);
+        }
+
+        await checkNotifications();
+    }
+
     async function checkNotifications() {
 
         if (msgBusy || offlineMode() || creatorSource) {
@@ -70126,14 +70434,23 @@
 
         try {
 
-            const now = Date.now();
-            const res = await murekaFetch("/api/msg/list?time=" + now + "&last_id=" + now + "&page_size=20", { credentials: "include" });
-            const json = res.ok ? await res.json() : null;
-            const list = json && json.code === 0 && json.data && Array.isArray(json.data.list) ? json.data.list : null;
+            let page = null;
 
-            if (!list) {
+            try {
+                page = await fetchMsgPage("");
+            } catch (e) {
+                dbgLog("Notifications", "could not be read, " + errText(e));
                 return;
             }
+
+            const list = page.raw;
+            const readIds = msgReadIds();
+
+            msgList = list.map(function (item) {
+                return msgOf(item, readIds);
+            });
+            msgLast = page.last;
+            msgCount();
 
             let seen = 0;
 
@@ -70175,21 +70492,27 @@
                 return msgTime(x) > seen;
             }).length + " new of " + list.length + ", songs to read again: " + (songs.size || "none"));
 
-            // Each song read again a moment apart, its comments and plays
-            for (const id of songs) {
-
-                const song = hostFindSong(id);
-
-                if (song && !offlineMode()) {
-
-                    await fetchDetail(song);
-                    await sleep(800);
-                }
-            }
+            // Each song read again a moment apart, its comments and plays,
+            // after this read is done so an open list is not kept waiting
+            rereadMsgSongs(Array.from(songs));
         } catch (e) {
             dbgLog("Notifications", "could not be read, " + errText(e));
         } finally {
             msgBusy = false;
+        }
+    }
+
+    async function rereadMsgSongs(ids) {
+
+        for (const id of ids) {
+
+            const song = hostFindSong(id);
+
+            if (song && !offlineMode()) {
+
+                await fetchDetail(song);
+                await sleep(800);
+            }
         }
     }
 
@@ -70708,6 +71031,183 @@
         load(true);
     }
 
+    // Mureka's notifications, newest first: who, what and when, the
+    // comment of a comment. A tap marks one read and plays its song, or
+    // opens the comments of a comment. Read again as it opens
+    function openNotifications() {
+
+        if (!panelEl) {
+            return;
+        }
+
+        const dialog = makeDialog({
+            cardCss: "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:12px;width:100%;max-width:420px;"
+                + "max-height:86%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px",
+            onCancel: function () {
+                msgRepaint = null;
+            }
+        });
+        const card = dialog.card;
+        const head = document.createElement("div");
+        const title = document.createElement("div");
+        const allBtn = makeButton("Mark all read", "#333", "#fff", function () {
+
+            allBtn.disabled = true;
+            msgMarkAllRead().then(function () {
+                allBtn.disabled = false;
+            }, function (e) {
+
+                allBtn.disabled = false;
+                showToast("Marked read here, Mureka did not take it: " + errText(e), false);
+            });
+        });
+        const shut = makeButton("Close", "#444", "#fff", function () {
+            done();
+        });
+        const listBox = document.createElement("div");
+        const note = document.createElement("div");
+        const moreBtn = makeButton("More notifications", "#333", "#fff", function () {
+            more();
+        });
+        let extra = [];
+        let last = msgLast;
+        let busy = false;
+        const done = function () {
+
+            msgRepaint = null;
+            dialog.close();
+        };
+
+        head.classList.add("mp-row8");
+        title.textContent = "Notifications";
+        title.style.cssText = "font-weight:600;flex:1 1 auto;min-width:0";
+        allBtn.style.flex = "0 0 auto";
+        shut.style.flex = "0 0 auto";
+        head.appendChild(title);
+        head.appendChild(allBtn);
+        head.appendChild(shut);
+        listBox.style.cssText = "flex:1 1 auto;min-height:80px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"
+            + "-webkit-overflow-scrolling:touch;overscroll-behavior:contain";
+        note.style.cssText = "font-size:12px;color:#888;line-height:1.5;padding:4px 2px";
+        moreBtn.style.display = "none";
+        card.appendChild(head);
+        card.appendChild(listBox);
+        card.appendChild(moreBtn);
+        panelEl.appendChild(dialog.back);
+
+        function row(m) {
+
+            const box = document.createElement("button");
+            const top = document.createElement("div");
+            const dot = document.createElement("span");
+            const who = document.createElement("span");
+            const when = document.createElement("span");
+            const what = document.createElement("div");
+
+            box.type = "button";
+            box.style.cssText = "display:flex;flex-direction:column;gap:3px;padding:7px 9px;border:none;border-radius:8px;text-align:left;"
+                + "cursor:pointer;font:inherit;color:#fff;background:" + (m.read ? "#1d1d22" : "#2a2f33");
+            top.style.cssText = "display:flex;gap:7px;align-items:center;font-size:12px";
+            dot.style.cssText = "flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:" + (m.read ? "transparent" : ACCENT);
+            who.textContent = m.who;
+            who.style.cssText = "font-weight:600;color:" + (m.read ? "#bbb" : "#fff") + ";min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+            when.textContent = m.at ? commentAge(m.at) : "";
+            when.style.cssText = "flex:0 0 auto;margin-left:auto;color:#888";
+            what.textContent = m.what;
+            what.style.cssText = "font-size:13px;line-height:1.4;overflow-wrap:anywhere;color:" + (m.read ? "#aaa" : "#ddd");
+            top.appendChild(dot);
+            top.appendChild(who);
+            top.appendChild(when);
+            box.appendChild(top);
+            box.appendChild(what);
+
+            if (m.text) {
+
+                const said = document.createElement("div");
+
+                said.textContent = m.text;
+                said.style.cssText = "font-size:13px;line-height:1.4;padding-left:8px;border-left:2px solid #ffb454;white-space:pre-wrap;"
+                    + "overflow-wrap:anywhere;color:" + (m.read ? "#999" : "#eee");
+                box.appendChild(said);
+            }
+
+            box.title = m.song ? (m.code === "1002" ? "Open the comments" : "Play the song") : "Mark read";
+            box.addEventListener("click", function () {
+
+                if (m.song) {
+                    done();
+                }
+
+                msgOpen(m.id, true);
+            });
+
+            return box;
+        }
+
+        function paint() {
+
+            const all = msgList.concat(extra);
+
+            listBox.textContent = "";
+
+            for (const m of all) {
+                listBox.appendChild(row(m));
+            }
+
+            if (!all.length) {
+
+                note.textContent = busy ? "Reading Mureka's notifications..." : "No notifications";
+                listBox.appendChild(note);
+            }
+
+            allBtn.style.display = all.some(function (m) {
+                return !m.read || m.unreadThere;
+            }) ? "" : "none";
+            moreBtn.style.display = last ? "" : "none";
+        }
+
+        function more() {
+
+            if (busy || !last) {
+                return;
+            }
+
+            busy = true;
+            moreBtn.disabled = true;
+            moreNotifications(last).then(function (r) {
+
+                extra = extra.concat(r.list);
+                last = r.last;
+            }, function (e) {
+                showToast("Could not read more notifications: " + errText(e), false);
+            }).then(function () {
+
+                busy = false;
+                moreBtn.disabled = false;
+                paint();
+            });
+        }
+
+        msgRepaint = function () {
+
+            if (!extra.length) {
+                last = msgLast;
+            }
+
+            paint();
+        };
+        busy = true;
+        paint();
+        refreshNotifications().then(function () {
+
+            busy = false;
+
+            if (msgRepaint) {
+                msgRepaint();
+            }
+        });
+    }
+
     // ---- The web view's way in ----
 
     // What the web view shows of the form, sent with the state while it is
@@ -70777,6 +71277,31 @@
 
             likeComment({ id: String(a.id || ""), level: Number(a.level) || 1 }).then(function (r) {
                 reply({ ok: true, liked: r.liked, likes: r.likes });
+            }, failed);
+        } else if (op === "msgList") {
+
+            const after = String(a.after || "");
+            const answer = function (list, last) {
+                reply({ ok: true, list: list, last: last, unread: msgUnread });
+            };
+
+            if (after) {
+
+                moreNotifications(after).then(function (r) {
+                    answer(r.list, r.last);
+                }, failed);
+            } else {
+
+                refreshNotifications().then(function () {
+                    answer(msgList, msgLast);
+                }, failed);
+            }
+        } else if (op === "msgOpen") {
+            reply({ ok: true, comments: msgOpen(String(a.id || ""), false) });
+        } else if (op === "msgReadAll") {
+
+            msgMarkAllRead().then(function () {
+                reply({ ok: true });
             }, failed);
         } else if (op === "matchSets") {
 
@@ -75480,6 +76005,104 @@
         font-weight: 400;
         line-height: 1.5;
         white-space: nowrap;
+    }
+
+    /* Unread notifications on Mureka, a bell with their count, a tap
+       shows them */
+    #msgBadge {
+        display: none;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 0.25em;
+        margin-left: 0.4em;
+        padding: 0.05em 0.45em;
+        border: 1px solid rgba(255, 180, 84, 0.55);
+        border-radius: 0.6em;
+        background: none;
+        color: #ffb454;
+        font: inherit;
+        font-size: 0.75em;
+        font-weight: 600;
+        line-height: 1.5;
+        white-space: nowrap;
+        cursor: pointer;
+    }
+
+    #msgBadge .ico {
+        display: block;
+        width: 1.1em;
+        height: 1.1em;
+    }
+
+    html.phone #msgBadge {
+        margin-left: 6px;
+        font-size: 10px;
+        vertical-align: 1px;
+    }
+
+    /* A notification, lit while unread, the comment of a comment under it */
+    .nfItem {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 8px 10px;
+        border: none;
+        border-radius: 8px;
+        background: #1d1d22;
+        color: #aaa;
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+    }
+
+    .nfItem.unread {
+        background: #2a2f33;
+        color: #ddd;
+    }
+
+    .nfTop {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.8em;
+    }
+
+    .nfDot {
+        flex: 0 0 auto;
+        width: 0.5em;
+        height: 0.5em;
+        border-radius: 50%;
+    }
+
+    .nfItem.unread .nfDot {
+        background: var(--accent);
+    }
+
+    .nfWho {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 600;
+        color: #bbb;
+    }
+
+    .nfItem.unread .nfWho {
+        color: #fff;
+    }
+
+    .nfWhen {
+        flex: 0 0 auto;
+        margin-left: auto;
+        color: var(--muted, #888);
+    }
+
+    .nfSaid {
+        padding-left: 0.6em;
+        border-left: 2px solid #ffb454;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
     }
 
     /* A darker, quieter take on WireGuard's red, and a soft white */
@@ -81879,6 +82502,7 @@
         <div id="midBar">
             <span id="badges">
                 <span id="whoName"></span>
+                <button id="msgBadge" type="button" aria-label="Notifications" title="Notifications"></button>
                 <span id="netBadge"></span>
                 <button id="heatBadge" type="button"></button>
                 <button id="batteryBadge" type="button"></button>
@@ -82495,6 +83119,10 @@
     const ICONS = {
         comment: [
             ["path", { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }]
+        ],
+        bell: [
+            ["path", { d: "M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" }],
+            ["path", { d: "M13.73 21a2 2 0 0 1-3.46 0" }]
         ],
         settings: [
             ["circle", { cx: "12", cy: "12", r: "3" }],
@@ -86478,7 +87106,7 @@
     // keeps no gap for it
     function syncBadges() {
 
-        const any = ["whoName", "netBadge", "hotspotBadge", "wgBadge", "heatBadge", "batteryBadge"].some(function (id) {
+        const any = ["whoName", "msgBadge", "netBadge", "hotspotBadge", "wgBadge", "heatBadge", "batteryBadge"].some(function (id) {
             return $(id).style.display !== "" && $(id).style.display !== "none";
         });
 
@@ -87285,6 +87913,32 @@
     // the badge is not shown
     let wgShown = null;
 
+    // The bell with the count of unread notifications, while there are some
+    let msgBadgeShown = -1;
+
+    function paintMsgBadge(s) {
+
+        const el = $("msgBadge");
+        const n = s && Number(s.msgUnread) > 0 ? Number(s.msgUnread) : 0;
+
+        if (!el || n === msgBadgeShown) {
+            return;
+        }
+
+        msgBadgeShown = n;
+        el.style.display = n > 0 ? "inline-flex" : "none";
+        el.textContent = "";
+        el.appendChild(icon("bell"));
+        el.appendChild(document.createTextNode(n >= 20 ? "20+" : String(n)));
+        el.title = n + (n === 1 ? " new notification" : " new notifications") + " on Mureka";
+    }
+
+    $("msgBadge").addEventListener("click", function (ev) {
+
+        ev.stopPropagation();
+        openNotifications();
+    });
+
     function paintWgBadge(s) {
 
         const el = $("wgBadge");
@@ -87484,6 +88138,7 @@
         paintNetBadge(s);
         paintHotspotBadge(s);
         paintWgBadge(s);
+        paintMsgBadge(s);
         paintHeatBadge(s);
         paintBatteryBadge(s);
         orderBadges(s);
@@ -105817,6 +106472,200 @@
         return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
     }
 
+    // Mureka's notifications, newest first, read through the Android
+    // device: who, what and when, the comment of a comment. A tap marks one
+    // read and plays its song, or opens the comments of a comment
+    function openNotifications() {
+
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const head = document.createElement("div");
+        const title = document.createElement("div");
+        const all = document.createElement("button");
+        const shut = document.createElement("button");
+        const listBox = document.createElement("div");
+        const note = document.createElement("div");
+        const more = document.createElement("button");
+        let items = [];
+        let last = "";
+        let busy = false;
+        let unBack = null;
+        const close = function () {
+
+            back.remove();
+
+            if (unBack) {
+                unBack();
+            }
+        };
+
+        back.className = "cmBack";
+        card.className = "cmCard";
+        head.className = "cmHead";
+        title.className = "cmTitle";
+        title.textContent = "Notifications";
+        all.type = "button";
+        all.className = "chip";
+        all.textContent = "Mark all read";
+        all.style.display = "none";
+        all.addEventListener("click", function () {
+
+            all.disabled = true;
+            crAsk({ op: "msgReadAll" }).then(function (r) {
+
+                all.disabled = false;
+
+                for (const m of items) {
+
+                    m.read = true;
+                    m.unreadThere = false;
+                }
+
+                paint();
+
+                if (!r || !r.ok) {
+                    toast("Marked read on the Android device, Mureka did not take it" + (r && r.why ? ": " + r.why : ""), "bad");
+                }
+            });
+        });
+        shut.type = "button";
+        shut.className = "chip";
+        shut.textContent = "Close";
+        shut.addEventListener("click", close);
+        listBox.className = "cmList";
+        note.className = "cmNote";
+        more.type = "button";
+        more.className = "chip";
+        more.textContent = "More notifications";
+        more.style.display = "none";
+        more.addEventListener("click", function () {
+            load(false);
+        });
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close();
+            }
+        });
+
+        head.appendChild(title);
+        head.appendChild(all);
+        head.appendChild(shut);
+        card.appendChild(head);
+        card.appendChild(listBox);
+        card.appendChild(more);
+        back.appendChild(card);
+        document.body.appendChild(back);
+        unBack = onBack(close);
+
+        function row(m) {
+
+            const box = document.createElement("button");
+            const top = document.createElement("div");
+            const dot = document.createElement("span");
+            const who = document.createElement("span");
+            const when = document.createElement("span");
+            const what = document.createElement("div");
+
+            box.type = "button";
+            box.className = "nfItem" + (m.read ? "" : " unread");
+            box.title = m.song ? (m.code === "1002" ? "Open the comments" : "Play the song") : "Mark read";
+            top.className = "nfTop";
+            dot.className = "nfDot";
+            who.className = "nfWho";
+            who.textContent = m.who;
+            when.className = "nfWhen";
+            when.textContent = m.at ? commentAge(m.at) : "";
+            what.textContent = m.what;
+            top.appendChild(dot);
+            top.appendChild(who);
+            top.appendChild(when);
+            box.appendChild(top);
+            box.appendChild(what);
+
+            if (m.text) {
+
+                const said = document.createElement("div");
+
+                said.className = "nfSaid";
+                said.textContent = m.text;
+                box.appendChild(said);
+            }
+
+            box.addEventListener("click", function () {
+
+                m.read = true;
+
+                if (m.song) {
+                    close();
+                } else {
+                    paint();
+                }
+
+                crAsk({ op: "msgOpen", id: m.id }).then(function (r) {
+
+                    if (r && r.ok && r.comments) {
+                        openComments(r.comments);
+                    }
+                });
+            });
+
+            return box;
+        }
+
+        function paint() {
+
+            listBox.textContent = "";
+
+            for (const m of items) {
+                listBox.appendChild(row(m));
+            }
+
+            if (!items.length) {
+
+                note.textContent = busy ? "Reading Mureka's notifications..." : "No notifications";
+                listBox.appendChild(note);
+            }
+
+            all.style.display = items.some(function (m) {
+                return !m.read || m.unreadThere;
+            }) ? "" : "none";
+            more.style.display = last ? "" : "none";
+        }
+
+        function load(first) {
+
+            if (busy) {
+                return;
+            }
+
+            busy = true;
+            more.disabled = true;
+            paint();
+            crAsk({ op: "msgList", after: first ? "" : last }).then(function (r) {
+
+                busy = false;
+                more.disabled = false;
+
+                if (!r || !r.ok) {
+
+                    note.textContent = "Could not read the notifications" + (r && r.why ? ": " + r.why : "");
+                    listBox.textContent = "";
+                    listBox.appendChild(note);
+                    return;
+                }
+
+                const list = Array.isArray(r.list) ? r.list : [];
+
+                items = first ? list : items.concat(list);
+                last = String(r.last || "");
+                paint();
+            });
+        }
+
+        load(true);
+    }
+
     function openComments(m) {
 
         const back = document.createElement("div");
@@ -109587,6 +110436,14 @@
             song.appendChild(icon("chevronRight"));
             box.appendChild(song);
         }
+
+        group("Mureka");
+
+        box.appendChild(menuItem("bell", "Notifications" + (Number(s.msgUnread) > 0 ? " (" + s.msgUnread + " new)" : ""), function () {
+
+            close();
+            openNotifications();
+        }));
 
         group("Library");
 
