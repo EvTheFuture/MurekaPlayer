@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.255";
+    const VERSION = "2.0.1.256";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -69651,11 +69651,20 @@
             return createEasy(d);
         }
 
+        // The rows for the new songs show at the press, in their set, as
+        // on Mureka's own page, also while the lyrics are checked first
+        const body = createBody(d);
+        const into = createSetNow(d, body.title || "");
+        const sending = addSending(body.title || "", into.setId);
+
         if (d.kind === "song" && asIs !== true) {
 
             try {
 
                 if (await createCheckLyrics(d.lyrics.trim()) === 3) {
+
+                    dropSending(sending);
+                    createSetUndo(into);
                     return { ok: false, ask: "polish", text: "Mureka would refine these lyrics first" };
                 }
             } catch (e) {
@@ -69663,7 +69672,39 @@
             }
         }
 
-        const body = createBody(d);
+        const set = d.setOn && d.setId && d.setId !== "new" ? songSets.get(d.setId) : null;
+
+        // Sent in the background, as Mureka's own page does: the form is
+        // free at once and the rows stand for the songs. Mureka may hold its
+        // answer a minute; what comes of it is in the debug log, and only
+        // songs that will not come are told
+        createSend(d, body, into, sending).then(function (r) {
+
+            setCreateNote(r.text);
+            publishHostSoon();
+        }, function (e) {
+
+            const text = "Making the songs" + (body.title ? " of \"" + body.title + "\"" : "") + " did not work, "
+                + (e && e.message ? e.message : "no connection");
+
+            dbgLog("Create", "Sending to Mureka failed: " + errText(e));
+            setCreateNote(text, true);
+            showToast(text, false);
+            publishHostSoon();
+        });
+
+        return {
+            ok: true,
+            text: "Sent to Mureka: two songs" + (body.title ? " of \"" + body.title + "\"" : "")
+                + (d.playMode === "now" ? ", played as soon as they are ready" : d.playMode === "after" ? ", played next" : "")
+                + (d.setOn && d.setId === "new" ? ", in a new set" : set ? ", in " + set.name : "")
+                + ". They show in the list while they are made"
+        };
+    }
+
+    // The send to Mureka and what follows it, in the background. Answers
+    // what Mureka said, throws when no songs are coming
+    async function createSend(d, body, into, sending) {
 
         dbgLog("Create", "making " + (d.kind === "instrumental" ? "an instrumental" : "a song")
             + (d.remix ? " remix" : "") + (d.voice === "character" && d.kind === "song" ? " with a character" : "")
@@ -69677,8 +69718,6 @@
         // in the background
         const before = createFeedIds();
         const t0 = Date.now();
-        const into = createSetNow(d, body.title || "");
-        const sending = addSending(body.title || "", into.setId);
         const sent = createPost("/api/pgc/feed/generate", body, CREATE_GENERATE_WAIT_MS);
         const watch = createWatchStarted(before, body.title || "", t0);
         let feedId = "";
@@ -69702,6 +69741,10 @@
 
                 wait = Number(feed.wait_num) || 0;
                 feedId = feed.feed_id !== undefined ? String(feed.feed_id) : "";
+
+                if (feedId) {
+                    createClaimed.add(feedId);
+                }
                 dbgLog("Create", "Mureka answered after " + Math.round((Date.now() - t0) / 100) / 10 + " s" + (wait > 0 ? ", number " + wait + " in its line" : ""));
             } else {
 
@@ -69731,13 +69774,6 @@
 
                 dbgLog("Create", "Mureka's answer was lost after " + Math.round((Date.now() - t0) / 100) / 10 + " s, " + errText(e)
                     + ", the library is looked at for the songs up to " + Math.round(CREATE_LOST_WAIT_MS / 1000) + " s more");
-                createBusy = "No answer from Mureka, looking for the songs in the library";
-
-                if (createUi) {
-                    paintCreate(true);
-                }
-
-                publishHostSoon();
                 watch.longer(CREATE_LOST_WAIT_MS);
                 feedId = await Promise.race([watch.promise, new Promise(function (resolve) {
                     setTimeout(function () {
@@ -69844,6 +69880,10 @@
     // clock and Mureka's apart
     const CREATE_NEW_SLACK_S = 60;
 
+    // The generations sends have taken as theirs, so two sends of the same
+    // title at once each find their own
+    const createClaimed = new Set();
+
     // The first page of the library looked at every few seconds for a
     // generation not there before, of the title asked for when there is
     // one. Its promise gives the generation's id; found keeps it too
@@ -69892,11 +69932,12 @@
 
                         const made = Number(s.generate_at) || 0;
 
-                        if (!id || before.has(id) || (title && String(s.title || "").trim() !== title.trim())
+                        if (!id || before.has(id) || createClaimed.has(id) || (title && String(s.title || "").trim() !== title.trim())
                             || (made > 0 && made < t0 / 1000 - CREATE_NEW_SLACK_S)) {
                             continue;
                         }
 
+                        createClaimed.add(id);
                         out.found = id;
 
                         if (!stopped) {
