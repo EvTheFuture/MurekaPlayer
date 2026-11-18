@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.256";
+    const VERSION = "2.0.1.257";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -4474,6 +4474,10 @@
             ratingUnrated: "hide",
             artStars: true,
             movingCovers: true,
+            iosFreshStart: true,
+            iosRestartBetween: true,
+            iosSettle: true,
+            iosPlayAnew: false,
             smartEnabled: true,
             bpmEnabled: false,
             bpmMin: 0,
@@ -4747,6 +4751,10 @@
                         ? parsed.ratingUnrated : "hide",
                     artStars: parsed.artStars !== false,
                     movingCovers: parsed.movingCovers !== false,
+                    iosFreshStart: parsed.iosFreshStart !== false,
+                    iosRestartBetween: parsed.iosRestartBetween !== false,
+                    iosSettle: parsed.iosSettle !== false,
+                    iosPlayAnew: parsed.iosPlayAnew === true,
                     smartEnabled: parsed.smartEnabled !== false,
                     bpmEnabled: parsed.bpmEnabled === true,
                     bpmMin: typeof parsed.bpmMin === "number" ? parsed.bpmMin : 0,
@@ -18667,6 +18675,9 @@
                 return;
             }
 
+            // A new song heard for the first time, not a reload of one
+            const heardNew = !!trackStartAt;
+
             if (trackStartAt) {
 
                 trackHeardMs = Math.round(performance.now() - trackStartAt);
@@ -18679,6 +18690,10 @@
             userPaused = false;
             switchingTrack = false;
             playFailStreak = 0;
+
+            if (heardNew) {
+                iosPlayAnewSoon();
+            }
 
             // Keep the screen awake if wanted and start the countdown to the
             // blackout
@@ -18749,7 +18764,7 @@
                     audio.currentTime = Math.min(pendingSeek, audio.duration - 0.5);
                 } catch (e) {
                 }
-            } else if (isIosLike() && (iosGain || anyFadeOn()) && (audio.currentTime || 0) < 0.01 && isFinite(audio.duration)
+            } else if (settings.iosFreshStart !== false && isIosLike() && (iosGain || anyFadeOn()) && (audio.currentTime || 0) < 0.01 && isFinite(audio.duration)
                 && audio.duration > 2) {
 
                 // A song from its beginning on an iPhone or iPad, through
@@ -22923,9 +22938,67 @@
     // A load waiting for its moment, the song stopped only for it
     let iosSettleWaiting = false;
 
+    // The test setting Play anew after a song change: a new song through
+    // the sound engine, once it has played a moment, is paused and played
+    // on as the Play / Pause button does, to learn whether that alone, with
+    // no tap, keeps the crackle away. Played on from a timer, Safari may
+    // keep it paused with the screen locked
+    const IOS_ANEW_AFTER_MS = 300;
+    const IOS_ANEW_PAUSE_MS = 700;
+
+    let iosAnewEl = null;
+    let iosAnewSrc = "";
+
+    function iosPlayAnewSoon() {
+
+        if (settings.iosPlayAnew !== true || !iosGain || !iosCtx || !audio || !isIosLike() || !currentSong) {
+            return;
+        }
+
+        // Once for each song loaded
+        if (iosAnewEl === audio && iosAnewSrc === audio.src) {
+            return;
+        }
+
+        iosAnewEl = audio;
+        iosAnewSrc = audio.src;
+
+        const el = audio;
+        const id = currentSong.song_id;
+        const same = function () {
+            return audio === el && currentSong && currentSong.song_id === id;
+        };
+
+        setTimeout(function () {
+
+            if (!same() || audio.paused || audio.seeking) {
+                return;
+            }
+
+            dbgLog("Audio", "played anew after the song change, paused and played on as a press does, as set" + (document.hidden ? ", out of view" : ""));
+            iosGain.gain.cancelScheduledValues(iosCtx.currentTime);
+            iosGain.gain.value = 0;
+            userPaused = true;
+            audio.pause();
+
+            setTimeout(function () {
+
+                if (!same() || !audio.paused) {
+                    return;
+                }
+
+                startAudioPlayback();
+            }, IOS_ANEW_PAUSE_MS);
+        }, IOS_ANEW_AFTER_MS);
+    }
+
+    function iosSettleMs() {
+        return settings.iosSettle === false ? 0 : IOS_SETTLE_MS;
+    }
+
     function iosSettleThen(then, why, back) {
 
-        if (!iosGain || !iosCtx || !audio || !isIosLike()) {
+        if (!iosGain || !iosCtx || !audio || !isIosLike() || settings.iosSettle === false) {
 
             then();
             return;
@@ -23021,6 +23094,23 @@
             return;
         }
 
+        // Left out by the test setting, the next song after the moment of
+        // silence alone
+        if (settings.iosRestartBetween === false) {
+
+            const el = audio;
+            const src = audio.src;
+
+            dbgLog("Audio", "the sound engine not restarted between two songs, as set");
+            setTimeout(function () {
+
+                if (audio === el && audio.src === src && audio.ended) {
+                    then();
+                }
+            }, iosSettleMs());
+            return;
+        }
+
         const el = audio;
         const src = audio.src;
         const t0 = performance.now();
@@ -23052,7 +23142,7 @@
                 then();
             };
 
-            setTimeout(go, Math.max(0, IOS_SETTLE_MS - (performance.now() - t0)));
+            setTimeout(go, Math.max(0, iosSettleMs() - (performance.now() - t0)));
         };
 
         dbgLog("Audio", "the sound engine stops and starts again between two songs, " + iosCtx.sampleRate + " Hz");
@@ -57628,6 +57718,29 @@
                 });
 
             devPage.appendChild(withHint(groupRow, !isApkHost() && group.plainHint ? group.plainHint : group.hint));
+        }
+
+        // Switches to find what makes the sound crackle on an iPhone
+        if (isIosLike()) {
+
+            const iosRow = function (key, label, hint) {
+
+                devPage.appendChild(withHint(makeBoolRow(label, function () {
+                    return key === "iosPlayAnew" ? settings[key] === true : settings[key] !== false;
+                }, function (v) {
+
+                    settings[key] = v;
+                    saveSettings();
+                    dbgLog("Audio", label + " " + (v ? "on" : "off"));
+                }), hint));
+            };
+
+            devPage.appendChild(makeLabel("iPhone sound tests"));
+            devPage.appendChild(makeHint("To find what makes the sound crackle after a song change, until a pause and play. Each is in the debug log as it is switched."));
+            iosRow("iosFreshStart", "Start songs 50 ms in", "A song from its beginning starts 50 ms in, which keeps the waveform in step. Off, from its very beginning.");
+            iosRow("iosRestartBetween", "Restart the sound engine between songs", "Stopped and started again as a song ends, before the next one.");
+            iosRow("iosSettle", "A moment of silence before a load", "0.4 s with the song stopped before the next song or a move loads it.");
+            iosRow("iosPlayAnew", "Play anew after a song change", "A new song is paused and played on once it has played 0.3 s, as Play / Pause does, a second of silence at its start. With the screen locked Safari may keep it paused.");
         }
 
         devPage.appendChild(makeLabel("Other tools"));
