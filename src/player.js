@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.271";
+    const VERSION = "2.0.1.272";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -69385,6 +69385,12 @@
             setOn: x.setOn === true || (x.setOn === undefined && !!x.setId),
             setId: createText(x.setId, 40),
             setName: createText(x.setName, 80),
+
+            // The set the last songs went into, and its name then: the set
+            // follows the name while it was chosen this way, not by hand
+            setAuto: x.setAuto === true,
+            setFrom: createText(x.setFrom, 40),
+            setFromName: createText(x.setFromName, 80),
             model: CREATE_MODELS.some(function (m) {
                 return m.value === x.model;
             }) ? x.model : CREATE_MODEL
@@ -69430,11 +69436,17 @@
                 dbgLog("Create", "the form could not be kept, " + errText(e));
             }
         }, 400);
+        createSetFollowSoon();
         publishHostSoon();
     }
 
     // A change to the form from anywhere, the phone's page drawn again
     function changeCreateDraft(changes) {
+
+        // A set chosen by hand stays as chosen
+        if (changes && changes.setId !== undefined && changes.setAuto === undefined) {
+            changes = Object.assign({}, changes, { setAuto: false });
+        }
 
         createDraft = createCleanDraft(Object.assign({}, loadCreateDraft(), changes || {}));
         saveCreateDraft();
@@ -70434,7 +70446,7 @@
             }
         }
 
-        const set = d.setOn && d.setId && d.setId !== "new" ? songSets.get(d.setId) : null;
+        const set = into.setId ? songSets.get(into.setId) : null;
 
         // Sent in the background, as Mureka's own page does: the form is
         // free at once and the rows stand for the songs. Mureka may hold its
@@ -70461,7 +70473,7 @@
         return {
             ok: true,
             text: "Sent to Mureka: two songs" + (body.title ? " of \"" + body.title + "\"" : "")
-                + (d.setOn && d.setId === "new" ? ", in a new set" : set ? ", in " + set.name : "")
+                + (into.made ? ", in a new set" : set ? ", in " + set.name : "")
                 + ". They show in the list while they are made" + createPlayWords(d.playMode, " and ")
         };
     }
@@ -70578,7 +70590,7 @@
             watch.stop();
         }
 
-        const set = d.setOn && d.setId && d.setId !== "new" ? songSets.get(d.setId) : null;
+        const set = into.setId ? songSets.get(into.setId) : null;
 
         // The rows wait for the songs of this generation, or go now when
         // Mureka named none
@@ -70611,7 +70623,7 @@
             feedId: feedId,
             text: (early ? "Mureka has started making two songs" : "Making two songs") + (body.title ? " of \"" + body.title + "\"" : "")
                 + (wait > 0 ? ", number " + wait + " in Mureka's line" : "")
-                + (d.setOn && d.setId === "new" ? ", in a new set" : set ? ", in " + set.name : "")
+                + (into.made ? ", in a new set" : set ? ", in " + set.name : "")
                 + createPlayWords(d.playMode, ". They ")
         };
     }
@@ -71197,10 +71209,17 @@
 
     function createRemember(feedId, d) {
 
-        const setId = d.setOn && (d.setId === "new" || songSets.has(d.setId)) ? d.setId : "";
+        let setId = d.setOn && (d.setId === "new" || songSets.has(d.setId)) ? d.setId : "";
 
         if (!feedId || (!d.playMode && !setId)) {
             return;
+        }
+
+        // A set of that name already there takes the songs
+        if (setId === "new" && setNamed(d.setName || d.title)) {
+
+            setId = setNamed(d.setName || d.title);
+            createSetFollowFrom(setId, (d.setName || d.title).trim());
         }
 
         createWishes.push({ feedId: feedId, play: d.playMode, setId: setId, title: (d.setName || d.title).trim(), seen: [], newSet: "",
@@ -71223,6 +71242,18 @@
         }
 
         const name = (d.setName || d.title || title || "").trim();
+        const same = setNamed(name);
+
+        // A set of that name already there takes the songs, never a second
+        // set of the same name
+        if (same) {
+
+            dbgLog("Create", "a new set was asked for, but the set " + JSON.stringify(name) + " (" + same + ") is there already and takes the songs");
+            createSetFollowFrom(same, (d.setName || d.title || "").trim());
+
+            return { setId: same, wish: Object.assign({}, d, { setId: same }), made: "" };
+        }
+
         const id = newSetId();
         const now = Date.now();
 
@@ -71230,8 +71261,91 @@
         saveSets();
         dbgLog("Create", "the new set " + JSON.stringify(name || "New song") + " (" + id + ") made before the songs are sent"
             + (name ? "" : ", named after the first song once it is listed"));
+        createSetFollowFrom(id, (d.setName || d.title || "").trim());
 
         return { setId: id, wish: Object.assign({}, d, { setId: id, nameFromSong: !name }), made: id };
+    }
+
+    // The set of a name, the one used last when there are more, empty for
+    // none
+    function setNamed(name) {
+
+        const want = String(name || "").trim().toLowerCase();
+
+        if (!want) {
+            return "";
+        }
+
+        const hit = setsByUse().find(function (e) {
+            return String(e.set.name || "").trim().toLowerCase() === want;
+        });
+
+        return hit ? hit.set.id : "";
+    }
+
+    // The form's set from now on the one the songs went into, while the
+    // name stays the same. Asked for again, more songs go into it rather
+    // than into another new set of the same name
+    let createFollowName = null;
+    let createFollowTimer = 0;
+
+    function createSetFollowFrom(id, name) {
+
+        const d = loadCreateDraft();
+
+        if (!d.setOn || (d.setId !== "new" && d.setId !== id)) {
+            return;
+        }
+
+        createFollowName = name;
+        changeCreateDraft({ setId: id, setAuto: true, setFrom: id, setFromName: name });
+        dbgLog("Create", "the form's set is now " + createSetText(loadCreateDraft()) + ", while the name stays " + JSON.stringify(name));
+    }
+
+    // A moment after the name changed: back to the set it came from when
+    // the name is that again, else the set the form looks most like, else
+    // a new one
+    function createSetFollowSoon() {
+
+        const d = createDraft;
+
+        if (!d || !d.setOn || !d.setAuto || !d.setFrom) {
+            return;
+        }
+
+        clearTimeout(createFollowTimer);
+        createFollowTimer = setTimeout(createSetFollow, 1200);
+    }
+
+    function createSetFollow() {
+
+        const d = loadCreateDraft();
+
+        if (!d.setOn || !d.setAuto || !d.setFrom) {
+            return;
+        }
+
+        const name = (d.setName || d.title).trim();
+
+        if (name === createFollowName) {
+            return;
+        }
+
+        createFollowName = name;
+
+        let want = "";
+
+        if (name.toLowerCase() === d.setFromName.trim().toLowerCase() && songSets.has(d.setFrom)) {
+            want = d.setFrom;
+        } else {
+            want = setNamed(name) || createSuggestSet() || "new";
+        }
+
+        if (want !== d.setId) {
+
+            changeCreateDraft({ setId: want, setAuto: true });
+            dbgLog("Create", "the name is now " + JSON.stringify(name) + ", the songs go " + createSetText(loadCreateDraft()));
+        }
     }
 
     // A set made for a send that came to nothing goes again, if still empty
@@ -71252,6 +71366,11 @@
         openedSets.delete(into.made);
         saveSets();
         dbgLog("Create", "the new set " + into.made + " let go, the songs were not sent");
+
+        // The form asks for a new set again
+        if (loadCreateDraft().setId === into.made) {
+            changeCreateDraft({ setId: "new", setAuto: false, setFrom: "", setFromName: "" });
+        }
     }
 
     // The new songs found among those of a page, played and put in a set as
@@ -71297,6 +71416,7 @@
                     }
 
                     w.newSet = set.id;
+                    createSetFollowFrom(set.id, w.title);
                 } else if (w.setId && songSets.has(w.setId)) {
 
                     putInSet(song, w.setId, "hand");
@@ -71394,6 +71514,12 @@
 
         const d = loadCreateDraft();
         const key = [d.title, d.style, d.lyrics.length, songSets.size, songSetOf.size].join("|");
+        const named = setNamed(d.title);
+
+        // A set named as the title is the one
+        if (named) {
+            return named;
+        }
 
         if (createSuggestMemo.key === key) {
             return createSuggestMemo.id;
@@ -73070,9 +73196,13 @@
 
             const suggested = suggest ? songSets.get(suggest) : null;
 
-            ui.setHint.textContent = suggested && suggested.id !== chosen ? "The songs look most like " + suggested.name
+            const following = d.setAuto && d.setFrom && chosen === d.setFrom;
+
+            // The set the last songs went into, kept while the name is
+            ui.setHint.textContent = following ? "Where the last songs went, kept while the name stays the same"
+                : suggested && suggested.id !== chosen ? "The songs look most like " + suggested.name
                 : suggested ? "The set the songs look most like" : "";
-            ui.setHint.style.display = suggested ? "" : "none";
+            ui.setHint.style.display = following || suggested ? "" : "none";
             ui.setName.style.display = chosen === "new" ? "" : "none";
             put(ui.setName, d.setName);
         }
@@ -110913,9 +111043,13 @@
                     return y.id === ui.suggest;
                 });
 
-                ui.setHint.textContent = suggested && suggested.id !== chosen ? "The songs look most like " + suggested.name
+                const following = fresh.setAuto && fresh.setFrom && chosen === fresh.setFrom;
+
+                // The set the last songs went into, kept while the name is
+                ui.setHint.textContent = following ? "Where the last songs went, kept while the name stays the same"
+                    : suggested && suggested.id !== chosen ? "The songs look most like " + suggested.name
                     : suggested ? "The set the songs look most like" : "";
-                ui.setHint.style.display = suggested ? "" : "none";
+                ui.setHint.style.display = following || suggested ? "" : "none";
                 ui.setName.style.display = chosen === "new" ? "" : "none";
 
                 if (document.activeElement !== ui.setName && crPending.setName === undefined) {

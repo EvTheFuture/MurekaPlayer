@@ -31576,9 +31576,13 @@
                     return y.id === ui.suggest;
                 });
 
-                ui.setHint.textContent = suggested && suggested.id !== chosen ? "The songs look most like " + suggested.name
+                const following = fresh.setAuto && fresh.setFrom && chosen === fresh.setFrom;
+
+                // The set the last songs went into, kept while the name is
+                ui.setHint.textContent = following ? "Where the last songs went, kept while the name stays the same"
+                    : suggested && suggested.id !== chosen ? "The songs look most like " + suggested.name
                     : suggested ? "The set the songs look most like" : "";
-                ui.setHint.style.display = suggested ? "" : "none";
+                ui.setHint.style.display = following || suggested ? "" : "none";
                 ui.setName.style.display = chosen === "new" ? "" : "none";
 
                 if (document.activeElement !== ui.setName && crPending.setName === undefined) {
