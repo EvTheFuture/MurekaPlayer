@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.266";
+    const VERSION = "2.0.1.267";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -29308,7 +29308,10 @@
         dbgLog("Key", (isField(ev.target) && ev.key && ev.key.length === 1
             ? "(a typed character)" : JSON.stringify(ev.key)) + ": " + why);
 
-        if (isDebug()) {
+        // Typing in a field is no key passed over, and the letters typed
+        // are no one's business on the status line, where the last one
+        // stayed after the field was gone
+        if (isDebug() && !isField(ev.target)) {
             setStatus("Key " + JSON.stringify(ev.key) + ": " + why);
         }
     }
