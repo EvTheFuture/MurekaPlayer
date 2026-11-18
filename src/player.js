@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.243";
+    const VERSION = "2.0.1.244";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -15101,7 +15101,8 @@
 
     function msgKind(code) {
 
-        return MSG_KINDS[String(code)] || {
+        // A mention comes as 2003 as well as 2004, the same to show
+        return MSG_KINDS[String(code) === "2003" ? "2004" : String(code)] || {
             name: "Notification",
             color: "#9aa0a6",
             shapes: [
@@ -24417,6 +24418,22 @@
 
         const reads = new Map();
 
+        // Where Mureka's own page goes, its address as it moves from page
+        // to page without loading, to learn the addresses of its pages, a
+        // video's among them
+        let pageAt = location.pathname + location.search;
+
+        setInterval(function () {
+
+            const now = location.pathname + location.search;
+
+            if (now !== pageAt) {
+
+                pageAt = now;
+                dbgLog("Mureka", "Page now at " + redact(now).slice(0, 300));
+            }
+        }, 1000);
+
         // Addresses the watched fetch and XMLHttpRequest saw lately, so the
         // browser's own list of what was loaded names only the others
         const hooked = new Map();
@@ -24544,7 +24561,7 @@
         // The reads whose answers are logged: the trim screen's two, a
         // playlist with its songs, and the storage pass a picture upload
         // asks for, of which only the harmless parts are kept
-        const READ_ANSWERS = ["/api/pgc/song/check", "/api/pgc/song/info", "/api/pgc/playlist/detail", "/api/misc/cos-token"];
+        const READ_ANSWERS = ["/api/pgc/song/check", "/api/pgc/song/info", "/api/pgc/playlist/detail", "/api/misc/cos-token", "/api/pgc/video/detail"];
 
         const answerFor = function (method, url) {
 
@@ -24612,7 +24629,7 @@
 
             const pass = /cos-token/.test(what);
             const msg = /\/api\/msg\//.test(what);
-            const long = /playlist\/detail|comment|mention/.test(what) || MAKING.test(what) || (msg && !msgWhole);
+            const long = /playlist\/detail|video\/detail|comment|mention/.test(what) || MAKING.test(what) || (msg && !msgWhole);
 
             if (msg) {
                 msgWhole = true;
@@ -72423,9 +72440,10 @@
             return "followed you";
         }
 
-        // Mentioned in a comment, on a song or on a video. Which it is shows
-        // by the name Mureka fills in, the song's or the video's
-        if (code === "2004") {
+        // Mentioned in a comment, on a song or on a video, 2003 and 2004 seen
+        // alike. Which it is on shows by the name Mureka fills in, the
+        // song's or the video's
+        if (code === "2003" || code === "2004") {
             return "mentioned you in a comment" + (title ? " on " + (item.__video ? "the video " : "") + q : "");
         }
 
@@ -72462,7 +72480,7 @@
         const objectUrl = String(item.object_url || "");
         const video = named.video_name !== undefined || /\.(mp4|webm|mov)(\?|$)/i.test(objectUrl);
         const title = String(item.object_name || named.song_name || named.video_name || trans[0] || "");
-        const onComment = code === "1002" || code === "2004";
+        const onComment = code === "1002" || code === "2003" || code === "2004";
         const songId = video ? "" : String((onComment ? item.extra_object_id : item.object_id) || "");
         const song = hostFindSong(songId);
         const at = msgTime(item);
@@ -72484,6 +72502,7 @@
             what: msgWhat(code, Object.assign({ __video: video }, item), trans, title),
             text: named.comment_content !== undefined ? named.comment_content : code === "1002" ? trans[2] || "" : "",
             video: video && objectUrl ? (/^https?:\/\//i.test(objectUrl) ? objectUrl : AUDIO_BASE + objectUrl) : "",
+            on: onComment && !video ? String(item.extra_object_id || "") : "",
             song: song ? songId : "",
             title: title,
             cover: cover,
@@ -72641,18 +72660,34 @@
 
         const song = m.song ? hostFindSong(m.song) : null;
 
-        // On a video, or a song not in this library: the comment is in the
-        // notification, and a video plays where it is kept
+        // On a video, the comment is in the notification and the video plays
+        // where it is kept. On someone else's song, its comments open all
+        // the same, read by the song's id
         if (!song) {
 
             if (m.video && showComments) {
                 window.open(m.video, "_blank", "noopener");
             }
 
-            return m.video ? { url: m.video } : null;
+            if (m.video) {
+                return { url: m.video };
+            }
+
+            if (m.on) {
+
+                const theirs = { song_id: m.on, title: m.title || "", cover: m.cover || "" };
+
+                if (showComments) {
+                    openComments(theirs);
+                }
+
+                return { id: m.on, title: theirs.title, cover: m.cover || "" };
+            }
+
+            return null;
         }
 
-        if (m.code === "1002" || m.code === "2004") {
+        if (m.code === "1002" || m.code === "2003" || m.code === "2004") {
 
             if (showComments) {
                 openComments(song);
@@ -73644,8 +73679,8 @@
                 box.appendChild(pic);
             }
 
-            box.title = m.song ? (m.code === "1002" || m.code === "2004" ? "Open the comments" : "Play the song")
-                : m.video ? "Watch the video" : "Mark read";
+            box.title = m.song ? (/^(1002|2003|2004)$/.test(m.code) ? "Open the comments" : "Play the song")
+                : m.video ? "Watch the video" : m.on ? "Open the comments" : "Mark read";
             box.addEventListener("click", function () {
                 msgOpen(m.id, true);
             });
@@ -88820,7 +88855,8 @@
 
     function msgKind(code) {
 
-        return MSG_KINDS[String(code)] || {
+        // A mention comes as 2003 as well as 2004, the same to show
+        return MSG_KINDS[String(code) === "2003" ? "2004" : String(code)] || {
             name: "Notification",
             color: "#9aa0a6",
             shapes: [
@@ -110896,8 +110932,8 @@
             box.className = "nfItem" + (m.read ? "" : " unread");
             box.setAttribute("role", "button");
             box.tabIndex = 0;
-            box.title = m.song ? (m.code === "1002" || m.code === "2004" ? "Open the comments" : "Play the song")
-                : m.video ? "Watch the video" : "Mark read";
+            box.title = m.song ? (/^(1002|2003|2004)$/.test(m.code) ? "Open the comments" : "Play the song")
+                : m.video ? "Watch the video" : m.on ? "Open the comments" : "Mark read";
             disc.className = "nfDisc";
             disc.title = kind.name;
             disc.style.color = kind.color;

@@ -176,7 +176,8 @@
 
     function msgKind(code) {
 
-        return MSG_KINDS[String(code)] || {
+        // A mention comes as 2003 as well as 2004, the same to show
+        return MSG_KINDS[String(code) === "2003" ? "2004" : String(code)] || {
             name: "Notification",
             color: "#9aa0a6",
             shapes: [
