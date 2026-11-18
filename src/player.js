@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.259";
+    const VERSION = "2.0.1.260";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -2031,6 +2031,10 @@
     // song, and the check of it while a song plays
     let iosMeter = null;
     let iosMeterBuf = null;
+
+    // The crackle meter's own long look at the sound, two thirds of a second
+    let crackleNode = null;
+    let crackleBuf = null;
     let iosWatchTimer = 0;
     let iosWatchLast = null;
     let iosStillTicks = 0;
@@ -22319,7 +22323,21 @@
                 iosMeter.fftSize = 2048;
                 iosMeterBuf = new Float32Array(iosMeter.fftSize);
                 iosGain.connect(iosMeter);
-                iosMeter.connect(iosCtx.destination);
+
+                // The crackle meter after it, also passing the sound on
+                try {
+
+                    crackleNode = iosCtx.createAnalyser();
+                    crackleNode.fftSize = 32768;
+                    crackleBuf = new Float32Array(crackleNode.fftSize);
+                    iosMeter.connect(crackleNode);
+                    crackleNode.connect(iosCtx.destination);
+                } catch (e) {
+
+                    crackleNode = null;
+                    crackleBuf = null;
+                    iosMeter.connect(iosCtx.destination);
+                }
             } catch (e) {
 
                 iosMeter = null;
@@ -22887,26 +22905,29 @@
         iosSilentTicks = 0;
     }
 
-    // The crackle meter: once a second a moment of what reaches the
-    // speaker is looked at for sudden jumps between two samples and for
-    // holes of silence inside sound, the marks of a crackle. Told every
-    // 15 s in the debug log, to learn whether a crackle can be told there
+    // The crackle meter: once a second the last two thirds of a second of
+    // what reaches the speaker is looked at for holes, sound dropping
+    // straight to nothing for a few samples and back, which is how sound
+    // missing its turn shows, and for sharp jumps between two samples. A
+    // song's own quiet fades away, a hole is sudden. Told every 15 s in the
+    // debug log, to learn whether a crackle can be told there
     const CRACKLE_TELL_LOOKS = 15;
-    let crackle = { looks: 0, clicks: 0, holes: 0, hit: 0, level: 0 };
+    const CRACKLE_HOLE_SAMPLES = 8;
+    let crackle = { looks: 0, holes: 0, holeLooks: 0, jumps: 0, level: 0 };
 
     function crackleLook() {
 
-        if (!iosMeter || !iosMeterBuf || !loggingOn()) {
+        if (!crackleNode || !crackleBuf || !loggingOn()) {
             return;
         }
 
         try {
-            iosMeter.getFloatTimeDomainData(iosMeterBuf);
+            crackleNode.getFloatTimeDomainData(crackleBuf);
         } catch (e) {
             return;
         }
 
-        const b = iosMeterBuf;
+        const b = crackleBuf;
         let sum = 0;
         let steps = 0;
 
@@ -22924,43 +22945,51 @@
             return;
         }
 
-        const jump = Math.max(0.08, meanStep * 8);
-        let clicks = 0;
+        const jump = Math.max(0.3, meanStep * 25);
         let holes = 0;
+        let jumps = 0;
         let run = 0;
+        let before = 0;
 
         for (let i = 1; i < b.length; i++) {
 
             if (Math.abs(b[i] - b[i - 1]) > jump) {
-                clicks += 1;
+                jumps += 1;
             }
 
-            if (Math.abs(b[i]) < 0.00001) {
+            if (Math.abs(b[i]) < 0.000001) {
+
+                // A run starting right after sound that was not near nothing
+                if (run === 0) {
+                    before = Math.abs(b[i - 1]);
+                }
 
                 run += 1;
+            } else {
 
-                if (run === 16) {
+                if (run >= CRACKLE_HOLE_SAMPLES && run < 2000 && before > 0.01 && Math.abs(b[i]) > 0.01) {
                     holes += 1;
                 }
-            } else {
+
                 run = 0;
             }
         }
 
         crackle.looks += 1;
-        crackle.clicks += clicks;
         crackle.holes += holes;
+        crackle.jumps += jumps;
         crackle.level += rms;
 
-        if (clicks > 0 || holes > 0) {
-            crackle.hit += 1;
+        if (holes > 0) {
+            crackle.holeLooks += 1;
         }
 
         if (crackle.looks >= CRACKLE_TELL_LOOKS) {
 
-            dbgLog("Audio", "crackle meter at " + dbgNum(audio.currentTime) + ": " + crackle.hit + " of " + crackle.looks + " looks marked, "
-                + crackle.clicks + " jumps, " + crackle.holes + " holes, level " + Math.round(crackle.level / crackle.looks * 100) / 100);
-            crackle = { looks: 0, clicks: 0, holes: 0, hit: 0, level: 0 };
+            dbgLog("Audio", "crackle meter at " + dbgNum(audio.currentTime) + ": " + crackle.holes + " holes in "
+                + crackle.holeLooks + " of " + crackle.looks + " looks, " + crackle.jumps + " sharp jumps, level "
+                + Math.round(crackle.level / crackle.looks * 100) / 100);
+            crackle = { looks: 0, holes: 0, holeLooks: 0, jumps: 0, level: 0 };
         }
     }
 
@@ -23362,6 +23391,8 @@
         iosCtx = null;
         iosGain = null;
         iosMeter = null;
+        crackleNode = null;
+        crackleBuf = null;
         audio = null;
 
         if (old) {
