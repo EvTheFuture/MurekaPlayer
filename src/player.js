@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.248";
+    const VERSION = "2.0.1.249";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -3362,6 +3362,9 @@
     let seekBar = null;
     let curTimeEl = null;
     let remTimeEl = null;
+    let seekRowEl = null;
+    let seekLeftEl = null;
+    let seekRightEl = null;
 
     // The pie before the time, how much of the playing song is here
     let songDotEl = null;
@@ -4488,6 +4491,7 @@
             prevRestartOn: true,
             prevRestart: 3,
             waveSeek: true,
+            waveTimesOver: true,
             waveSource: "mureka",
             bpmSource: "mureka-song",
             onlineBadge: "fade",
@@ -4778,6 +4782,7 @@
                         && parsed.prevRestart >= 1 && parsed.prevRestart <= 300)
                         ? parsed.prevRestart : 3,
                     waveSeek: parsed.waveSeek !== false,
+                    waveTimesOver: parsed.waveTimesOver !== false,
                     waveSource: parsed.waveSource === "song" ? "song" : "mureka",
                     bpmSource: (parsed.bpmSource === "song-mureka" || parsed.bpmSource === "mureka")
                         ? parsed.bpmSource : "mureka-song",
@@ -36523,6 +36528,44 @@
         });
     }
 
+    // The times beside the waveform, or over its ends with the waveform
+    // across the whole width. Over it, the ends behind the times darken a
+    // little, fading out toward the middle, the times let a press through
+    // to the waveform, and only the stats button takes its own
+    function layoutSeekRow() {
+
+        if (!seekRowEl || !seekLeftEl || !seekRightEl) {
+            return;
+        }
+
+        const over = settings.waveTimesOver !== false && waveCanvas && waveCanvas.style.display !== "none";
+        const box = "display:flex;align-items:center;gap:8px;flex:0 0 auto";
+
+        seekRowEl.style.position = over ? "relative" : "";
+        seekRowEl.style.gap = over ? "0" : "8px";
+
+        if (!over) {
+
+            seekLeftEl.style.cssText = box;
+            seekRightEl.style.cssText = box;
+            curTimeEl.style.textShadow = "";
+            remTimeEl.style.textShadow = "";
+            return;
+        }
+
+        const side = "position:absolute;top:0;bottom:0;z-index:1;pointer-events:none;" + box + ";";
+        const shade = "rgba(0,0,0,0.6)";
+
+        seekLeftEl.style.cssText = side + "left:0;padding:0 22px 0 2px;background:linear-gradient(to right," + shade + " 40%,rgba(0,0,0,0))";
+        seekRightEl.style.cssText = side + "right:0;padding:0 2px 0 22px;background:linear-gradient(to left," + shade + " 40%,rgba(0,0,0,0))";
+        curTimeEl.style.textShadow = "0 0 3px #000,0 0 1px #000";
+        remTimeEl.style.textShadow = "0 0 3px #000,0 0 1px #000";
+
+        // The stats button and the song's dot still answer a press
+        statsBtnEl.style.pointerEvents = "auto";
+        songDotEl.style.pointerEvents = "auto";
+    }
+
     // Choose between the waveform canvas and the classic slider
     function updateSeekMode() {
 
@@ -36534,6 +36577,7 @@
 
         waveCanvas.style.display = useWave ? "block" : "none";
         seekBar.style.display = useWave ? "none" : "";
+        layoutSeekRow();
 
         if (useWave) {
             drawWave();
@@ -38767,6 +38811,7 @@
             waveWorking: ownWaveWorking(),
             murekaWaveWaiting: murekaWaveWaiting(),
             statsButton: settings.statsButton === true,
+            waveTimesOver: settings.waveTimesOver !== false,
             stats: Date.now() < statsWebUntil ? statsRows() : null,
             exportsKey: hostExportsKey(),
             trimJob: hostTrimJob,
@@ -47625,11 +47670,19 @@
             }
         }
 
-        seekRow.appendChild(songDotEl);
-        seekRow.appendChild(curTimeEl);
+        // The times at either end, each in a box of its own. Beside the
+        // waveform or, set so, over its ends, the waveform then across the
+        // whole width with the ends darkened behind the times
+        seekLeftEl = document.createElement("span");
+        seekRightEl = document.createElement("span");
+        seekLeftEl.appendChild(songDotEl);
+        seekLeftEl.appendChild(curTimeEl);
+        seekRightEl.appendChild(remTimeEl);
+        seekRowEl = seekRow;
+        seekRow.appendChild(seekLeftEl);
         seekRow.appendChild(seekBar);
         seekRow.appendChild(waveCanvas);
-        seekRow.appendChild(remTimeEl);
+        seekRow.appendChild(seekRightEl);
 
         // A small ringed i at the end, when switched on, opens the stats
         statsBtnEl = document.createElement("span");
@@ -47644,7 +47697,8 @@
             ev.stopPropagation();
             openStats();
         });
-        seekRow.appendChild(statsBtnEl);
+        seekRightEl.appendChild(statsBtnEl);
+        layoutSeekRow();
 
         // Transport row, icon buttons for previous, play/pause, stop, next, shuffle, repeat
         const controlRow = document.createElement("div");
@@ -55885,7 +55939,19 @@
         // progress shows on it and in which colors. Without the waveform the
         // rest is hidden, without the progress on it its colors, and with
         // the play head moving along the color past it
+        // The times over the waveform's ends, the waveform the full width
+        const timesOverRow = makeBoolRow("Times over the waveform", function () {
+            return settings.waveTimesOver !== false;
+        }, function (v) {
+
+            settings.waveTimesOver = v;
+            layoutSeekRow();
+            drawWave();
+            publishHostSoon();
+        });
+
         const mobileWave = [
+            withHint(timesOverRow, "The waveform runs the whole width, with the times and the stats button over its ends, which darken a little behind them, here and in the web view. A press on a time seeks as on the waveform, the stats button opens the stats. Off, the times stand beside it."),
             withHint(waveSourceRow, "Mureka's is 2000 values per song, drawn as bars. From the song works it out from the song itself once it is cached, far more detailed, and keeps it, the same colors. Until a song is cached it shows Mureka's. The web view has its own choice."),
             withHint(waveZoomKeepRow, "The waveform opens zoomed in as far as it was last time. Pinch, the mouse wheel over it or a double tap zooms."),
             withHint(wavePlayHeadRow, PLAY_HEAD_MODE_HINT),
@@ -55928,7 +55994,7 @@
 
         mobilePage.appendChild(makeLabel("Waveform"));
         mobilePage.appendChild(withHint(waveRow, "The seek bar shows the song's waveform instead of a plain line."));
-        mobileWave.slice(0, 3).concat(mobileWavePages, mobileWave.slice(3), [mobileWaveLook], mobileWaveProgress, [mobileWaveReset]).forEach(function (el) {
+        mobileWave.slice(0, 4).concat(mobileWavePages, mobileWave.slice(4), [mobileWaveLook], mobileWaveProgress, [mobileWaveReset]).forEach(function (el) {
             mobilePage.appendChild(el);
         });
         paintMobileWave();
@@ -78352,6 +78418,55 @@
         color: var(--muted);
     }
 
+    /* The times at the ends: beside the bar, their boxes left out of the
+       layout, or set so on the phone, over the waveform's ends, the
+       waveform the full width and its ends darkened a little behind them.
+       A press on the times goes through to the waveform, the stats button
+       and the song's dot keep theirs */
+    #seekL,
+    #seekR {
+        display: contents;
+    }
+
+    #seek.timesOver {
+        position: relative;
+    }
+
+    #seek.timesOver #seekL,
+    #seek.timesOver #seekR {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: 2vw;
+        pointer-events: none;
+    }
+
+    #seek.timesOver #seekL {
+        left: 0;
+        padding: 0 2.2em 0 0.2em;
+        background: linear-gradient(to right, rgba(0, 0, 0, 0.6) 40%, rgba(0, 0, 0, 0));
+    }
+
+    #seek.timesOver #seekR {
+        right: 0;
+        padding: 0 0.2em 0 2.2em;
+        background: linear-gradient(to left, rgba(0, 0, 0, 0.6) 40%, rgba(0, 0, 0, 0));
+    }
+
+    #seek.timesOver #cur,
+    #seek.timesOver #left {
+        color: #e8e8ec;
+        text-shadow: 0 0 3px #000, 0 0 1px #000;
+    }
+
+    #seek.timesOver #statsBtn,
+    #seek.timesOver #songDot {
+        pointer-events: auto;
+    }
+
     /* How much of the playing song is here: in this browser when the music
        plays here, on the phone otherwise. A cyan pie that fades in and out
        while it fills, solid once all of it is there, nothing when neither
@@ -85512,11 +85627,9 @@
         </div>
     </div>
     <div id="seek">
-        <span id="songDot" title=""></span>
-        <span id="cur">0:00</span>
+        <span id="seekL"><span id="songDot" title=""></span><span id="cur">0:00</span></span>
         <div id="bar"><div id="track"><div id="fill"></div><div id="knob"></div></div><canvas id="wave"></canvas></div>
-        <span id="left">-0:00</span>
-        <span id="statsBtn" role="button" tabindex="0" title="Stats for nerds" aria-label="Stats for nerds">i</span>
+        <span id="seekR"><span id="left">-0:00</span><span id="statsBtn" role="button" tabindex="0" title="Stats for nerds" aria-label="Stats for nerds">i</span></span>
     </div>
     <div id="controls">
         <button class="ctl" id="shuffle" type="button" data-label="Shuffle" aria-label="Shuffle">
@@ -92434,6 +92547,9 @@
 
             $("wave").style.display = wave ? "block" : "none";
             $("track").style.visibility = wave ? "hidden" : "visible";
+
+            // The times over the waveform's ends, as set on the phone
+            $("seek").classList.toggle("timesOver", !!wave && !!(state && state.waveTimesOver));
             bar.classList.toggle("waveWait", wantWait);
             waveShown = "";
         }

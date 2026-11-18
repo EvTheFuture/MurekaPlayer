@@ -327,6 +327,55 @@
         color: var(--muted);
     }
 
+    /* The times at the ends: beside the bar, their boxes left out of the
+       layout, or set so on the phone, over the waveform's ends, the
+       waveform the full width and its ends darkened a little behind them.
+       A press on the times goes through to the waveform, the stats button
+       and the song's dot keep theirs */
+    #seekL,
+    #seekR {
+        display: contents;
+    }
+
+    #seek.timesOver {
+        position: relative;
+    }
+
+    #seek.timesOver #seekL,
+    #seek.timesOver #seekR {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: 2vw;
+        pointer-events: none;
+    }
+
+    #seek.timesOver #seekL {
+        left: 0;
+        padding: 0 2.2em 0 0.2em;
+        background: linear-gradient(to right, rgba(0, 0, 0, 0.6) 40%, rgba(0, 0, 0, 0));
+    }
+
+    #seek.timesOver #seekR {
+        right: 0;
+        padding: 0 0.2em 0 2.2em;
+        background: linear-gradient(to left, rgba(0, 0, 0, 0.6) 40%, rgba(0, 0, 0, 0));
+    }
+
+    #seek.timesOver #cur,
+    #seek.timesOver #left {
+        color: #e8e8ec;
+        text-shadow: 0 0 3px #000, 0 0 1px #000;
+    }
+
+    #seek.timesOver #statsBtn,
+    #seek.timesOver #songDot {
+        pointer-events: auto;
+    }
+
     /* How much of the playing song is here: in this browser when the music
        plays here, on the phone otherwise. A cyan pie that fades in and out
        while it fills, solid once all of it is there, nothing when neither
@@ -7487,11 +7536,9 @@
         </div>
     </div>
     <div id="seek">
-        <span id="songDot" title=""></span>
-        <span id="cur">0:00</span>
+        <span id="seekL"><span id="songDot" title=""></span><span id="cur">0:00</span></span>
         <div id="bar"><div id="track"><div id="fill"></div><div id="knob"></div></div><canvas id="wave"></canvas></div>
-        <span id="left">-0:00</span>
-        <span id="statsBtn" role="button" tabindex="0" title="Stats for nerds" aria-label="Stats for nerds">i</span>
+        <span id="seekR"><span id="left">-0:00</span><span id="statsBtn" role="button" tabindex="0" title="Stats for nerds" aria-label="Stats for nerds">i</span></span>
     </div>
     <div id="controls">
         <button class="ctl" id="shuffle" type="button" data-label="Shuffle" aria-label="Shuffle">
@@ -14409,6 +14456,9 @@
 
             $("wave").style.display = wave ? "block" : "none";
             $("track").style.visibility = wave ? "hidden" : "visible";
+
+            // The times over the waveform's ends, as set on the phone
+            $("seek").classList.toggle("timesOver", !!wave && !!(state && state.waveTimesOver));
             bar.classList.toggle("waveWait", wantWait);
             waveShown = "";
         }
