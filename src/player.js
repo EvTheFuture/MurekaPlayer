@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.249";
+    const VERSION = "2.0.1.250";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -22201,6 +22201,8 @@
         updateMediaPosition();
     }
 
+    let iosGainWaitLogged = false;
+
     function iosCtxStateChanged() {
 
         dbgLog("Audio", "sound engine " + iosCtx.state);
@@ -22223,6 +22225,22 @@
         if (!audio || !iosCtx || iosCtx.state !== "running" || String(audio.src).indexOf("blob:") !== 0) {
             return false;
         }
+
+        // Not put in while the page is out of view, the screen locked say.
+        // Put in then, the sound crackled from there on, until Safari was
+        // started again. It goes in with a song started in view
+        if (document.hidden) {
+
+            if (!iosGainWaitLogged) {
+
+                iosGainWaitLogged = true;
+                dbgLog("Audio", "the gain for fades waits for the page to be in view, the song plays without it");
+            }
+
+            return false;
+        }
+
+        iosGainWaitLogged = false;
 
         try {
 
@@ -27030,6 +27048,23 @@
         // into it with the old song's delay
         pauseHold = null;
         engineMark = null;
+
+        // Through the sound engine, the element is emptied before every
+        // new song, as playing on after a pause does. That alone ended a
+        // crackle that went on from a song change, which a song tapped,
+        // stopped first and then loaded straight away, did not
+        if (iosGain) {
+
+            dbgLog("Audio", "the song element emptied before the next song, as a pause and play does"
+                + (audio.ended ? ", the last one ended" : "") + (document.hidden ? ", out of view" : ""));
+
+            try {
+                audio.removeAttribute("src");
+                audio.load();
+            } catch (e) {
+                // Loaded anew below all the same
+            }
+        }
 
         audio.src = url;
         updateSeekDisplay();
