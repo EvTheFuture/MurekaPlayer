@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.261";
+    const VERSION = "2.0.1.262";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -4483,6 +4483,7 @@
             iosSettle: true,
             iosPlayAnew: false,
             iosAmbientStart: true,
+            iosRestSec: 1,
             smartEnabled: true,
             bpmEnabled: false,
             bpmMin: 0,
@@ -4761,6 +4762,7 @@
                     iosSettle: parsed.iosSettle !== false,
                     iosPlayAnew: parsed.iosPlayAnew === true,
                     iosAmbientStart: parsed.iosAmbientStart !== false,
+                    iosRestSec: iosRestClean(parsed.iosRestSec),
                     smartEnabled: parsed.smartEnabled !== false,
                     bpmEnabled: parsed.bpmEnabled === true,
                     bpmMin: typeof parsed.bpmMin === "number" ? parsed.bpmMin : 0,
@@ -23211,6 +23213,69 @@
         }, IOS_ANEW_AFTER_MS);
     }
 
+    // The sound engine's rest: stopped for a while and started again. A
+    // crackle that came with a song change, until a pause and play, ended
+    // with the engine stopped for a second while the song went on, where a
+    // stop of a few hundredths, as between two songs, did not. So the
+    // engine rests that long at every song change and move
+    function iosRestClean(v) {
+
+        const n = Number(v);
+
+        return isFinite(n) && n >= 0 ? Math.min(3, Math.round(n * 10) / 10) : 1;
+    }
+
+    function iosRestMs() {
+        return Math.round(iosRestClean(settings.iosRestSec) * 1000);
+    }
+
+    // then once the engine runs again, or after a wait should it not say
+    function iosEngineRest(then, why) {
+
+        const ms = iosRestMs();
+
+        if (!iosCtx || iosCtx.state !== "running" || ms <= 0) {
+
+            then();
+            return;
+        }
+
+        const t0 = performance.now();
+        let done = false;
+        let safety = 0;
+
+        const go = function (late) {
+
+            if (done) {
+                return;
+            }
+
+            done = true;
+            clearTimeout(safety);
+            dbgLog("Audio", "the sound engine " + iosCtx.state + " after its rest, " + Math.round(performance.now() - t0) + " ms"
+                + (late ? ", waited no longer" : ""));
+            then();
+        };
+        const again = function () {
+
+            setTimeout(function () {
+
+                iosCtx.resume().then(function () {
+                    go(false);
+                }, function () {
+                    go(false);
+                });
+            }, Math.max(0, ms - (performance.now() - t0)));
+        };
+
+        dbgLog("Audio", "the sound engine rests " + ms + " ms, " + why + ", " + iosCtx.sampleRate + " Hz");
+        safety = setTimeout(function () {
+            go(true);
+        }, ms + 1500);
+
+        iosCtx.suspend().then(again, again);
+    }
+
     function iosSettleMs() {
         return settings.iosSettle === false ? 0 : IOS_SETTLE_MS;
     }
@@ -23239,9 +23304,7 @@
             audio.pause();
         }
 
-        dbgLog("Audio", "the song stopped and silent " + IOS_SETTLE_MS + " ms before it is loaded again, " + why);
-
-        setTimeout(function () {
+        const after = function () {
 
             if (token !== iosSettleToken) {
                 return;
@@ -23254,7 +23317,18 @@
             }
 
             then();
-        }, IOS_SETTLE_MS);
+        };
+
+        // The engine resting meanwhile, the wait is its rest
+        if (settings.iosRestartBetween !== false && iosCtx.state === "running" && iosRestMs() > 0) {
+
+            dbgLog("Audio", "the song stopped and silent before it is loaded again, " + why);
+            iosEngineRest(after, why);
+            return;
+        }
+
+        dbgLog("Audio", "the song stopped and silent " + IOS_SETTLE_MS + " ms before it is loaded again, " + why);
+        setTimeout(after, IOS_SETTLE_MS);
     }
 
     // The sound back with a short fade once the song loaded again plays,
@@ -23295,17 +23369,9 @@
         el.addEventListener("playing", up);
     }
 
-    // On an iPhone, the song going through the sound engine at times
-    // crackled after the next song started on its own, until a pause and
-    // play, which a song chosen by hand never did: the engine kept running
-    // across the change while the phone set its sound up anew for the next
-    // song. Stopped and started again in the moment between two songs, as
-    // a pause does, needing no tap, the same as when the engine is lost.
-    // The next song comes only once the engine runs again: started while
-    // the engine was still stopping and starting, every song that came on
-    // its own crackled until a pause and play
-    const IOS_RESTART_WAIT_MS = 600;
-
+    // On an iPhone, the song going through the sound engine crackled after
+    // a song change, until a pause and play. The engine rests between two
+    // songs, see iosEngineRest, and the next song comes once it runs again
     function restartIosEngineBetweenSongs(then) {
 
         if (!iosCtx || !iosGain || iosCtx.state !== "running" || !isIosLike()) {
@@ -23332,57 +23398,17 @@
 
         const el = audio;
         const src = audio.src;
-        const t0 = performance.now();
-        let done = false;
-        let waitTimer = 0;
 
-        // Once, after the restart or after the wait, and only while the
-        // song that ended is still the one there, nothing else chosen
-        const next = function (late) {
+        iosEngineRest(function () {
 
-            if (done) {
+            if (audio !== el || audio.src !== src || !audio.ended) {
+
+                dbgLog("Audio", "another song was chosen meanwhile, the one that ended is not followed on");
                 return;
             }
 
-            done = true;
-            clearTimeout(waitTimer);
-            dbgLog("Audio", "the sound engine " + iosCtx.state + " after the restart between two songs, "
-                + Math.round(performance.now() - t0) + " ms" + (late ? ", waited no longer" : "") + ", the next song comes");
-
-            // Altogether as long after the end as a song loaded again waits
-            const go = function () {
-
-                if (audio !== el || audio.src !== src || !audio.ended) {
-
-                    dbgLog("Audio", "another song was chosen meanwhile, the one that ended is not followed on");
-                    return;
-                }
-
-                then();
-            };
-
-            setTimeout(go, Math.max(0, iosSettleMs() - (performance.now() - t0)));
-        };
-
-        dbgLog("Audio", "the sound engine stops and starts again between two songs, " + iosCtx.sampleRate + " Hz");
-
-        const again = function () {
-            return iosCtx.resume();
-        };
-
-        waitTimer = setTimeout(function () {
-            next(true);
-        }, IOS_RESTART_WAIT_MS);
-
-        Promise.resolve().then(function () {
-            return iosCtx.suspend();
-        }).then(again, again).then(function () {
-            next(false);
-        }, function () {
-
-            // The watch on the engine takes over
-            next(false);
-        });
+            then();
+        }, "between two songs");
     }
 
     function iosEngineLost(why) {
@@ -57959,7 +57985,18 @@
             devPage.appendChild(makeLabel("iPhone sound tests"));
             devPage.appendChild(makeHint("To find what makes the sound crackle after a song change, until a pause and play. Each is in the debug log as it is switched."));
             iosRow("iosFreshStart", "Start songs 50 ms in", "A song from its beginning starts 50 ms in, which keeps the waveform in step. Off, from its very beginning.");
-            iosRow("iosRestartBetween", "Restart the sound engine between songs", "Stopped and started again as a song ends, before the next one.");
+            iosRow("iosRestartBetween", "Rest the sound engine at a song change", "The sound engine stopped for a while and started again as a song ends, before a song asked for and before a move in the song, which ended the crackle where a short stop did not.");
+
+            const restRow = makeStepperRow("The sound engine's rest, seconds", function () {
+                return iosRestClean(settings.iosRestSec);
+            }, function (v) {
+
+                settings.iosRestSec = iosRestClean(v);
+                saveSettings();
+                dbgLog("Audio", "the sound engine's rest " + settings.iosRestSec + " s");
+            }, 0, 3, 0.1);
+
+            devPage.appendChild(withHint(restRow, "How long the engine rests. 1 s ended the crackle in a test; shorter is quicker if it still does."));
             iosRow("iosSettle", "A moment of silence before a load", "0.4 s with the song stopped before the next song or a move loads it.");
             iosRow("iosAmbientStart", "Mix with other apps until the first play", "As the player opens, Safari is told the page's sound mixes with other apps, and it becomes music at the first play. Off, it is music from the start, never changed under a running sound engine. Takes effect when the player is opened again.");
             iosRow("iosPlayAnew", "Play anew after a song change", "A new song is paused and played on once it has played 0.3 s, as Play / Pause does, a second of silence at its start. With the screen locked Safari may keep it paused.");
