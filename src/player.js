@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.273";
+    const VERSION = "2.0.1.274";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -83753,14 +83753,29 @@
     #menuItems,
     #actionItems {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 4px 12px;
+    }
+
+    /* The choices never grow wider than their column, a long name wraps
+       inside its choice, so the popup has nothing to scroll sideways */
+    #menuBox {
+        overflow-x: hidden;
+    }
+
+    .menuItem {
+        min-width: 0;
+    }
+
+    .menuItem > span:last-child {
+        min-width: 0;
+        overflow-wrap: anywhere;
     }
 
     @media (max-width: 700px) {
 
         #menuItems {
-            grid-template-columns: 1fr;
+            grid-template-columns: minmax(0, 1fr);
         }
 
         /* One column has no row to finish */
@@ -83782,7 +83797,7 @@
     @media (max-width: 360px) {
 
         #actionItems {
-            grid-template-columns: 1fr;
+            grid-template-columns: minmax(0, 1fr);
         }
     }
 
@@ -84033,8 +84048,10 @@
         min-height: calc(var(--ctl-h) * 1.6);
     }
 
-    .menuItem.tall + .menuItem.tall {
-        margin-top: 10px;
+    /* Room between the rows, the same for both columns so they stay
+       level */
+    #menuItems:has(> .menuItem.tall) {
+        row-gap: 14px;
     }
 
     .menuItem:disabled {
@@ -84050,7 +84067,7 @@
     }
 
     #menuBox.switchBox #menuItems {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
 
     .swPanel {
