@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.253";
+    const VERSION = "2.0.1.254";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -22696,6 +22696,15 @@
 
             fade.safety = setTimeout(back, 5000);
 
+            // Stopped a moment before the new song loads, see iosSettleThen.
+            // The pause is the switch's own, no pause pressed
+            if (iosGain) {
+
+                switchingTrack = true;
+                iosSettleThen(then, "the next song asked for", false);
+                return;
+            }
+
             then();
         }, 40);
 
@@ -22901,6 +22910,99 @@
         }
     }
 
+    // On an iPhone, through the sound engine, a song loaded again straight
+    // after it stopped crackled from then on: after a move in the song,
+    // after the next song came on its own, a song tapped. Loaded again after
+    // a pause and play, it never did, and that ended the crackle. So before
+    // a song is loaded anew it is stopped, silent, for a moment first, as a
+    // pause is, and only the last of several loads asked for meanwhile goes
+    // ahead. back: the sound comes back with a short fade once it plays
+    const IOS_SETTLE_MS = 400;
+    let iosSettleToken = 0;
+
+    // A load waiting for its moment, the song stopped only for it
+    let iosSettleWaiting = false;
+
+    function iosSettleThen(then, why, back) {
+
+        if (!iosGain || !iosCtx || !audio || !isIosLike()) {
+
+            then();
+            return;
+        }
+
+        const token = ++iosSettleToken;
+
+        iosSettleWaiting = true;
+
+        try {
+
+            iosGain.gain.cancelScheduledValues(iosCtx.currentTime);
+            iosGain.gain.value = 0;
+        } catch (e) {
+            // Silent enough once stopped
+        }
+
+        if (!audio.paused) {
+            audio.pause();
+        }
+
+        dbgLog("Audio", "the song stopped and silent " + IOS_SETTLE_MS + " ms before it is loaded again, " + why);
+
+        setTimeout(function () {
+
+            if (token !== iosSettleToken) {
+                return;
+            }
+
+            iosSettleWaiting = false;
+
+            if (back) {
+                iosGainBackOnPlaying();
+            }
+
+            then();
+        }, IOS_SETTLE_MS);
+    }
+
+    // The sound back with a short fade once the song loaded again plays,
+    // after a silence over the stutter Safari may make as it starts
+    function iosGainBackOnPlaying() {
+
+        if (!audio) {
+            return;
+        }
+
+        const el = audio;
+        let done = false;
+
+        const up = function () {
+
+            if (done) {
+                return;
+            }
+
+            done = true;
+            clearTimeout(safety);
+            el.removeEventListener("playing", up);
+
+            if (!iosGain || !iosCtx || audio !== el) {
+                return;
+            }
+
+            const g = iosGain.gain;
+            const t = iosCtx.currentTime;
+
+            g.cancelScheduledValues(t);
+            g.setValueAtTime(0, t);
+            g.setValueAtTime(0, t + 0.1);
+            g.linearRampToValueAtTime(1, t + 0.3);
+        };
+        const safety = setTimeout(up, 4000);
+
+        el.addEventListener("playing", up);
+    }
+
     // On an iPhone, the song going through the sound engine at times
     // crackled after the next song started on its own, until a pause and
     // play, which a song chosen by hand never did: the engine kept running
@@ -22938,13 +23040,19 @@
             dbgLog("Audio", "the sound engine " + iosCtx.state + " after the restart between two songs, "
                 + Math.round(performance.now() - t0) + " ms" + (late ? ", waited no longer" : "") + ", the next song comes");
 
-            if (audio !== el || audio.src !== src || !audio.ended) {
+            // Altogether as long after the end as a song loaded again waits
+            const go = function () {
 
-                dbgLog("Audio", "another song was chosen meanwhile, the one that ended is not followed on");
-                return;
-            }
+                if (audio !== el || audio.src !== src || !audio.ended) {
 
-            then();
+                    dbgLog("Audio", "another song was chosen meanwhile, the one that ended is not followed on");
+                    return;
+                }
+
+                then();
+            };
+
+            setTimeout(go, Math.max(0, IOS_SETTLE_MS - (performance.now() - t0)));
         };
 
         dbgLog("Audio", "the sound engine stops and starts again between two songs, " + iosCtx.sampleRate + " Hz");
@@ -27082,6 +27190,10 @@
         // does not read that as an interruption, cleared once playing fires
         switchingTrack = true;
         dropPlayOnCopy();
+
+        // A load still waiting for its moment of silence is not wanted now
+        iosSettleToken += 1;
+        iosSettleWaiting = false;
 
         // A song still playing stops first, as one that ended has. On an
         // iPhone or iPad, swapped while it plays, the new song is heard
@@ -37406,7 +37518,9 @@
         }
 
         const src = audio.src;
-        const playing = !audio.paused;
+
+        // Stopped only for a move still waiting, it counts as playing
+        const playing = !audio.paused || iosSettleWaiting;
 
         dbgLog("Audio", "moved to " + dbgNum(at) + " by loading the song again, Safari would play on from the old place");
         movingLag = 0;
@@ -37423,6 +37537,32 @@
         movingTimer = setTimeout(function () {
             movingTo = null;
         }, 3000);
+
+        // Playing, stopped and silent a moment first, then faded back in
+        if (playing) {
+
+            iosSettleThen(function () {
+                moveReload(src, at, true);
+            }, "a move in the song", true);
+            return;
+        }
+
+        iosSettleToken += 1;
+        moveReload(src, at, false);
+    }
+
+    function moveReload(src, at, playing) {
+
+        // Another song or another move meanwhile
+        if (!audio || (audio.src !== src && audio.getAttribute("src"))) {
+            return;
+        }
+
+        heldReleasing = true;
+        clearTimeout(heldReleaseTimer);
+        heldReleaseTimer = setTimeout(function () {
+            heldReleasing = false;
+        }, 1500);
 
         try {
 
