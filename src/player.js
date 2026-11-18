@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.245";
+    const VERSION = "2.0.1.246";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -11178,12 +11178,50 @@
     // debug log shows what the feed holds without copying the raw page
     let loggedFeedFields = "";
 
+    // A song with a moving cover, a looped video Mureka shows in place of
+    // its picture, logged once with what Mureka sends for it, to learn
+    // where the video is kept before the player shows it
+    const videoCoverLogged = new Set();
+
+    function noteVideoCover(song, where) {
+
+        if (!song || typeof song !== "object") {
+            return;
+        }
+
+        const used = song.song_cover_task_used;
+        const video = song.song_cover_task_video_cover;
+        const id = String(song.song_id || "");
+
+        if ((!used && !video) || !id || videoCoverLogged.has(id) || videoCoverLogged.size > 40) {
+            return;
+        }
+
+        videoCoverLogged.add(id);
+
+        const fields = {};
+
+        for (const k of Object.keys(song)) {
+
+            if (/cover|video|mv/i.test(k)) {
+                fields[k] = song[k];
+            }
+        }
+
+        dbgLog("Cover", "a moving cover in " + where + ", " + (song.title || "Untitled") + " (" + id + "): "
+            + JSON.stringify(fields).slice(0, 1500));
+    }
+
     function logFeedFields(page) {
 
         const songs = extractSongs(page);
 
         if (songs.length === 0) {
             return;
+        }
+
+        for (const song of songs) {
+            noteVideoCover(song, "the feed");
         }
 
         const keys = new Set();
@@ -24561,7 +24599,8 @@
         // The reads whose answers are logged: the trim screen's two, a
         // playlist with its songs, and the storage pass a picture upload
         // asks for, of which only the harmless parts are kept
-        const READ_ANSWERS = ["/api/pgc/song/check", "/api/pgc/song/info", "/api/pgc/playlist/detail", "/api/misc/cos-token", "/api/pgc/video/detail"];
+        const READ_ANSWERS = ["/api/pgc/song/check", "/api/pgc/song/info", "/api/pgc/playlist/detail", "/api/misc/cos-token", "/api/pgc/video/detail",
+            "/api/pgc/song/detail", "/api/pgc/feed/list/search"];
 
         const answerFor = function (method, url) {
 
@@ -24627,6 +24666,14 @@
 
         const logAnswer = function (what, status, text) {
 
+            // A song's detail and Mureka's search, read all the time, are
+            // only looked through for songs with a moving cover
+            if (/song\/detail|feed\/list\/search/.test(what)) {
+
+                coverVideosIn(text, /search/.test(what) ? "Mureka's search" : "Mureka's song detail");
+                return;
+            }
+
             const pass = /cos-token/.test(what);
             const msg = /\/api\/msg\//.test(what);
             const long = /playlist\/detail|video\/detail|comment|mention/.test(what) || MAKING.test(what) || (msg && !msgWhole);
@@ -24643,6 +24690,46 @@
             if (/comment\/list/.test(what)) {
                 logCommentMoments(text);
             }
+        };
+
+        const coverVideosIn = function (text, where) {
+
+            let json = null;
+
+            try {
+                json = JSON.parse(text);
+            } catch (e) {
+                return;
+            }
+
+            const walk = function (node, depth) {
+
+                if (!node || typeof node !== "object" || depth > 6) {
+                    return;
+                }
+
+                if (Array.isArray(node)) {
+
+                    node.forEach(function (x) {
+                        walk(x, depth + 1);
+                    });
+                    return;
+                }
+
+                // Its own song id, or the song's beside it in a detail
+                if (node.song_cover_task_video_cover || node.song_cover_task_used) {
+                    noteVideoCover(node.song_id ? node : Object.assign({}, node.song || {}, node), where);
+                }
+
+                for (const k of Object.keys(node)) {
+
+                    if (node[k] && typeof node[k] === "object") {
+                        walk(node[k], depth + 1);
+                    }
+                }
+            };
+
+            walk(json && json.data, 0);
         };
 
         const logCommentMoments = function (text) {
@@ -26151,6 +26238,11 @@
             apiOk = true;
 
             const d = json.data;
+
+            noteVideoCover(Object.assign({ song_id: song.song_id, title: song.title }, d.song || {}, {
+                song_cover_task_used: d.song_cover_task_used !== undefined ? d.song_cover_task_used : d.song && d.song.song_cover_task_used,
+                song_cover_task_video_cover: d.song_cover_task_video_cover || (d.song && d.song.song_cover_task_video_cover)
+            }), "the song's detail");
 
             const entry = {
                 play_count: d.play_count,
