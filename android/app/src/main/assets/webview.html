@@ -154,6 +154,22 @@
         -webkit-user-drag: none;
     }
 
+    /* A moving cover over the picture, hidden until it plays */
+    .tileVid {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: inherit;
+        pointer-events: none;
+        visibility: hidden;
+    }
+
+    .tileVid.on {
+        visibility: visible;
+    }
+
     #cover {
         overflow: hidden;
     }
@@ -34267,6 +34283,65 @@
     let glideToken = 0;
     let placeRetry = false;
 
+    // The playing song's moving cover, a looped silent video over its
+    // picture, straight from Mureka. Shown once it plays, so the picture
+    // stays while it comes, or when it cannot be had from here
+    function setCoverVideo(tile, url) {
+
+        let vid = tile.querySelector(".tileVid");
+
+        if (!vid && !url) {
+            return;
+        }
+
+        if (!vid) {
+
+            vid = document.createElement("video");
+            vid.className = "tileVid";
+            vid.muted = true;
+            vid.loop = true;
+            vid.playsInline = true;
+            vid.setAttribute("playsinline", "");
+            vid.setAttribute("muted", "");
+            vid.preload = "auto";
+            vid.addEventListener("playing", function () {
+                vid.classList.toggle("on", !!vid.dataset.src);
+            });
+            vid.addEventListener("error", function () {
+                vid.classList.remove("on");
+            });
+
+            const img = tile.querySelector(".tileImg");
+
+            tile.insertBefore(vid, img ? img.nextSibling : tile.firstChild);
+        }
+
+        if (vid.dataset.src === url) {
+            return;
+        }
+
+        vid.dataset.src = url;
+        vid.classList.remove("on");
+
+        if (!url) {
+
+            vid.pause();
+            vid.removeAttribute("src");
+            vid.load();
+            return;
+        }
+
+        vid.src = url;
+
+        const started = vid.play();
+
+        if (started && started.catch) {
+            started.catch(function () {
+                // Not allowed to start yet, it starts once the page is used
+            });
+        }
+    }
+
     function setTile(tile, song) {
 
         const url = song && song.cover ? song.cover : "";
@@ -34415,6 +34490,7 @@
     function applyFlowSongs(s) {
 
         setTile(tiles[2], s && s.id ? { id: s.id, cover: s.cover } : null);
+        setCoverVideo(tiles[2], s && s.id ? String(s.coverVideo || "") : "");
         setTile(tiles[1], s && s.prevSong ? s.prevSong : null);
         setTile(tiles[3], s && s.upNext ? s.upNext : null);
         setTile(tiles[0], s && s.prevSong2 ? s.prevSong2 : null);

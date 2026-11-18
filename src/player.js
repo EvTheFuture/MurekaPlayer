@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.247";
+    const VERSION = "2.0.1.248";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -3398,6 +3398,7 @@
     // Album art coverflow and swipe state
     // artTiles is the row of cover images, the middle one is the current song
     let artTiles = [];
+    let artVideoEl = null;
 
     // Counts every change to what the list holds, and the web view's sorted
     // copy of it made for that count. Declared early, the list renders
@@ -4463,6 +4464,7 @@
             ratingMin: 1,
             ratingUnrated: "hide",
             artStars: true,
+            movingCovers: true,
             smartEnabled: true,
             bpmEnabled: false,
             bpmMin: 0,
@@ -4734,6 +4736,7 @@
                     ratingUnrated: (parsed.ratingUnrated === "any" || parsed.ratingUnrated === "only")
                         ? parsed.ratingUnrated : "hide",
                     artStars: parsed.artStars !== false,
+                    movingCovers: parsed.movingCovers !== false,
                     smartEnabled: parsed.smartEnabled !== false,
                     bpmEnabled: parsed.bpmEnabled === true,
                     bpmMin: typeof parsed.bpmMin === "number" ? parsed.bpmMin : 0,
@@ -5647,6 +5650,29 @@
         return typeof s.duration_milliseconds === "number" && s.duration_milliseconds > 0;
     }
 
+    // A song's moving cover as Mureka sends it: song_cover_task_used holds
+    // the looped video, a path in its storage ending in .mp4, and
+    // song_cover_task_video_cover a picture of its first frame
+    function coverVideoPath(s) {
+
+        const path = s ? String(s.song_cover_task_used || "") : "";
+
+        return /\.(mp4|webm|mov)(\?|$)/i.test(path) ? path : "";
+    }
+
+    // The address of a song's moving cover, empty without one or with
+    // moving covers turned off
+    function coverVideoUrl(song) {
+
+        const path = song && settings.movingCovers !== false ? String(song.cover_video || "") : "";
+
+        if (!path) {
+            return "";
+        }
+
+        return /^https?:\/\//i.test(path) ? path : AUDIO_BASE + path.replace(/^\//, "");
+    }
+
     // Keep only the fields we actually need, to save space
     // description is not used anywhere, so it is dropped
     function trim(s) {
@@ -5681,6 +5707,9 @@
 
             // Shared from another account's player, maybe not public
             shared: s.shared === true || undefined,
+
+            // A moving cover, the looped video Mureka shows for the song
+            cover_video: coverVideoPath(s) || undefined,
 
             // The list page the song was last read on, "" for the first page
             page_cursor: s.page_cursor,
@@ -11192,6 +11221,23 @@
         const used = song.song_cover_task_used;
         const video = song.song_cover_task_video_cover;
         const id = String(song.song_id || "");
+
+        // A library song learns of its moving cover from wherever Mureka
+        // tells of it, its own search and song pages too
+        const mine = id ? hostFindSong(id) : null;
+        const path = coverVideoPath(song);
+
+        if (mine && path && mine.cover_video !== path) {
+
+            mine.cover_video = path;
+            saveCache();
+
+            if (currentSong && String(currentSong.song_id) === id) {
+
+                setArtSources();
+                publishHostSoon();
+            }
+        }
 
         if ((!used && !video) || !id || videoCoverLogged.has(id) || videoCoverLogged.size > 40) {
             return;
@@ -26243,6 +26289,24 @@
 
             const d = json.data;
 
+            // The moving cover, as the song's detail gives it now
+            {
+
+                const moving = coverVideoPath(d) || coverVideoPath(d.song);
+
+                if ((song.cover_video || "") !== moving && (moving || d.song_cover_task_used !== undefined
+                    || (d.song && d.song.song_cover_task_used !== undefined))) {
+
+                    song.cover_video = moving || undefined;
+                    saveCache();
+
+                    if (currentSong && String(currentSong.song_id) === String(song.song_id)) {
+                        setArtSources();
+                        publishHostSoon();
+                    }
+                }
+            }
+
             noteVideoCover(Object.assign({ song_id: song.song_id, title: song.title }, d.song || {}, {
                 song_cover_task_used: d.song_cover_task_used !== undefined ? d.song_cover_task_used : d.song && d.song.song_cover_task_used,
                 song_cover_task_video_cover: d.song_cover_task_video_cover || (d.song && d.song.song_cover_task_video_cover)
@@ -31182,6 +31246,44 @@
                 storeLater.forEach(cacheArt);
             });
         }
+
+        setArtVideo();
+    }
+
+    // The playing song's moving cover over its picture, or none
+    function setArtVideo() {
+
+        if (!artVideoEl) {
+            return;
+        }
+
+        const url = coverVideoUrl(currentSong);
+
+        if (artVideoEl.dataset.src === url) {
+            return;
+        }
+
+        artVideoEl.dataset.src = url;
+        artVideoEl.style.visibility = "hidden";
+
+        if (!url) {
+
+            artVideoEl.pause();
+            artVideoEl.removeAttribute("src");
+            artVideoEl.load();
+            return;
+        }
+
+        dbgLog("Cover", "a moving cover for " + (currentSong.title || "Untitled") + ": " + url.replace(/^https?:\/\/[^/]+/, ""));
+        artVideoEl.src = url;
+
+        const started = artVideoEl.play();
+
+        if (started && started.catch) {
+            started.catch(function () {
+                // Not allowed to start yet, it starts with the next press
+            });
+        }
     }
 
     // Which side of the playing cover shows this song, 1 for the one after,
@@ -31328,6 +31430,16 @@
 
             artTiles[i].style.webkitMaskImage = mask;
             artTiles[i].style.maskImage = mask;
+
+            // The moving cover goes where the playing cover goes, over it
+            if (rel === 0 && artVideoEl) {
+
+                artVideoEl.style.transform = artTiles[i].style.transform;
+                artVideoEl.style.zIndex = String(z);
+                artVideoEl.style.filter = artTiles[i].style.filter;
+                artVideoEl.style.webkitMaskImage = mask;
+                artVideoEl.style.maskImage = mask;
+            }
         }
     }
 
@@ -38480,6 +38592,9 @@
             title: song ? (song.title || "Untitled") : "",
             subtitle: song ? formatMeta(settings.metaSubtitle, song) : "",
             cover: song ? coverUrl(song) : "",
+
+            // The song's moving cover, played over the cover where it is shown
+            coverVideo: coverVideoUrl(song),
             src: song ? (songUrl(song) || "") : "",
             playing: hasAudio && !audio.paused,
             position: hasAudio ? songClockAt() : times.at,
@@ -47104,6 +47219,31 @@
         // Keep a handle on the center tile
         playerArt = artTiles[ART_SIDE_TILES];
         playerArt.id = "mureka-player-art";
+
+        // A moving cover plays over the center tile, following it as it is
+        // swiped. Silent and looping, shown only once it plays, so the
+        // picture stays until the video has come
+        artVideoEl = document.createElement("video");
+        artVideoEl.muted = true;
+        artVideoEl.loop = true;
+        artVideoEl.playsInline = true;
+        artVideoEl.setAttribute("playsinline", "");
+        artVideoEl.setAttribute("muted", "");
+        artVideoEl.preload = "auto";
+        artVideoEl.style.cssText = "position:absolute;top:0;left:0;height:100%;aspect-ratio:1/1;object-fit:cover;will-change:transform;"
+            + "visibility:hidden;pointer-events:none";
+        artVideoEl.addEventListener("playing", function () {
+            artVideoEl.style.visibility = artVideoEl.dataset.src ? "visible" : "hidden";
+        });
+        artVideoEl.addEventListener("error", function () {
+
+            if (artVideoEl.dataset.src) {
+
+                dbgLog("Cover", "the moving cover would not play, the picture stays: " + artVideoEl.dataset.src.replace(/^https?:\/\/[^/]+/, ""));
+                artVideoEl.style.visibility = "hidden";
+            }
+        });
+        artWrapEl.appendChild(artVideoEl);
 
         // Swipe the covers left or right to move to the next or previous song
         artWrapEl.addEventListener("touchstart", onArtTouchStart, { passive: true });
@@ -55796,6 +55936,19 @@
 
         // What shows on the cover, the lyrics and the control buttons
         mobilePage.appendChild(makeLabel("Cover and lyrics"));
+
+        // A song's moving cover, the looped video Mureka shows in place of
+        // its picture, here and in the web view
+        const movingRow = makeBoolRow("Moving covers", function () {
+            return settings.movingCovers !== false;
+        }, function (v) {
+
+            settings.movingCovers = v;
+            setArtSources();
+            publishHostSoon();
+        });
+
+        mobilePage.appendChild(withHint(movingRow, "A song made with a moving cover on Mureka plays it, looped and silent, over its picture, here and in the web view. Off, the picture stays."));
         mobilePage.appendChild(withHint(overlayRow, "What shows on the cover: nothing, the song info, or the info with synced lyrics. A double tap on the cover switches too."));
         mobilePage.appendChild(withHint(artStarsRow, "The playing song's stars at the top of the cover, tap one to rate. Hidden with the art overlays off."));
         mobilePage.appendChild(lyricSizeRow);
@@ -78024,6 +78177,22 @@
         pointer-events: none;
         user-select: none;
         -webkit-user-drag: none;
+    }
+
+    /* A moving cover over the picture, hidden until it plays */
+    .tileVid {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: inherit;
+        pointer-events: none;
+        visibility: hidden;
+    }
+
+    .tileVid.on {
+        visibility: visible;
     }
 
     #cover {
@@ -112139,6 +112308,65 @@
     let glideToken = 0;
     let placeRetry = false;
 
+    // The playing song's moving cover, a looped silent video over its
+    // picture, straight from Mureka. Shown once it plays, so the picture
+    // stays while it comes, or when it cannot be had from here
+    function setCoverVideo(tile, url) {
+
+        let vid = tile.querySelector(".tileVid");
+
+        if (!vid && !url) {
+            return;
+        }
+
+        if (!vid) {
+
+            vid = document.createElement("video");
+            vid.className = "tileVid";
+            vid.muted = true;
+            vid.loop = true;
+            vid.playsInline = true;
+            vid.setAttribute("playsinline", "");
+            vid.setAttribute("muted", "");
+            vid.preload = "auto";
+            vid.addEventListener("playing", function () {
+                vid.classList.toggle("on", !!vid.dataset.src);
+            });
+            vid.addEventListener("error", function () {
+                vid.classList.remove("on");
+            });
+
+            const img = tile.querySelector(".tileImg");
+
+            tile.insertBefore(vid, img ? img.nextSibling : tile.firstChild);
+        }
+
+        if (vid.dataset.src === url) {
+            return;
+        }
+
+        vid.dataset.src = url;
+        vid.classList.remove("on");
+
+        if (!url) {
+
+            vid.pause();
+            vid.removeAttribute("src");
+            vid.load();
+            return;
+        }
+
+        vid.src = url;
+
+        const started = vid.play();
+
+        if (started && started.catch) {
+            started.catch(function () {
+                // Not allowed to start yet, it starts once the page is used
+            });
+        }
+    }
+
     function setTile(tile, song) {
 
         const url = song && song.cover ? song.cover : "";
@@ -112287,6 +112515,7 @@
     function applyFlowSongs(s) {
 
         setTile(tiles[2], s && s.id ? { id: s.id, cover: s.cover } : null);
+        setCoverVideo(tiles[2], s && s.id ? String(s.coverVideo || "") : "");
         setTile(tiles[1], s && s.prevSong ? s.prevSong : null);
         setTile(tiles[3], s && s.upNext ? s.upNext : null);
         setTile(tiles[0], s && s.prevSong2 ? s.prevSong2 : null);
