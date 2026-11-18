@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.269";
+    const VERSION = "2.0.1.270";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -857,7 +857,8 @@
                     // is when it is out of view, say after a seek
                     const u = f > p && f < p + s ? turnPace(s) : 0;
                     const aim = turnAim((f - p) / s, u, pageLead());
-                    const next = clampStart(f + u * s - s * aim);
+                    const raw = f + u * s - s * aim;
+                    const next = clampStart(raw);
 
                     // Glides there, as after a seek. Landing ahead of the
                     // play head, the page waits for it to come into view
@@ -876,7 +877,7 @@
                     } else if (Math.abs(next - p) > 1e-6) {
 
                         z.glide = { from: p, at: performance.now(), ms: pageGlide(), inOut: true, turn: true,
-                            x0: (f - p) / s, u: u, lead: aim, span: s };
+                            x0: (f - p) / s, u: u, lead: aim, span: s, to: next, end: Math.abs(raw - next) > 1e-9 };
                         z.page = next;
                         z.turnFrac = next > f ? f : null;
                     }
@@ -1032,6 +1033,24 @@
                     // The waveform placed under the play head where its
                     // path has it now, by where the song really is, so a
                     // pace measured wrong never moves where it lands
+                    // Near the end of the song there is not a whole view
+                    // left to turn to: the waveform eases in and out to
+                    // the end of the song on its own, the play head going
+                    // on across it
+                    if (g.end && g.span === s) {
+
+                        target = clampStart(g.from + (g.to - g.from) * easeInOut(k));
+                        z.page = g.to;
+
+                        if (k >= 1) {
+
+                            z.glide = null;
+                            z.turnFrac = null;
+                        }
+
+                        return target;
+                    }
+
                     if (g.span === s && isFinite(g.x0)) {
 
                         target = clampStart(f - s * turnHead(g, k));
@@ -88131,7 +88150,8 @@
                     // is when it is out of view, say after a seek
                     const u = f > p && f < p + s ? turnPace(s) : 0;
                     const aim = turnAim((f - p) / s, u, pageLead());
-                    const next = clampStart(f + u * s - s * aim);
+                    const raw = f + u * s - s * aim;
+                    const next = clampStart(raw);
 
                     // Glides there, as after a seek. Landing ahead of the
                     // play head, the page waits for it to come into view
@@ -88150,7 +88170,7 @@
                     } else if (Math.abs(next - p) > 1e-6) {
 
                         z.glide = { from: p, at: performance.now(), ms: pageGlide(), inOut: true, turn: true,
-                            x0: (f - p) / s, u: u, lead: aim, span: s };
+                            x0: (f - p) / s, u: u, lead: aim, span: s, to: next, end: Math.abs(raw - next) > 1e-9 };
                         z.page = next;
                         z.turnFrac = next > f ? f : null;
                     }
@@ -88306,6 +88326,24 @@
                     // The waveform placed under the play head where its
                     // path has it now, by where the song really is, so a
                     // pace measured wrong never moves where it lands
+                    // Near the end of the song there is not a whole view
+                    // left to turn to: the waveform eases in and out to
+                    // the end of the song on its own, the play head going
+                    // on across it
+                    if (g.end && g.span === s) {
+
+                        target = clampStart(g.from + (g.to - g.from) * easeInOut(k));
+                        z.page = g.to;
+
+                        if (k >= 1) {
+
+                            z.glide = null;
+                            z.turnFrac = null;
+                        }
+
+                        return target;
+                    }
+
                     if (g.span === s && isFinite(g.x0)) {
 
                         target = clampStart(f - s * turnHead(g, k));
