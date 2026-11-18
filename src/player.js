@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.254";
+    const VERSION = "2.0.1.255";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -69675,7 +69675,7 @@
         // meanwhile: a generation new since the request went out, of the
         // title asked for, is taken as the answer, and Mureka's own comes
         // in the background
-        const before = await createFeedIds();
+        const before = createFeedIds();
         const t0 = Date.now();
         const into = createSetNow(d, body.title || "");
         const sending = addSending(body.title || "", into.setId);
@@ -69811,7 +69811,11 @@
 
     // The generations on the first page of the library now, by id, none
     // when it cannot be read or another creator's songs are shown
-    async function createFeedIds() {
+    // Taken from the songs known here, no longer read from Mureka first,
+    // which held the send back half a second and more. A generation the
+    // player has not seen yet is told apart by its time as well, see
+    // createWatchStarted
+    function createFeedIds() {
 
         const ids = new Set();
 
@@ -69819,20 +69823,26 @@
             return null;
         }
 
-        try {
+        for (const s of cache.songs) {
 
-            for (const s of extractSongs(await fetchPage(null))) {
-
-                if (s && s.feed_id !== undefined) {
-                    ids.add(String(s.feed_id));
-                }
+            if (s && s.feed_id !== undefined && s.feed_id !== null) {
+                ids.add(String(s.feed_id));
             }
-        } catch (e) {
-            return null;
         }
+
+        pendingSongs.forEach(function (e) {
+
+            if (e.song && e.song.feed_id !== undefined && e.song.feed_id !== null) {
+                ids.add(String(e.song.feed_id));
+            }
+        });
 
         return ids;
     }
+
+    // How long before a send a generation found may have been made, its
+    // clock and Mureka's apart
+    const CREATE_NEW_SLACK_S = 60;
 
     // The first page of the library looked at every few seconds for a
     // generation not there before, of the title asked for when there is
@@ -69880,7 +69890,10 @@
 
                         const id = s && s.feed_id !== undefined ? String(s.feed_id) : "";
 
-                        if (!id || before.has(id) || (title && String(s.title || "").trim() !== title.trim())) {
+                        const made = Number(s.generate_at) || 0;
+
+                        if (!id || before.has(id) || (title && String(s.title || "").trim() !== title.trim())
+                            || (made > 0 && made < t0 / 1000 - CREATE_NEW_SLACK_S)) {
                             continue;
                         }
 
