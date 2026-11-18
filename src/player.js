@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.252";
+    const VERSION = "2.0.1.253";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -3478,7 +3478,13 @@
 
     // A request to Mureka refused at once while offline
     function offlineRefusal() {
-        return Promise.reject(new Error("No internet, the player is offline"));
+
+        const e = new Error("No internet, the player is offline");
+
+        // Never sent, which a caller may need to tell from a lost answer
+        e.offline = true;
+
+        return Promise.reject(e);
     }
 
     // fetch for Mureka, for what the user asked for: a like, a rename, a
@@ -22222,6 +22228,8 @@
         updateMediaPosition();
     }
 
+    let iosGainWaitLogged = false;
+
     function iosCtxStateChanged() {
 
         dbgLog("Audio", "sound engine " + iosCtx.state);
@@ -22244,6 +22252,23 @@
         if (!audio || !iosCtx || iosCtx.state !== "running" || String(audio.src).indexOf("blob:") !== 0) {
             return false;
         }
+
+        // Not put in while the page is out of view, the screen locked say.
+        // Put in then, the sound crackled from there on, until a pause and
+        // play, seen twice. It goes in with a song started or a fade asked
+        // for while the page is in view
+        if (document.hidden) {
+
+            if (!iosGainWaitLogged) {
+
+                iosGainWaitLogged = true;
+                dbgLog("Audio", "the gain for fades waits for the page to be in view, the song plays without it");
+            }
+
+            return false;
+        }
+
+        iosGainWaitLogged = false;
 
         try {
 
@@ -68684,13 +68709,29 @@
     // One of Mureka's requests for making songs, a POST with the time first
     async function createPost(path, body, ms) {
 
-        const res = await timedFetch(path, {
-            method: "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(Object.assign({ time: Date.now() }, body)),
-            signal: createSignal()
-        }, ms || 30000);
+        const signal = createSignal();
+        let res = null;
+
+        try {
+
+            res = await timedFetch(path, {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(Object.assign({ time: Date.now() }, body)),
+                signal: signal
+            }, ms || 30000);
+        } catch (e) {
+
+            // No answer at all, the connection lost or no answer in time:
+            // Mureka may have got the request all the same. Not so when it
+            // was never sent, or stopped from the form
+            if (e && typeof e === "object" && !e.offline && !(signal && signal.aborted)) {
+                e.lost = true;
+            }
+
+            throw e;
+        }
 
         return createAnswer(path, res);
     }
@@ -69543,6 +69584,30 @@
             // No answer in time, but the songs may have come all the same
             feedId = watch.found;
 
+            // The answer lost on the way, as Safari at times does with one
+            // Mureka holds a long time: the songs were often made all the
+            // same, so the library is looked at a while longer for them
+            if (!feedId && e && e.lost && watch.on) {
+
+                dbgLog("Create", "Mureka's answer was lost after " + Math.round((Date.now() - t0) / 100) / 10 + " s, " + errText(e)
+                    + ", the library is looked at for the songs up to " + Math.round(CREATE_LOST_WAIT_MS / 1000) + " s more");
+                createBusy = "No answer from Mureka, looking for the songs in the library";
+
+                if (createUi) {
+                    paintCreate(true);
+                }
+
+                publishHostSoon();
+                watch.longer(CREATE_LOST_WAIT_MS);
+                feedId = await Promise.race([watch.promise, new Promise(function (resolve) {
+                    setTimeout(function () {
+                        resolve("");
+                    }, CREATE_LOST_WAIT_MS + 1000);
+                })]);
+                dbgLog("Create", feedId ? "the songs showed in the library after " + Math.round((Date.now() - t0) / 100) / 10 + " s, generation " + feedId
+                    : "the songs did not show in the library either");
+            }
+
             if (!feedId) {
 
                 watch.stop();
@@ -69598,6 +69663,10 @@
     // How long Mureka's answer to making songs is waited for, and how
     // often the library is looked at meanwhile
     const CREATE_GENERATE_WAIT_MS = 180000;
+
+    // How much longer the library is looked at when Mureka's answer to
+    // making songs was lost on the way
+    const CREATE_LOST_WAIT_MS = 150000;
     const CREATE_GENERATE_LOOK_MS = 4000;
 
     // The generations on the first page of the library now, by id, none
@@ -69630,14 +69699,28 @@
     // one. Its promise gives the generation's id; found keeps it too
     function createWatchStarted(before, title, t0) {
 
-        const out = { found: "", stop: null, promise: null };
+        const out = { found: "", stop: null, promise: null, on: !!before, longer: null };
         let timer = 0;
         let stopped = !before;
+        let until = t0 + CREATE_GENERATE_WAIT_MS;
+        let look = null;
 
         out.stop = function () {
 
             stopped = true;
             clearTimeout(timer);
+        };
+
+        // Looked for longer, from now, when Mureka's answer was lost
+        out.longer = function (ms) {
+
+            if (stopped || !look) {
+                return;
+            }
+
+            until = Math.max(until, Date.now() + ms);
+            clearTimeout(timer);
+            timer = setTimeout(look, CREATE_GENERATE_LOOK_MS);
         };
         out.promise = new Promise(function (resolve) {
 
@@ -69645,7 +69728,7 @@
                 return;
             }
 
-            const look = async function () {
+            look = async function () {
 
                 if (stopped) {
                     return;
@@ -69678,7 +69761,7 @@
                     // Looked at again in a moment
                 }
 
-                if (!stopped && Date.now() - t0 < CREATE_GENERATE_WAIT_MS) {
+                if (!stopped && Date.now() < until) {
                     timer = setTimeout(look, CREATE_GENERATE_LOOK_MS);
                 }
             };
