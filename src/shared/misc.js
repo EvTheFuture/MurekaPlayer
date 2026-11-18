@@ -1,4 +1,4 @@
-    // Small helpers: the debug log's values, a percent as shown, toast times, the cover editor, the kinds of notifications.
+    // Small helpers: the debug log's values, a percent as shown, toast times, the cover editor, the kinds of notifications, the credits.
     // Shared by the player and the web view's page, src/shared/misc.js,
     // inlined into both by embed-webview.sh
 
@@ -185,4 +185,126 @@
                 ["path", { d: "M13.73 21a2 2 0 0 1-3.46 0" }]
             ]
         };
+    }
+
+    // ---- Credits ----
+
+    // A count of credits as shown, with the digits grouped
+    function creditsNum(n) {
+        return typeof n === "number" && isFinite(n) ? n.toLocaleString() : "-";
+    }
+
+    // A day, 11 Dec
+    function creditsDay(ms) {
+        return new Date(ms).toLocaleDateString([], { day: "numeric", month: "short" });
+    }
+
+    // A clock, 01:10
+    function creditsClock(ms) {
+        return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+    }
+
+    // How long until a time, in minutes, hours or days
+    function creditsUntil(ms, now) {
+
+        const left = ms - now;
+
+        if (left <= 0) {
+            return "now";
+        }
+
+        if (left < 3600000) {
+            return "in " + Math.max(1, Math.round(left / 60000)) + " min";
+        }
+
+        if (left < 48 * 3600000) {
+            return "in " + Math.round(left / 3600000) + " h";
+        }
+
+        return "in " + Math.round(left / 86400000) + " days";
+    }
+
+    // The packs still in use, the one that ends first first
+    function creditsLivePacks(c, now) {
+
+        return (c && Array.isArray(c.packs) ? c.packs : []).filter(function (p) {
+            return !p.until || p.until > now;
+        }).sort(function (a, b) {
+            return (a.until || Infinity) - (b.until || Infinity);
+        });
+    }
+
+    // One line about the credits, for the top of the form
+    function creditsLine(c, now) {
+
+        if (!c) {
+            return "Credits: looking them up";
+        }
+
+        if (typeof c.gold !== "number") {
+            return "Credits: " + (c.why || "not known");
+        }
+
+        const parts = [creditsNum(c.gold) + " credits left"];
+        const packs = creditsLivePacks(c, now);
+
+        if (c.day && c.day.total) {
+            parts.push(creditsNum(c.day.left) + "/" + creditsNum(c.day.total) + " free today");
+        }
+
+        // Two packs at once: the new one came before the old one ends
+        if (packs.length > 1 && packs[0].until) {
+            parts.push("the old pack ends " + creditsUntil(packs[0].until, now) + " with " + creditsNum(packs[0].left) + " unused");
+        } else if (packs.length && packs[0].until) {
+            parts.push("the pack ends " + creditsUntil(packs[0].until, now));
+        }
+
+        return parts.join(", ");
+    }
+
+    // The details, as label and value rows. sub: a row that belongs to the
+    // one above it
+    function creditsRows(c, now) {
+
+        const rows = [];
+
+        if (!c) {
+            return rows;
+        }
+
+        if (typeof c.gold === "number") {
+            rows.push({ label: "Credits left", value: creditsNum(c.gold) });
+        }
+
+        if (c.month && c.month.total) {
+            rows.push({ label: "Monthly", value: creditsNum(c.month.left) + " / " + creditsNum(c.month.total) });
+        }
+
+        if (c.day && c.day.total) {
+            rows.push({ label: "Free, daily", value: creditsNum(c.day.left) + " / " + creditsNum(c.day.total) });
+        }
+
+        for (const p of creditsLivePacks(c, now)) {
+
+            rows.push({
+                label: "Pack" + (p.from ? " from " + creditsDay(p.from) : ""),
+                value: creditsNum(p.left) + " of " + creditsNum(p.size) + " left"
+            });
+
+            if (p.until) {
+                rows.push({ label: "Ends", value: creditsDay(p.until) + " " + creditsClock(p.until) + ", " + creditsUntil(p.until, now), sub: true });
+            }
+        }
+
+        if (c.can === false) {
+            rows.push({ label: "Making songs", value: "Mureka says not now" });
+        }
+
+        if (c.why) {
+            rows.push({ label: "Last look", value: "Did not work, " + c.why });
+        } else if (c.at) {
+            rows.push({ label: "Looked up", value: creditsClock(c.at) });
+        }
+
+        return rows;
     }

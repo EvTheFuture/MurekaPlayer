@@ -2092,6 +2092,50 @@
         color: var(--muted);
     }
 
+    /* The credits: one line, tapped open to the details */
+    .crCredits {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px 14px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.03);
+        color: var(--muted);
+        font-size: 0.92em;
+        cursor: pointer;
+    }
+
+    .crCredits.bad .crCreditsLine {
+        color: #ff8a8a;
+    }
+
+    .crCreditsRows {
+        display: none;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .crCredits.open .crCreditsRows {
+        display: flex;
+    }
+
+    .crCreditsRow {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+    }
+
+    .crCreditsRow.sub {
+        padding-left: 14px;
+    }
+
+    .crCreditsRow span:last-child {
+        margin-left: auto;
+        text-align: right;
+        color: var(--text);
+    }
+
     /* A name on the left, the choice on the right, under it when narrow */
     .crLine {
         display: flex;
@@ -11085,7 +11129,7 @@
     // BEGIN SHARED misc
     // Written by embed-webview.sh from src/shared/misc.js. Change that
     // file and run make embed, never the lines up to END SHARED misc
-    // Small helpers: the debug log's values, a percent as shown, toast times, the cover editor, the kinds of notifications.
+    // Small helpers: the debug log's values, a percent as shown, toast times, the cover editor, the kinds of notifications, the credits.
     // Shared by the player and the web view's page, src/shared/misc.js,
     // inlined into both by embed-webview.sh
 
@@ -11272,6 +11316,128 @@
                 ["path", { d: "M13.73 21a2 2 0 0 1-3.46 0" }]
             ]
         };
+    }
+
+    // ---- Credits ----
+
+    // A count of credits as shown, with the digits grouped
+    function creditsNum(n) {
+        return typeof n === "number" && isFinite(n) ? n.toLocaleString() : "-";
+    }
+
+    // A day, 11 Dec
+    function creditsDay(ms) {
+        return new Date(ms).toLocaleDateString([], { day: "numeric", month: "short" });
+    }
+
+    // A clock, 01:10
+    function creditsClock(ms) {
+        return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+    }
+
+    // How long until a time, in minutes, hours or days
+    function creditsUntil(ms, now) {
+
+        const left = ms - now;
+
+        if (left <= 0) {
+            return "now";
+        }
+
+        if (left < 3600000) {
+            return "in " + Math.max(1, Math.round(left / 60000)) + " min";
+        }
+
+        if (left < 48 * 3600000) {
+            return "in " + Math.round(left / 3600000) + " h";
+        }
+
+        return "in " + Math.round(left / 86400000) + " days";
+    }
+
+    // The packs still in use, the one that ends first first
+    function creditsLivePacks(c, now) {
+
+        return (c && Array.isArray(c.packs) ? c.packs : []).filter(function (p) {
+            return !p.until || p.until > now;
+        }).sort(function (a, b) {
+            return (a.until || Infinity) - (b.until || Infinity);
+        });
+    }
+
+    // One line about the credits, for the top of the form
+    function creditsLine(c, now) {
+
+        if (!c) {
+            return "Credits: looking them up";
+        }
+
+        if (typeof c.gold !== "number") {
+            return "Credits: " + (c.why || "not known");
+        }
+
+        const parts = [creditsNum(c.gold) + " credits left"];
+        const packs = creditsLivePacks(c, now);
+
+        if (c.day && c.day.total) {
+            parts.push(creditsNum(c.day.left) + "/" + creditsNum(c.day.total) + " free today");
+        }
+
+        // Two packs at once: the new one came before the old one ends
+        if (packs.length > 1 && packs[0].until) {
+            parts.push("the old pack ends " + creditsUntil(packs[0].until, now) + " with " + creditsNum(packs[0].left) + " unused");
+        } else if (packs.length && packs[0].until) {
+            parts.push("the pack ends " + creditsUntil(packs[0].until, now));
+        }
+
+        return parts.join(", ");
+    }
+
+    // The details, as label and value rows. sub: a row that belongs to the
+    // one above it
+    function creditsRows(c, now) {
+
+        const rows = [];
+
+        if (!c) {
+            return rows;
+        }
+
+        if (typeof c.gold === "number") {
+            rows.push({ label: "Credits left", value: creditsNum(c.gold) });
+        }
+
+        if (c.month && c.month.total) {
+            rows.push({ label: "Monthly", value: creditsNum(c.month.left) + " / " + creditsNum(c.month.total) });
+        }
+
+        if (c.day && c.day.total) {
+            rows.push({ label: "Free, daily", value: creditsNum(c.day.left) + " / " + creditsNum(c.day.total) });
+        }
+
+        for (const p of creditsLivePacks(c, now)) {
+
+            rows.push({
+                label: "Pack" + (p.from ? " from " + creditsDay(p.from) : ""),
+                value: creditsNum(p.left) + " of " + creditsNum(p.size) + " left"
+            });
+
+            if (p.until) {
+                rows.push({ label: "Ends", value: creditsDay(p.until) + " " + creditsClock(p.until) + ", " + creditsUntil(p.until, now), sub: true });
+            }
+        }
+
+        if (c.can === false) {
+            rows.push({ label: "Making songs", value: "Mureka says not now" });
+        }
+
+        if (c.why) {
+            rows.push({ label: "Last look", value: "Did not work, " + c.why });
+        } else if (c.at) {
+            rows.push({ label: "Looked up", value: creditsClock(c.at) });
+        }
+
+        return rows;
     }
     // END SHARED misc
 
@@ -30884,6 +31050,45 @@
         const ui = crUi;
         const form = $("crForm");
 
+        // The credits, one line that opens to the details and looks again
+        ui.credits = document.createElement("div");
+        ui.credits.className = "crCredits";
+        ui.credits.tabIndex = 0;
+        ui.credits.setAttribute("role", "button");
+        ui.creditsLine = document.createElement("div");
+        ui.creditsLine.className = "crCreditsLine";
+        ui.creditsRows = document.createElement("div");
+        ui.creditsRows.className = "crCreditsRows";
+        ui.credits.appendChild(ui.creditsLine);
+        ui.credits.appendChild(ui.creditsRows);
+
+        const creditsToggle = function () {
+
+            crCreditsOpen = !crCreditsOpen;
+            crPaintCredits(crCreditsLast, false);
+
+            if (crCreditsOpen) {
+
+                crAsk({ op: "credits" }).then(function (r) {
+
+                    if (r && r.ok && r.state) {
+                        paintCreatePop(r.state, true);
+                    }
+                });
+            }
+        };
+
+        ui.credits.addEventListener("click", creditsToggle);
+        ui.credits.addEventListener("keydown", function (e) {
+
+            if (e.key === "Enter" || e.key === " ") {
+
+                e.preventDefault();
+                creditsToggle();
+            }
+        });
+        form.appendChild(ui.credits);
+
         ui.kind = crSegments([
             { label: "With lyrics", value: "song" },
             { label: "Instrumental", value: "instrumental" },
@@ -31184,6 +31389,52 @@
 
     // The form as the phone has it. Fields being typed in, or with typing
     // not yet sent, are left as they are unless all is to be put in
+    // The credits as the phone last told them, and whether the details show
+    let crCreditsLast = null;
+    let crCreditsOpen = false;
+    let crCreditsKey = "";
+
+    // The credits line, and the details while open. Drawn again only when
+    // something in them changed or a minute went by
+    function crPaintCredits(credits, looking) {
+
+        const ui = crUi;
+        const now = Date.now();
+
+        if (!ui || !ui.credits) {
+            return;
+        }
+
+        const key = JSON.stringify([credits, looking, crCreditsOpen, Math.floor(now / 60000)]);
+
+        if (key === crCreditsKey) {
+            return;
+        }
+
+        crCreditsKey = key;
+        crCreditsLast = credits;
+        ui.credits.classList.toggle("open", crCreditsOpen);
+        ui.credits.classList.toggle("bad", !!(credits && credits.can === false));
+        ui.credits.setAttribute("aria-expanded", crCreditsOpen ? "true" : "false");
+        ui.creditsLine.textContent = (crCreditsOpen ? "\u25be " : "\u25b8 ")
+            + (looking && !credits ? "Credits: looking them up" : creditsLine(credits, now));
+        ui.creditsRows.replaceChildren();
+
+        for (const r of creditsRows(credits, now)) {
+
+            const row = document.createElement("div");
+            const label = document.createElement("span");
+            const value = document.createElement("span");
+
+            row.className = "crCreditsRow" + (r.sub ? " sub" : "");
+            label.textContent = r.label;
+            value.textContent = r.value;
+            row.appendChild(label);
+            row.appendChild(value);
+            ui.creditsRows.appendChild(row);
+        }
+    }
+
     function paintCreatePop(c, all) {
 
         if (!crUi || !c) {
@@ -31191,6 +31442,8 @@
         }
 
         const ui = crUi;
+
+        crPaintCredits(c.credits || null, c.creditsLooking === true);
 
         if (c.draft) {
 
