@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.258";
+    const VERSION = "2.0.1.259";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -4478,6 +4478,7 @@
             iosRestartBetween: true,
             iosSettle: true,
             iosPlayAnew: false,
+            iosAmbientStart: true,
             smartEnabled: true,
             bpmEnabled: false,
             bpmMin: 0,
@@ -4755,6 +4756,7 @@
                     iosRestartBetween: parsed.iosRestartBetween !== false,
                     iosSettle: parsed.iosSettle !== false,
                     iosPlayAnew: parsed.iosPlayAnew === true,
+                    iosAmbientStart: parsed.iosAmbientStart !== false,
                     smartEnabled: parsed.smartEnabled !== false,
                     bpmEnabled: parsed.bpmEnabled === true,
                     bpmMin: typeof parsed.bpmMin === "number" ? parsed.bpmMin : 0,
@@ -22143,6 +22145,21 @@
             return;
         }
 
+        // The test setting off: music from the start, so the kind is never
+        // changed under a running sound engine
+        if (settings.iosAmbientStart === false) {
+
+            try {
+
+                navigator.audioSession.type = "playback";
+                dbgLog("Audio", "the page's sound is music from the start, as set");
+            } catch (e) {
+                // Safari before the setting
+            }
+
+            return;
+        }
+
         try {
 
             navigator.audioSession.type = "ambient";
@@ -22163,6 +22180,9 @@
         try {
 
             if (navigator.audioSession.type !== "playback") {
+
+                dbgLog("Audio", "the page's sound made music, it was " + navigator.audioSession.type
+                    + (iosCtx ? ", sound engine " + iosCtx.state : ", no sound engine yet"));
                 navigator.audioSession.type = "playback";
             }
         } catch (e) {
@@ -22307,7 +22327,8 @@
             }
 
             audio.crossOrigin = "anonymous";
-            dbgLog("Audio", "the song goes through a gain for fades, Safari ignores a page's own volume");
+            dbgLog("Audio", "the song goes through a gain for fades, Safari ignores a page's own volume, "
+                + iosCtx.sampleRate + " Hz" + (navigator.audioSession ? ", the page's sound " + navigator.audioSession.type : ""));
 
             if (!iosWatchTimer) {
                 iosWatchTimer = setInterval(watchIosEngine, IOS_WATCH_MS);
@@ -22943,7 +22964,21 @@
         }
     }
 
+    // The page's kind of sound as last seen, so a change by anyone, Mureka's
+    // own page say, shows in the debug log
+    let iosSessionSeen = "";
+
     function watchIosEngine() {
+
+        if (navigator.audioSession && navigator.audioSession.type !== iosSessionSeen) {
+
+            if (iosSessionSeen) {
+                dbgLog("Audio", "the page's sound changed from " + iosSessionSeen + " to " + navigator.audioSession.type
+                    + (iosCtx ? ", sound engine " + iosCtx.state + ", " + iosCtx.sampleRate + " Hz" : ""));
+            }
+
+            iosSessionSeen = navigator.audioSession.type;
+        }
 
         if (engineMark) {
             noteHeardLag();
@@ -57821,6 +57856,7 @@
             iosRow("iosFreshStart", "Start songs 50 ms in", "A song from its beginning starts 50 ms in, which keeps the waveform in step. Off, from its very beginning.");
             iosRow("iosRestartBetween", "Restart the sound engine between songs", "Stopped and started again as a song ends, before the next one.");
             iosRow("iosSettle", "A moment of silence before a load", "0.4 s with the song stopped before the next song or a move loads it.");
+            iosRow("iosAmbientStart", "Mix with other apps until the first play", "As the player opens, Safari is told the page's sound mixes with other apps, and it becomes music at the first play. Off, it is music from the start, never changed under a running sound engine. Takes effect when the player is opened again.");
             iosRow("iosPlayAnew", "Play anew after a song change", "A new song is paused and played on once it has played 0.3 s, as Play / Pause does, a second of silence at its start. With the screen locked Safari may keep it paused.");
         }
 
