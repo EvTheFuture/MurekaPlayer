@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.241";
+    const VERSION = "2.0.1.242";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -15077,6 +15077,14 @@
             shapes: [
                 ["path", { d: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" }],
                 ["circle", { cx: "12", cy: "12", r: "3" }]
+            ]
+        },
+        "2004": {
+            name: "Mention",
+            color: "#4dd0e1",
+            shapes: [
+                ["circle", { cx: "12", cy: "12", r: "4" }],
+                ["path", { d: "M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94" }]
             ]
         },
         "2001": {
@@ -72365,6 +72373,12 @@
             return "followed you";
         }
 
+        // Mentioned in a comment, on a song or on a video. Which it is shows
+        // by the name Mureka fills in, the song's or the video's
+        if (code === "2004") {
+            return "mentioned you in a comment" + (title ? " on " + (item.__video ? "the video " : "") + q : "");
+        }
+
         return String(item.text || "").replace(/\{song_name\}/g, title).replace(/\{comment_content\}/g, trans[2] || "")
             .replace(/\{[a-z_]+\}/g, "").trim();
     }
@@ -72377,14 +72391,35 @@
             return String(t && t.value !== undefined ? t.value : "");
         }) : [];
         const code = String(item.biz_code || "");
-        const title = String(item.object_name || trans[0] || "");
-        const songId = String((code === "1002" ? item.extra_object_id : item.object_id) || "");
+
+        // What Mureka fills in, by name: song_name, user_name,
+        // comment_content, video_name. Not every kind names them, so the
+        // order is the fallback
+        const named = {};
+
+        if (Array.isArray(item.trans)) {
+
+            for (const t of item.trans) {
+
+                const key = String(t && t.key || "").replace(/[{}]/g, "");
+
+                if (/^[a-z_]+$/.test(key)) {
+                    named[key] = String(t.value !== undefined ? t.value : "");
+                }
+            }
+        }
+
+        const objectUrl = String(item.object_url || "");
+        const video = named.video_name !== undefined || /\.(mp4|webm|mov)(\?|$)/i.test(objectUrl);
+        const title = String(item.object_name || named.song_name || named.video_name || trans[0] || "");
+        const onComment = code === "1002" || code === "2004";
+        const songId = video ? "" : String((onComment ? item.extra_object_id : item.object_id) || "");
         const song = hostFindSong(songId);
         const at = msgTime(item);
         const id = String(item.msg_id || code + ":" + (item.object_id || "") + ":" + at);
         const userId = String(item.user_id || user.user_id || "");
         const stage = String(user.stage_name || "").trim();
-        const shown = stage || String(trans[1] || "").trim();
+        const shown = stage || String(named.user_name || trans[1] || "").trim();
 
         // Who it was by a number only: the name is looked up
         const needName = !!userId && (!shown || /^[0-9]+$/.test(shown));
@@ -72396,8 +72431,9 @@
             needName: needName && !msgNames.has(userId),
             who: needName && msgNames.has(userId) ? msgNames.get(userId) : shown || "Someone",
             at: at * 1000,
-            what: msgWhat(code, item, trans, title),
-            text: code === "1002" ? trans[2] || "" : "",
+            what: msgWhat(code, Object.assign({ __video: video }, item), trans, title),
+            text: named.comment_content !== undefined ? named.comment_content : code === "1002" ? trans[2] || "" : "",
+            video: video && objectUrl ? (/^https?:\/\//i.test(objectUrl) ? objectUrl : AUDIO_BASE + objectUrl) : "",
             song: song ? songId : "",
             title: title,
             cover: cover,
@@ -72555,11 +72591,18 @@
 
         const song = m.song ? hostFindSong(m.song) : null;
 
+        // On a video, or a song not in this library: the comment is in the
+        // notification, and a video plays where it is kept
         if (!song) {
-            return null;
+
+            if (m.video && showComments) {
+                window.open(m.video, "_blank", "noopener");
+            }
+
+            return m.video ? { url: m.video } : null;
         }
 
-        if (m.code === "1002") {
+        if (m.code === "1002" || m.code === "2004") {
 
             if (showComments) {
                 openComments(song);
@@ -73525,7 +73568,8 @@
                 box.appendChild(pic);
             }
 
-            box.title = m.song ? (m.code === "1002" ? "Open the comments" : "Play the song") : "Mark read";
+            box.title = m.song ? (m.code === "1002" || m.code === "2004" ? "Open the comments" : "Play the song")
+                : m.video ? "Watch the video" : "Mark read";
             box.addEventListener("click", function () {
                 msgOpen(m.id, true);
             });
@@ -88676,6 +88720,14 @@
             shapes: [
                 ["path", { d: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" }],
                 ["circle", { cx: "12", cy: "12", r: "3" }]
+            ]
+        },
+        "2004": {
+            name: "Mention",
+            color: "#4dd0e1",
+            shapes: [
+                ["circle", { cx: "12", cy: "12", r: "4" }],
+                ["path", { d: "M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94" }]
             ]
         },
         "2001": {
@@ -110768,7 +110820,8 @@
             box.className = "nfItem" + (m.read ? "" : " unread");
             box.setAttribute("role", "button");
             box.tabIndex = 0;
-            box.title = m.song ? (m.code === "1002" ? "Open the comments" : "Play the song") : "Mark read";
+            box.title = m.song ? (m.code === "1002" || m.code === "2004" ? "Open the comments" : "Play the song")
+                : m.video ? "Watch the video" : "Mark read";
             disc.className = "nfDisc";
             disc.title = kind.name;
             disc.style.color = kind.color;
@@ -110864,7 +110917,10 @@
                 paint();
                 crAsk({ op: "msgOpen", id: m.id }).then(function (r) {
 
-                    if (r && r.ok && r.comments) {
+                    // A video plays here, in this browser
+                    if (r && r.ok && r.comments && r.comments.url) {
+                        window.open(r.comments.url, "_blank", "noopener");
+                    } else if (r && r.ok && r.comments) {
                         openComments(r.comments);
                     }
                 });

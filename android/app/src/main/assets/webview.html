@@ -11060,6 +11060,14 @@
                 ["circle", { cx: "12", cy: "12", r: "3" }]
             ]
         },
+        "2004": {
+            name: "Mention",
+            color: "#4dd0e1",
+            shapes: [
+                ["circle", { cx: "12", cy: "12", r: "4" }],
+                ["path", { d: "M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94" }]
+            ]
+        },
         "2001": {
             name: "Follow",
             color: "#5fd38d",
@@ -33150,7 +33158,8 @@
             box.className = "nfItem" + (m.read ? "" : " unread");
             box.setAttribute("role", "button");
             box.tabIndex = 0;
-            box.title = m.song ? (m.code === "1002" ? "Open the comments" : "Play the song") : "Mark read";
+            box.title = m.song ? (m.code === "1002" || m.code === "2004" ? "Open the comments" : "Play the song")
+                : m.video ? "Watch the video" : "Mark read";
             disc.className = "nfDisc";
             disc.title = kind.name;
             disc.style.color = kind.color;
@@ -33246,7 +33255,10 @@
                 paint();
                 crAsk({ op: "msgOpen", id: m.id }).then(function (r) {
 
-                    if (r && r.ok && r.comments) {
+                    // A video plays here, in this browser
+                    if (r && r.ok && r.comments && r.comments.url) {
+                        window.open(r.comments.url, "_blank", "noopener");
+                    } else if (r && r.ok && r.comments) {
                         openComments(r.comments);
                     }
                 });
