@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.267";
+    const VERSION = "2.0.1.268";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -25179,8 +25179,9 @@
         const SECRET = "(?:token|auth|passw|pwd|secret|sign|cred|cookie|session|ticket|key|verif|otp|captcha|jwt|email|phone|mobile)";
         const secretJson = new RegExp("(\"([^\"]*" + SECRET + "[^\"]*)\"\\s*:\\s*)(\"(?:[^\"\\\\]|\\\\.)*\"|[^,}\\]\\s\\[{]+)", "gi");
 
-        // Names that only look secret: labels, counts and positions
-        const NOT_SECRET = /^(?:message_key|icon_key|session_count|after_message_sequence|replay_through_message_sequence)$/;
+        // Names that only look secret: labels, counts and positions, and
+        // the account's credits, which share cred with credentials
+        const NOT_SECRET = /^(?:message_key|icon_key|session_count|after_message_sequence|replay_through_message_sequence)$|credit/i;
 
         // In a query, or a form's body, which has no ? before its first key
         const secretQuery = new RegExp("((?:^|[?&])[^=&?]*" + SECRET + "[^=&]*=)[^&#]*", "gi");
@@ -25280,7 +25281,8 @@
         // playlist with its songs, and the storage pass a picture upload
         // asks for, of which only the harmless parts are kept
         const READ_ANSWERS = ["/api/pgc/song/check", "/api/pgc/song/info", "/api/pgc/playlist/detail", "/api/misc/cos-token", "/api/pgc/video/detail",
-            "/api/pgc/song/detail", "/api/pgc/feed/list/search"];
+            "/api/pgc/song/detail", "/api/pgc/feed/list/search", "/api/user/account", "/api/pgc/order/credit/list",
+            "/api/payment/subscription/status"];
 
         const answerFor = function (method, url) {
 
@@ -25360,7 +25362,7 @@
             // video maker, comments and mentions, and song making. The music
             // video maker's list of finished videos, read all the time, short
             const canvas = /video\/canvas/.test(what) && !/exportable\/list/.test(what);
-            const long = /playlist\/detail|video\/detail|comment|mention/.test(what) || canvas || MAKING.test(what) || (msg && !msgWhole);
+            const long = /playlist\/detail|video\/detail|comment|mention|user\/account|credit\/list|subscription\/status/.test(what) || canvas || MAKING.test(what) || (msg && !msgWhole);
 
             if (msg) {
                 msgWhole = true;
