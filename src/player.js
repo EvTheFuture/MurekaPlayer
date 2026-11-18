@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.242";
+    const VERSION = "2.0.1.243";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -24620,6 +24620,52 @@
 
             dbgLog("Mureka", "Answer to " + what + ": HTTP " + status + " "
                 + (pass ? passShape(text) : redact(text)).replace(/\s+/g, " ").slice(0, long ? 6000 : 800));
+
+            // A comment tagged with a place in the song is rare and may lie
+            // past where the answer is cut: each one logged whole, apart
+            if (/comment\/list/.test(what)) {
+                logCommentMoments(text);
+            }
+        };
+
+        const logCommentMoments = function (text) {
+
+            let data = null;
+
+            try {
+                data = JSON.parse(text).data;
+            } catch (e) {
+                return;
+            }
+
+            const all = [];
+
+            for (const c of (data && Array.isArray(data.list) ? data.list : [])) {
+
+                all.push(c);
+
+                for (const r of (Array.isArray(c.replies) ? c.replies : [])) {
+                    all.push(r);
+                }
+            }
+
+            const tagged = all.filter(function (c) {
+                return c && c.moment !== undefined && Number(c.moment) !== -1;
+            });
+
+            if (tagged.length === 0) {
+                return;
+            }
+
+            dbgLog("Comments", tagged.length + " of " + all.length + " comments read carry a place in the song");
+
+            for (const c of tagged) {
+
+                const one = Object.assign({}, c);
+
+                delete one.replies;
+                dbgLog("Comments", "with a place in the song, as Mureka sends it: " + redact(JSON.stringify(one)).slice(0, 3000));
+            }
         };
 
         const sumUp = function (kind, json) {
@@ -37994,9 +38040,13 @@
 
         const keep = doneTimers.get(btn);
 
+        // Done, in the accent, or for a red button, one that takes something
+        // away, in its own red, never the accent inside a red ring
+        const danger = btn.dataset.hostDanger === "1";
+
         btn.textContent = text;
-        btn.style.background = ok ? ACCENT : "#e5484d";
-        btn.style.color = ok ? "#000" : "#fff";
+        btn.style.background = ok ? (danger ? DANGER : ACCENT) : "#e5484d";
+        btn.style.color = ok && !danger ? "#000" : "#fff";
 
         keep.timer = setTimeout(function () {
 
@@ -72898,6 +72948,32 @@
         return json.data || {};
     }
 
+    // A comment's words, its mentions written out. Mureka sends a mention as
+    // {{M0}}, {{M1}} and so on in the text, and who each is in mentions,
+    // by index, the first one without it
+    function commentWords(c) {
+
+        const text = String(c && c.content || "");
+        const names = new Map();
+
+        if (c && Array.isArray(c.mentions)) {
+
+            c.mentions.forEach(function (m, i) {
+
+                const at = m && m.index !== undefined ? Number(m.index) : i;
+                const name = String(m && m.stage_name || "").trim();
+
+                if (name) {
+                    names.set(at, name);
+                }
+            });
+        }
+
+        return text.replace(/\{\{M(\d+)\}\}/g, function (all, n) {
+            return names.has(Number(n)) ? "@" + names.get(Number(n)) : "@someone";
+        });
+    }
+
     // A comment as the views show it. Replies, where Mureka sends them with
     // their comment, under whichever name it gives them
     function commentOf(c) {
@@ -72912,7 +72988,7 @@
             level: level,
             name: String(user.stage_name || "Someone"),
             user: String(user.user_id || user.id || ""),
-            text: String(c.content || ""),
+            text: commentWords(c),
             at: (Number(c.created_at) || 0) * 1000,
             mine: c.is_mine === true,
             likes: Number(c.like_count) || 0,
