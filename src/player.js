@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.274";
+    const VERSION = "2.0.1.275";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -6145,9 +6145,26 @@
             }
         } : null;
 
+        // Half or double what is in the field, for a tempo found twice or
+        // half as fast as it feels. Saved with Save
+        const scale = function (by) {
+
+            return function (field) {
+
+                const now = Number(String(field.value).trim()) || current;
+
+                if (now > 0) {
+                    field.value = String(Math.max(1, Math.round(now * by)));
+                }
+            };
+        };
+
         askText("BPM for " + (song.title || "Untitled"), current > 0 ? String(current) : "", "Save", function (answer) {
             setManualBpmText(song, String(answer));
-        }, clear, "numeric");
+        }, clear, "numeric", [
+            { label: "Half", fn: scale(0.5) },
+            { label: "Double", fn: scale(2) }
+        ]);
     }
 
     // Keep a typed tempo, or clear the hand entered one when the text is
@@ -28613,7 +28630,9 @@
         return { back: back, card: card, close: close };
     }
 
-    function askText(title, value, okLabel, onOk, extra, kind) {
+    // tools: small buttons under the field that change what is typed, each
+    // {label, fn(field)}
+    function askText(title, value, okLabel, onOk, extra, kind, tools) {
 
         if (!panelEl) {
             return;
@@ -28733,6 +28752,27 @@
         row.appendChild(yes);
         card.appendChild(head);
         card.appendChild(field);
+
+        // The helpers under the field, ringed, apart from the answers
+        if (Array.isArray(tools) && tools.length > 0) {
+
+            const toolRow = document.createElement("div");
+
+            toolRow.style.cssText = "display:flex;gap:8px";
+
+            for (const t of tools) {
+
+                const b = makeButton(t.label, "transparent", CTRL_ACCENT, function () {
+                    t.fn(field);
+                });
+
+                b.style.boxShadow = CTRL_RING + CTRL_ACCENT;
+                toolRow.appendChild(b);
+            }
+
+            card.appendChild(toolRow);
+        }
+
         card.appendChild(row);
         panelEl.appendChild(back);
 
@@ -84252,8 +84292,24 @@
     #bpmRow {
         display: none;
         align-items: center;
+        flex-wrap: wrap;
         gap: 10px;
         padding: 6px 14px;
+    }
+
+    /* Half and Double together, on a line of their own under the field
+       when the row is narrow */
+    #bpmScale {
+        display: flex;
+        gap: 10px;
+    }
+
+    @media (max-width: 560px) {
+
+        #bpmScale {
+            order: 1;
+            width: 100%;
+        }
     }
 
     #titleRow {
@@ -87264,6 +87320,10 @@
         <div id="bpmRow">
             <span>BPM</span>
             <input id="bpmInput" type="number" min="1" max="400" step="1" inputmode="numeric">
+            <span id="bpmScale">
+                <button class="chip" id="bpmHalf" type="button" title="Half the tempo">Half</button>
+                <button class="chip" id="bpmDouble" type="button" title="Double the tempo">Double</button>
+            </span>
             <button class="chip" id="bpmSave" type="button">Save</button>
             <button class="chip" id="bpmClear" type="button">Clear</button>
         </div>
@@ -114106,6 +114166,25 @@
 
         songAction("bpm", $("bpmInput").value.trim());
         closeSongMenu();
+    });
+
+    // Half or double what is in the field, for a tempo found twice or half
+    // as fast as it feels. Saved with Save
+    const bpmScale = function (by) {
+
+        const now = Number($("bpmInput").value.trim());
+
+        if (now > 0) {
+            $("bpmInput").value = String(Math.max(1, Math.round(now * by)));
+        }
+    };
+
+    $("bpmHalf").addEventListener("click", function () {
+        bpmScale(0.5);
+    });
+
+    $("bpmDouble").addEventListener("click", function () {
+        bpmScale(2);
     });
 
     $("bpmClear").addEventListener("click", function () {

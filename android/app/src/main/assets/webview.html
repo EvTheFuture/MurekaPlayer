@@ -4782,8 +4782,24 @@
     #bpmRow {
         display: none;
         align-items: center;
+        flex-wrap: wrap;
         gap: 10px;
         padding: 6px 14px;
+    }
+
+    /* Half and Double together, on a line of their own under the field
+       when the row is narrow */
+    #bpmScale {
+        display: flex;
+        gap: 10px;
+    }
+
+    @media (max-width: 560px) {
+
+        #bpmScale {
+            order: 1;
+            width: 100%;
+        }
     }
 
     #titleRow {
@@ -7794,6 +7810,10 @@
         <div id="bpmRow">
             <span>BPM</span>
             <input id="bpmInput" type="number" min="1" max="400" step="1" inputmode="numeric">
+            <span id="bpmScale">
+                <button class="chip" id="bpmHalf" type="button" title="Half the tempo">Half</button>
+                <button class="chip" id="bpmDouble" type="button" title="Double the tempo">Double</button>
+            </span>
             <button class="chip" id="bpmSave" type="button">Save</button>
             <button class="chip" id="bpmClear" type="button">Clear</button>
         </div>
@@ -34636,6 +34656,25 @@
 
         songAction("bpm", $("bpmInput").value.trim());
         closeSongMenu();
+    });
+
+    // Half or double what is in the field, for a tempo found twice or half
+    // as fast as it feels. Saved with Save
+    const bpmScale = function (by) {
+
+        const now = Number($("bpmInput").value.trim());
+
+        if (now > 0) {
+            $("bpmInput").value = String(Math.max(1, Math.round(now * by)));
+        }
+    };
+
+    $("bpmHalf").addEventListener("click", function () {
+        bpmScale(0.5);
+    });
+
+    $("bpmDouble").addEventListener("click", function () {
+        bpmScale(2);
     });
 
     $("bpmClear").addEventListener("click", function () {
