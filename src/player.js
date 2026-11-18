@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.268";
+    const VERSION = "2.0.1.269";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -13135,6 +13135,14 @@
 
         // A path on Mureka's file host, as the song list gives it
         return AUDIO_BASE + path;
+    }
+
+    // The cover as a JPEG, for the covers shown large. Mureka hands its
+    // covers out as WebP, and a cover copied with a long press, as Copy
+    // Image, went into some apps as its link rather than as a picture.
+    // Mureka's picture server makes a JPEG of the same cover when asked
+    function coverAsJpeg(url) {
+        return String(url || "").replace(/([?&]x-oss-process=[^&#]*\/format,)webp\b/i, "$1jpg");
     }
 
     // Build the album art URL for a song, served from the same host
@@ -31852,7 +31860,7 @@
                     artTiles[i].dataset.cover = cover;
                     artTiles[i].dataset.fallback = "";
                     artTiles[i].dataset.failed = "";
-                    artTiles[i].src = cover;
+                    artTiles[i].src = coverAsJpeg(cover);
 
                     // Which song each side shows, for the debug log, so a
                     // side cover that looks wrong can be traced to its song
