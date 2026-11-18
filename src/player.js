@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.251";
+    const VERSION = "2.0.1.252";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -10313,19 +10313,17 @@
     // only the set's id and color
     function foldSets(entries, opened, playingId, flat) {
 
-        if (songSetOf.size === 0 || !setsShown()) {
+        if ((songSetOf.size === 0 && !sendingInSet()) || !setsShown()) {
             return entries;
         }
 
         const out = [];
         let i = 0;
 
-        // A song still being made that is in a set already counts with it
+        // A song still being made that is in a set already counts with it,
+        // as do the rows of a send to Mureka
         const setIdOf = function (e) {
-
-            const m = songSetOf.get(String(e.song.song_id));
-
-            return m && songSets.has(m.set) ? m.set : "";
+            return listSetIdOf(e.song);
         };
 
         while (i < entries.length) {
@@ -21874,15 +21872,15 @@
 
         for (const p of pending) {
 
-            const m = songSetOf.get(String(at(p).song_id));
+            const setId = listSetIdOf(at(p));
 
-            if (m && songSets.has(m.set)) {
+            if (setId) {
 
-                if (!bySet.has(m.set)) {
-                    bySet.set(m.set, []);
+                if (!bySet.has(setId)) {
+                    bySet.set(setId, []);
                 }
 
-                bySet.get(m.set).push(p);
+                bySet.get(setId).push(p);
             } else {
                 top.push(p);
             }
@@ -21896,8 +21894,8 @@
 
         for (const x of list) {
 
-            const m = songSetOf.get(String(at(x).song_id));
-            const waiting = m ? bySet.get(m.set) : null;
+            const setId = listSetIdOf(at(x));
+            const waiting = setId ? bySet.get(setId) : null;
 
             if (waiting) {
 
@@ -21905,7 +21903,7 @@
                     out.push(p);
                 }
 
-                bySet.delete(m.set);
+                bySet.delete(setId);
             }
 
             out.push(x);
@@ -21922,6 +21920,29 @@
         return top.concat(out);
     }
 
+    // The set a row of the list is in, empty when none. The rows shown
+    // while Mureka has not listed a generation yet are in the set the form
+    // asked for from the start
+    function listSetIdOf(song) {
+
+        if (song && song.__sending) {
+            return song.__set && songSets.has(song.__set) ? song.__set : "";
+        }
+
+        const m = song ? songSetOf.get(String(song.song_id)) : null;
+
+        return m && songSets.has(m.set) ? m.set : "";
+    }
+
+    // Whether a send's rows wait in a set, which then shows even before
+    // any song is in one
+    function sendingInSet() {
+
+        return sendingSongs.some(function (x) {
+            return !!listSetIdOf(x);
+        });
+    }
+
     function shownPending() {
 
         // Only published songs or another creator's: the songs being made
@@ -21934,8 +21955,8 @@
     }
 
     // Two rows for a send to Mureka, named as asked, until its songs are
-    // listed. Answers the send's own number
-    function addSending(title) {
+    // listed, in the set asked for. Answers the send's own number
+    function addSending(title, setId) {
 
         sendingSeq += 1;
 
@@ -21951,6 +21972,7 @@
                 __pending: true,
                 __sending: send,
                 __feed: "",
+                __set: setId || "",
                 __until: Date.now() + SENDING_LONGEST_MS
             });
         }
@@ -57644,6 +57666,13 @@
                 }
             });
 
+            for (const x of sendingSongs) {
+
+                if (x.__set) {
+                    making.add(x.__set);
+                }
+            }
+
             return setsSorted().filter(function (e) {
                 return e.songs.length === 0 && !making.has(e.set.id);
             });
@@ -69467,7 +69496,8 @@
         // in the background
         const before = await createFeedIds();
         const t0 = Date.now();
-        const sending = addSending(body.title || "");
+        const into = createSetNow(d, body.title || "");
+        const sending = addSending(body.title || "", into.setId);
         const sent = createPost("/api/pgc/feed/generate", body, CREATE_GENERATE_WAIT_MS);
         const watch = createWatchStarted(before, body.title || "", t0);
         let feedId = "";
@@ -69517,6 +69547,7 @@
 
                 watch.stop();
                 dropSending(sending);
+                createSetUndo(into);
                 throw e;
             }
 
@@ -69541,10 +69572,12 @@
                 dropSending(sending);
             }
         } else {
+
             dropSending(sending);
+            createSetUndo(into);
         }
 
-        createRemember(feedId, d);
+        createRemember(feedId, into.wish);
 
         if (feedId && body.remix) {
             rememberRemixFrom(feedId, body.remix);
@@ -70114,7 +70147,55 @@
             return;
         }
 
-        createWishes.push({ feedId: feedId, play: d.playMode, setId: setId, title: (d.setName || d.title).trim(), seen: [], newSet: "", until: Date.now() + 15 * 60000 });
+        createWishes.push({ feedId: feedId, play: d.playMode, setId: setId, title: (d.setName || d.title).trim(), seen: [], newSet: "",
+            nameFromSong: d.nameFromSong === true, until: Date.now() + 15 * 60000 });
+    }
+
+    // The set the form asked for, there before the songs are sent, so the
+    // rows shown while Mureka works on them are in it at once. A new set is
+    // made now, empty, named as asked, or after the first song once Mureka
+    // has named it. Answers the set's id, empty for none, what to remember
+    // for the songs, and whether the set was made here
+    function createSetNow(d, title) {
+
+        if (!d.setOn) {
+            return { setId: "", wish: d, made: "" };
+        }
+
+        if (d.setId !== "new") {
+            return { setId: songSets.has(d.setId) ? d.setId : "", wish: d, made: "" };
+        }
+
+        const name = (d.setName || d.title || title || "").trim();
+        const id = newSetId();
+        const now = Date.now();
+
+        songSets.set(id, cleanSet({ id: id, name: name || "New song", color: freeSetColor(), used: now, created: now }));
+        saveSets();
+        dbgLog("Create", "the new set " + JSON.stringify(name || "New song") + " (" + id + ") made before the songs are sent"
+            + (name ? "" : ", named after the first song once it is listed"));
+
+        return { setId: id, wish: Object.assign({}, d, { setId: id, nameFromSong: !name }), made: id };
+    }
+
+    // A set made for a send that came to nothing goes again, if still empty
+    function createSetUndo(into) {
+
+        if (!into.made || !songSets.has(into.made)) {
+            return;
+        }
+
+        for (const m of songSetOf.values()) {
+
+            if (m.set === into.made) {
+                return;
+            }
+        }
+
+        songSets.delete(into.made);
+        openedSets.delete(into.made);
+        saveSets();
+        dbgLog("Create", "the new set " + into.made + " let go, the songs were not sent");
     }
 
     // The new songs found among those of a page, played and put in a set as
@@ -70161,7 +70242,16 @@
 
                     w.newSet = set.id;
                 } else if (w.setId && songSets.has(w.setId)) {
+
                     putInSet(song, w.setId, "hand");
+
+                    // A set made before Mureka named the song takes its name
+                    if (w.nameFromSong && (song.title || "").trim()) {
+
+                        w.nameFromSong = false;
+                        songSets.get(w.setId).name = song.title.trim().slice(0, 200);
+                        saveSets();
+                    }
                 }
 
                 if (w.setId) {
