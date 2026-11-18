@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.257";
+    const VERSION = "2.0.1.258";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -22866,6 +22866,83 @@
         iosSilentTicks = 0;
     }
 
+    // The crackle meter: once a second a moment of what reaches the
+    // speaker is looked at for sudden jumps between two samples and for
+    // holes of silence inside sound, the marks of a crackle. Told every
+    // 15 s in the debug log, to learn whether a crackle can be told there
+    const CRACKLE_TELL_LOOKS = 15;
+    let crackle = { looks: 0, clicks: 0, holes: 0, hit: 0, level: 0 };
+
+    function crackleLook() {
+
+        if (!iosMeter || !iosMeterBuf || !loggingOn()) {
+            return;
+        }
+
+        try {
+            iosMeter.getFloatTimeDomainData(iosMeterBuf);
+        } catch (e) {
+            return;
+        }
+
+        const b = iosMeterBuf;
+        let sum = 0;
+        let steps = 0;
+
+        for (let i = 1; i < b.length; i++) {
+
+            sum += b[i] * b[i];
+            steps += Math.abs(b[i] - b[i - 1]);
+        }
+
+        const rms = Math.sqrt(sum / b.length);
+        const meanStep = steps / (b.length - 1);
+
+        // Too quiet to tell anything by
+        if (rms < 0.02) {
+            return;
+        }
+
+        const jump = Math.max(0.08, meanStep * 8);
+        let clicks = 0;
+        let holes = 0;
+        let run = 0;
+
+        for (let i = 1; i < b.length; i++) {
+
+            if (Math.abs(b[i] - b[i - 1]) > jump) {
+                clicks += 1;
+            }
+
+            if (Math.abs(b[i]) < 0.00001) {
+
+                run += 1;
+
+                if (run === 16) {
+                    holes += 1;
+                }
+            } else {
+                run = 0;
+            }
+        }
+
+        crackle.looks += 1;
+        crackle.clicks += clicks;
+        crackle.holes += holes;
+        crackle.level += rms;
+
+        if (clicks > 0 || holes > 0) {
+            crackle.hit += 1;
+        }
+
+        if (crackle.looks >= CRACKLE_TELL_LOOKS) {
+
+            dbgLog("Audio", "crackle meter at " + dbgNum(audio.currentTime) + ": " + crackle.hit + " of " + crackle.looks + " looks marked, "
+                + crackle.clicks + " jumps, " + crackle.holes + " holes, level " + Math.round(crackle.level / crackle.looks * 100) / 100);
+            crackle = { looks: 0, clicks: 0, holes: 0, hit: 0, level: 0 };
+        }
+    }
+
     function watchIosEngine() {
 
         if (engineMark) {
@@ -22900,6 +22977,10 @@
         const length = isFinite(audio.duration) ? audio.duration : 0;
         const middle = now.el > IOS_EDGE_SEC && (!length || length - now.el > IOS_TAIL_SEC);
         const silent = ticked && middle && iosGain.gain.value > 0.05 && iosMeterSilent();
+
+        if (ticked && iosGain.gain.value > 0.5) {
+            crackleLook();
+        }
 
         iosStillTicks = ticked ? 0 : iosStillTicks + 1;
         iosSilentTicks = silent ? iosSilentTicks + 1 : 0;
