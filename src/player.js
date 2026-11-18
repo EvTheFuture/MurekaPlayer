@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.250";
+    const VERSION = "2.0.1.251";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -18650,8 +18650,7 @@
                 return;
             }
 
-            restartIosEngineBetweenSongs();
-            handleSongEnded();
+            restartIosEngineBetweenSongs(handleSongEnded);
         });
 
         // A song that starts playing proves the audio base URL is correct
@@ -22201,8 +22200,6 @@
         updateMediaPosition();
     }
 
-    let iosGainWaitLogged = false;
-
     function iosCtxStateChanged() {
 
         dbgLog("Audio", "sound engine " + iosCtx.state);
@@ -22225,22 +22222,6 @@
         if (!audio || !iosCtx || iosCtx.state !== "running" || String(audio.src).indexOf("blob:") !== 0) {
             return false;
         }
-
-        // Not put in while the page is out of view, the screen locked say.
-        // Put in then, the sound crackled from there on, until Safari was
-        // started again. It goes in with a song started in view
-        if (document.hidden) {
-
-            if (!iosGainWaitLogged) {
-
-                iosGainWaitLogged = true;
-                dbgLog("Audio", "the gain for fades waits for the page to be in view, the song plays without it");
-            }
-
-            return false;
-        }
-
-        iosGainWaitLogged = false;
 
         try {
 
@@ -22878,28 +22859,65 @@
     // play, which a song chosen by hand never did: the engine kept running
     // across the change while the phone set its sound up anew for the next
     // song. Stopped and started again in the moment between two songs, as
-    // a pause does, needing no tap, the same as when the engine is lost
-    function restartIosEngineBetweenSongs() {
+    // a pause does, needing no tap, the same as when the engine is lost.
+    // The next song comes only once the engine runs again: started while
+    // the engine was still stopping and starting, every song that came on
+    // its own crackled until a pause and play
+    const IOS_RESTART_WAIT_MS = 600;
+
+    function restartIosEngineBetweenSongs(then) {
 
         if (!iosCtx || !iosGain || iosCtx.state !== "running" || !isIosLike()) {
+            then();
             return;
         }
 
-        dbgLog("Audio", "the sound engine stopped and started again between two songs, " + iosCtx.sampleRate + " Hz");
+        const el = audio;
+        const src = audio.src;
+        const t0 = performance.now();
+        let done = false;
+        let waitTimer = 0;
+
+        // Once, after the restart or after the wait, and only while the
+        // song that ended is still the one there, nothing else chosen
+        const next = function (late) {
+
+            if (done) {
+                return;
+            }
+
+            done = true;
+            clearTimeout(waitTimer);
+            dbgLog("Audio", "the sound engine " + iosCtx.state + " after the restart between two songs, "
+                + Math.round(performance.now() - t0) + " ms" + (late ? ", waited no longer" : "") + ", the next song comes");
+
+            if (audio !== el || audio.src !== src || !audio.ended) {
+
+                dbgLog("Audio", "another song was chosen meanwhile, the one that ended is not followed on");
+                return;
+            }
+
+            then();
+        };
+
+        dbgLog("Audio", "the sound engine stops and starts again between two songs, " + iosCtx.sampleRate + " Hz");
 
         const again = function () {
             return iosCtx.resume();
         };
 
+        waitTimer = setTimeout(function () {
+            next(true);
+        }, IOS_RESTART_WAIT_MS);
+
         Promise.resolve().then(function () {
             return iosCtx.suspend();
         }).then(again, again).then(function () {
-
-            if (iosCtx.state !== "running") {
-                dbgLog("Audio", "the sound engine " + iosCtx.state + " after the restart between two songs");
-            }
+            next(false);
         }, function () {
+
             // The watch on the engine takes over
+            next(false);
         });
     }
 
@@ -27048,23 +27066,6 @@
         // into it with the old song's delay
         pauseHold = null;
         engineMark = null;
-
-        // Through the sound engine, the element is emptied before every
-        // new song, as playing on after a pause does. That alone ended a
-        // crackle that went on from a song change, which a song tapped,
-        // stopped first and then loaded straight away, did not
-        if (iosGain) {
-
-            dbgLog("Audio", "the song element emptied before the next song, as a pause and play does"
-                + (audio.ended ? ", the last one ended" : "") + (document.hidden ? ", out of view" : ""));
-
-            try {
-                audio.removeAttribute("src");
-                audio.load();
-            } catch (e) {
-                // Loaded anew below all the same
-            }
-        }
 
         audio.src = url;
         updateSeekDisplay();
