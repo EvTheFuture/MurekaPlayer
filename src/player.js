@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.263";
+    const VERSION = "2.0.1.264";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -70088,10 +70088,25 @@
         return {
             ok: true,
             text: "Sent to Mureka: two songs" + (body.title ? " of \"" + body.title + "\"" : "")
-                + (d.playMode === "now" ? ", played as soon as they are ready" : d.playMode === "after" ? ", played next" : "")
                 + (d.setOn && d.setId === "new" ? ", in a new set" : set ? ", in " + set.name : "")
-                + ". They show in the list while they are made"
+                + ". They show in the list while they are made" + createPlayWords(d.playMode, " and ")
         };
+    }
+
+    // How the new songs play, in the present: they play when ready or
+    // after the playing song. joint comes before, nothing when they are
+    // not asked to play
+    function createPlayWords(mode, joint) {
+
+        if (mode === "now") {
+            return joint + "play as soon as they are ready";
+        }
+
+        if (mode === "after") {
+            return joint + "play after the playing song";
+        }
+
+        return "";
     }
 
     // The send to Mureka and what follows it, in the background. Answers
@@ -70223,8 +70238,8 @@
             feedId: feedId,
             text: (early ? "Mureka has started making two songs" : "Making two songs") + (body.title ? " of \"" + body.title + "\"" : "")
                 + (wait > 0 ? ", number " + wait + " in Mureka's line" : "")
-                + (d.playMode === "now" ? ", played as soon as they are ready" : d.playMode === "after" ? ", played next" : "")
                 + (d.setOn && d.setId === "new" ? ", in a new set" : set ? ", in " + set.name : "")
+                + createPlayWords(d.playMode, ". They ")
         };
     }
 
@@ -70440,8 +70455,7 @@
         return {
             ok: true,
             feedId: "",
-            text: "Mureka's agent is on it, the songs come in a minute or two"
-                + (d.playMode === "now" ? ", played as soon as they are ready" : d.playMode === "after" ? ", played next" : "")
+            text: "Mureka's agent is on it, the songs come in a minute or two" + createPlayWords(d.playMode, " and ")
         };
     }
 
