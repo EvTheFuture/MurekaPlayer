@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.264";
+    const VERSION = "2.0.1.265";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -723,13 +723,60 @@
             return pageSetting("pageGlide", PAGE_GLIDE_MS, 200, 6000);
         }
 
-        // How long the play head's pace is measured over, and how far ahead
-        // of it a page turn may count on it getting, as part of the view
+        // How long the play head's pace is measured over
         const PACE_SAMPLE_MS = 250;
-        const PAGE_AHEAD_MAX = 0.3;
 
         function pages() {
             return !!(hooks.pages && hooks.pages());
+        }
+
+        // Out of view, through the page turn's ease in and out, at a
+        // place of its own and at its own pace, the play head
+        function easeInOut(k) {
+            return k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+        }
+
+        // Where the play head is across the view, 0 the left edge and 1 the
+        // right, as a page turns: from where it was, at its pace, eased over
+        // to where it lands, at the same pace again as it arrives. So the
+        // waveform sets off and arrives at rest, eased in and out, and the
+        // play head lands just where asked, however fast it goes
+        function turnHead(g, k) {
+            return g.x0 + g.u * k + (g.lead - g.x0 - g.u) * easeInOut(k);
+        }
+
+        // How far right of where a turn begins the play head still goes
+        // while the waveform sets off, for a play head crossing u views in
+        // a turn's time. The turn begins that much sooner, so the play head
+        // stays inside its mark
+        function turnRise(x0, u, lead) {
+
+            let top = x0;
+
+            for (let i = 1; i <= 24; i++) {
+                top = Math.max(top, turnHead({ x0: x0, u: u, lead: lead }, i / 24));
+            }
+
+            return top - x0;
+        }
+
+        // The play head's pace across the view, in views a turn takes
+        function turnPace(s) {
+            return isFinite(z.pace) && z.pace > 0 ? Math.min(1, z.pace * pageGlide() / s) : 0;
+        }
+
+        // Where across the view a page turns: the mark set, sooner by as far
+        // as the play head would still go right while the waveform sets off
+        function turnAt(f, p, s) {
+
+            const mark = pageTurn();
+
+            // Only worked out as the play head nears the mark
+            if (f < p + s * (mark - 0.3)) {
+                return mark;
+            }
+
+            return mark - turnRise(mark, turnPace(s), pageLead());
         }
 
         // The view with the play head in the centre, eased near the ends
@@ -774,7 +821,7 @@
                     z.page = clampStart(f - s * pageLead());
                     z.turnFrac = null;
                     z.pageSpan = s;
-                } else if (((f < p && !(z.turnFrac !== null && f >= z.turnFrac)) || f > p + s * pageTurn())
+                } else if (((f < p && !(z.turnFrac !== null && f >= z.turnFrac)) || f > p + s * turnAt(f, p, s))
                     && !(z.glide && z.glide.turn && f >= p - s && f <= p + 2 * s)) {
 
                     // In the middle of a turn, aimed at the play head as it
@@ -784,8 +831,8 @@
                     // so it lands close to the left edge rather than where
                     // it was as the turn began. Not ahead of where the song
                     // is when it is out of view, say after a seek
-                    const ahead = f > p && f < p + s && isFinite(z.pace) ? (z.pace || 0) * pageGlide() : 0;
-                    const next = clampStart(f + Math.min(s * PAGE_AHEAD_MAX, ahead) - s * pageLead());
+                    const u = f > p && f < p + s ? turnPace(s) : 0;
+                    const next = clampStart(f + u * s - s * pageLead());
 
                     // Glides there, as after a seek. Landing ahead of the
                     // play head, the page waits for it to come into view
@@ -803,7 +850,8 @@
                         z.turnFrac = null;
                     } else if (Math.abs(next - p) > 1e-6) {
 
-                        z.glide = { from: p, at: performance.now(), ms: pageGlide(), inOut: true, turn: true };
+                        z.glide = { from: p, at: performance.now(), ms: pageGlide(), inOut: true, turn: true,
+                            x0: (f - p) / s, u: u, lead: pageLead(), span: s };
                         z.page = next;
                         z.turnFrac = next > f ? f : null;
                     }
@@ -954,10 +1002,36 @@
                 if (g.turn && pages()) {
 
                     const f = Math.max(0, Math.min(1, frac));
-                    const left = Math.max(0, g.at + (g.ms || GLIDE_MS) - now);
-                    const ahead = isFinite(z.pace) ? Math.max(0, Math.min(span() * PAGE_AHEAD_MAX, (z.pace || 0) * left)) : 0;
+                    const s = span();
 
-                    target = clampStart(f + ahead - span() * pageLead());
+                    // The waveform placed under the play head where its
+                    // path has it now, by where the song really is, so a
+                    // pace measured wrong never moves where it lands
+                    if (g.span === s && isFinite(g.x0)) {
+
+                        target = clampStart(f - s * turnHead(g, k));
+
+                        // Never back the other way, as a play head moving
+                        // in steps would have it between two steps
+                        if (g.last !== undefined) {
+                            target = g.x0 >= g.lead ? Math.max(target, g.last) : Math.min(target, g.last);
+                        }
+
+                        g.last = target;
+                        z.page = k >= 1 ? target : clampStart(f + g.u * s * (1 - k) - s * g.lead);
+
+                        // Landed ahead of a play head that moves in steps,
+                        // the page waits for it rather than turning back
+                        if (k >= 1) {
+
+                            z.glide = null;
+                            z.turnFrac = target > f ? f : null;
+                        }
+
+                        return target;
+                    }
+
+                    target = clampStart(f - s * pageLead());
                     z.page = target;
                 }
 
@@ -87885,13 +87959,60 @@
             return pageSetting("pageGlide", PAGE_GLIDE_MS, 200, 6000);
         }
 
-        // How long the play head's pace is measured over, and how far ahead
-        // of it a page turn may count on it getting, as part of the view
+        // How long the play head's pace is measured over
         const PACE_SAMPLE_MS = 250;
-        const PAGE_AHEAD_MAX = 0.3;
 
         function pages() {
             return !!(hooks.pages && hooks.pages());
+        }
+
+        // Out of view, through the page turn's ease in and out, at a
+        // place of its own and at its own pace, the play head
+        function easeInOut(k) {
+            return k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+        }
+
+        // Where the play head is across the view, 0 the left edge and 1 the
+        // right, as a page turns: from where it was, at its pace, eased over
+        // to where it lands, at the same pace again as it arrives. So the
+        // waveform sets off and arrives at rest, eased in and out, and the
+        // play head lands just where asked, however fast it goes
+        function turnHead(g, k) {
+            return g.x0 + g.u * k + (g.lead - g.x0 - g.u) * easeInOut(k);
+        }
+
+        // How far right of where a turn begins the play head still goes
+        // while the waveform sets off, for a play head crossing u views in
+        // a turn's time. The turn begins that much sooner, so the play head
+        // stays inside its mark
+        function turnRise(x0, u, lead) {
+
+            let top = x0;
+
+            for (let i = 1; i <= 24; i++) {
+                top = Math.max(top, turnHead({ x0: x0, u: u, lead: lead }, i / 24));
+            }
+
+            return top - x0;
+        }
+
+        // The play head's pace across the view, in views a turn takes
+        function turnPace(s) {
+            return isFinite(z.pace) && z.pace > 0 ? Math.min(1, z.pace * pageGlide() / s) : 0;
+        }
+
+        // Where across the view a page turns: the mark set, sooner by as far
+        // as the play head would still go right while the waveform sets off
+        function turnAt(f, p, s) {
+
+            const mark = pageTurn();
+
+            // Only worked out as the play head nears the mark
+            if (f < p + s * (mark - 0.3)) {
+                return mark;
+            }
+
+            return mark - turnRise(mark, turnPace(s), pageLead());
         }
 
         // The view with the play head in the centre, eased near the ends
@@ -87936,7 +88057,7 @@
                     z.page = clampStart(f - s * pageLead());
                     z.turnFrac = null;
                     z.pageSpan = s;
-                } else if (((f < p && !(z.turnFrac !== null && f >= z.turnFrac)) || f > p + s * pageTurn())
+                } else if (((f < p && !(z.turnFrac !== null && f >= z.turnFrac)) || f > p + s * turnAt(f, p, s))
                     && !(z.glide && z.glide.turn && f >= p - s && f <= p + 2 * s)) {
 
                     // In the middle of a turn, aimed at the play head as it
@@ -87946,8 +88067,8 @@
                     // so it lands close to the left edge rather than where
                     // it was as the turn began. Not ahead of where the song
                     // is when it is out of view, say after a seek
-                    const ahead = f > p && f < p + s && isFinite(z.pace) ? (z.pace || 0) * pageGlide() : 0;
-                    const next = clampStart(f + Math.min(s * PAGE_AHEAD_MAX, ahead) - s * pageLead());
+                    const u = f > p && f < p + s ? turnPace(s) : 0;
+                    const next = clampStart(f + u * s - s * pageLead());
 
                     // Glides there, as after a seek. Landing ahead of the
                     // play head, the page waits for it to come into view
@@ -87965,7 +88086,8 @@
                         z.turnFrac = null;
                     } else if (Math.abs(next - p) > 1e-6) {
 
-                        z.glide = { from: p, at: performance.now(), ms: pageGlide(), inOut: true, turn: true };
+                        z.glide = { from: p, at: performance.now(), ms: pageGlide(), inOut: true, turn: true,
+                            x0: (f - p) / s, u: u, lead: pageLead(), span: s };
                         z.page = next;
                         z.turnFrac = next > f ? f : null;
                     }
@@ -88116,10 +88238,36 @@
                 if (g.turn && pages()) {
 
                     const f = Math.max(0, Math.min(1, frac));
-                    const left = Math.max(0, g.at + (g.ms || GLIDE_MS) - now);
-                    const ahead = isFinite(z.pace) ? Math.max(0, Math.min(span() * PAGE_AHEAD_MAX, (z.pace || 0) * left)) : 0;
+                    const s = span();
 
-                    target = clampStart(f + ahead - span() * pageLead());
+                    // The waveform placed under the play head where its
+                    // path has it now, by where the song really is, so a
+                    // pace measured wrong never moves where it lands
+                    if (g.span === s && isFinite(g.x0)) {
+
+                        target = clampStart(f - s * turnHead(g, k));
+
+                        // Never back the other way, as a play head moving
+                        // in steps would have it between two steps
+                        if (g.last !== undefined) {
+                            target = g.x0 >= g.lead ? Math.max(target, g.last) : Math.min(target, g.last);
+                        }
+
+                        g.last = target;
+                        z.page = k >= 1 ? target : clampStart(f + g.u * s * (1 - k) - s * g.lead);
+
+                        // Landed ahead of a play head that moves in steps,
+                        // the page waits for it rather than turning back
+                        if (k >= 1) {
+
+                            z.glide = null;
+                            z.turnFrac = target > f ? f : null;
+                        }
+
+                        return target;
+                    }
+
+                    target = clampStart(f - s * pageLead());
                     z.page = target;
                 }
 
