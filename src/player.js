@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.244";
+    const VERSION = "2.0.1.245";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -73029,7 +73029,9 @@
             likes: Number(c.like_count) || 0,
             liked: c.is_liked === true,
             replyCount: Number(c.reply_count || c.sub_count || c.child_count) || 0,
-            moment: Number(c.moment) >= 0 ? Number(c.moment) / 1000 : -1,
+            // The place in the song a comment is tagged with, in seconds as
+            // Mureka sends it: 75 shows on its page as 01:15
+            moment: Number(c.moment) >= 0 ? Number(c.moment) : -1,
             replies: nested.map(commentOf)
         };
     }
@@ -73099,12 +73101,13 @@
         }
     }
 
-    // The place in the song a tagged comment is about, as m:ss
+    // The place in the song a tagged comment is about, as mm:ss
     function momentText(sec) {
 
         const s = Math.max(0, Math.round(sec));
 
-        return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+        // As Mureka's page shows it, 01:15
+        return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
     }
 
     // A tagged comment's place played: the song moved there when it is the
@@ -110524,7 +110527,8 @@
 
         const s = Math.max(0, Math.round(sec));
 
-        return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+        // As Mureka's page shows it, 01:15
+        return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
     }
 
     // The room's chat, read through the Android device, from the shared
