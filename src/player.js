@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.262";
+    const VERSION = "2.0.1.263";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -23094,7 +23094,9 @@
             return;
         }
 
-        dbgLog("Audio", "test: the sound engine stopped for 1 s, the song goes on, engine " + iosCtx.state);
+        const ms = Math.max(100, iosRestMs());
+
+        dbgLog("Audio", "test: the sound engine stopped for " + ms + " ms, the song goes on, engine " + iosCtx.state);
 
         iosCtx.suspend().then(function () {
 
@@ -23105,11 +23107,11 @@
                 }, function (e) {
                     dbgLog("Audio", "test: the sound engine did not start again, " + errText(e));
                 });
-            }, 1000);
+            }, ms);
         }, function (e) {
             dbgLog("Audio", "test: the sound engine could not be stopped, " + errText(e));
         });
-        buttonDone(btn, "Stopped 1 s", true);
+        buttonDone(btn, "Stopped " + ms / 1000 + " s", true);
     }
 
     function iosTestSongStill(btn) {
@@ -58006,7 +58008,7 @@
             const testRow = document.createElement("div");
 
             testRow.classList.add("mp-row8");
-            testRow.appendChild(makeButton("Engine still 1 s", "#333", "#fff", function (ev) {
+            testRow.appendChild(makeButton("Engine still", "#333", "#fff", function (ev) {
                 iosTestEngineStill(ev.currentTarget);
             }));
             testRow.appendChild(makeButton("Song still 1 s", "#333", "#fff", function (ev) {
@@ -58016,7 +58018,7 @@
                 iosTestNewEngine(ev.currentTarget);
             }));
             devPage.appendChild(makeLabel("While it crackles"));
-            devPage.appendChild(makeHint("Each does one part of what a pause and play does: the sound engine stopped for a second with the song going on, the song stopped for a second and played on as it is, without loading it again, or a new sound engine and song element, the song going on where it was. Try one at a time, and note in the log which one ended the crackle."));
+            devPage.appendChild(makeHint("Each does one part of what a pause and play does: the sound engine stopped with the song going on, for the rest set above, the song stopped for a second and played on as it is, without loading it again, or a new sound engine and song element, the song going on where it was. Try one at a time, and note in the log which one ended the crackle."));
             devPage.appendChild(testRow);
         }
 
