@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.260";
+    const VERSION = "2.0.1.261";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -23082,6 +23082,80 @@
 
     // A load waiting for its moment, the song stopped only for it
     let iosSettleWaiting = false;
+
+    // The iPhone sound tests' taps, each logged
+    function iosTestEngineStill(btn) {
+
+        if (!iosCtx || !iosGain || !audio || audio.paused) {
+
+            buttonDone(btn, "No song through the engine", false);
+            return;
+        }
+
+        dbgLog("Audio", "test: the sound engine stopped for 1 s, the song goes on, engine " + iosCtx.state);
+
+        iosCtx.suspend().then(function () {
+
+            setTimeout(function () {
+
+                iosCtx.resume().then(function () {
+                    dbgLog("Audio", "test: the sound engine running again, " + iosCtx.state);
+                }, function (e) {
+                    dbgLog("Audio", "test: the sound engine did not start again, " + errText(e));
+                });
+            }, 1000);
+        }, function (e) {
+            dbgLog("Audio", "test: the sound engine could not be stopped, " + errText(e));
+        });
+        buttonDone(btn, "Stopped 1 s", true);
+    }
+
+    function iosTestSongStill(btn) {
+
+        if (!audio || audio.paused) {
+
+            buttonDone(btn, "Nothing playing", false);
+            return;
+        }
+
+        dbgLog("Audio", "test: the song stopped for 1 s, played on as it is at " + dbgNum(audio.currentTime));
+
+        // Its pause and play are no press and no interruption
+        heldReleasing = true;
+        clearTimeout(heldReleaseTimer);
+        heldReleaseTimer = setTimeout(function () {
+            heldReleasing = false;
+        }, 2500);
+        audio.pause();
+
+        setTimeout(function () {
+
+            const go = audio.play();
+
+            if (go && go.catch) {
+                go.catch(function (e) {
+                    dbgLog("Audio", "test: the song did not play on, " + errText(e));
+                });
+            }
+        }, 1000);
+        buttonDone(btn, "Stopped 1 s", true);
+    }
+
+    function iosTestNewEngine(btn) {
+
+        if (!audio || !currentSong || !iosGain) {
+
+            buttonDone(btn, "No song through the engine", false);
+            return;
+        }
+
+        dbgLog("Audio", "test: a new sound engine and song element, the song goes on");
+        userPaused = true;
+        audio.pause();
+        iosEngineDead = true;
+        startAudioPlayback();
+        buttonDone(btn, "New engine", true);
+    }
 
     // The test setting Play anew after a song change: a new song through
     // the sound engine, once it has played a moment, is paused and played
@@ -57889,6 +57963,24 @@
             iosRow("iosSettle", "A moment of silence before a load", "0.4 s with the song stopped before the next song or a move loads it.");
             iosRow("iosAmbientStart", "Mix with other apps until the first play", "As the player opens, Safari is told the page's sound mixes with other apps, and it becomes music at the first play. Off, it is music from the start, never changed under a running sound engine. Takes effect when the player is opened again.");
             iosRow("iosPlayAnew", "Play anew after a song change", "A new song is paused and played on once it has played 0.3 s, as Play / Pause does, a second of silence at its start. With the screen locked Safari may keep it paused.");
+
+            // Taps for while it crackles, each one part of what a pause and
+            // play does, to learn which part ends it
+            const testRow = document.createElement("div");
+
+            testRow.classList.add("mp-row8");
+            testRow.appendChild(makeButton("Engine still 1 s", "#333", "#fff", function (ev) {
+                iosTestEngineStill(ev.currentTarget);
+            }));
+            testRow.appendChild(makeButton("Song still 1 s", "#333", "#fff", function (ev) {
+                iosTestSongStill(ev.currentTarget);
+            }));
+            testRow.appendChild(makeButton("New engine", "#333", "#fff", function (ev) {
+                iosTestNewEngine(ev.currentTarget);
+            }));
+            devPage.appendChild(makeLabel("While it crackles"));
+            devPage.appendChild(makeHint("Each does one part of what a pause and play does: the sound engine stopped for a second with the song going on, the song stopped for a second and played on as it is, without loading it again, or a new sound engine and song element, the song going on where it was. Try one at a time, and note in the log which one ended the crackle."));
+            devPage.appendChild(testRow);
         }
 
         devPage.appendChild(makeLabel("Other tools"));
