@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.265";
+    const VERSION = "2.0.1.266";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -760,6 +760,28 @@
             return top - x0;
         }
 
+        // Where a turn aims the play head so that the nearest it comes to the
+        // left edge is the place set: arriving at its pace, it was a little
+        // further left a moment before, more so the faster it goes. So it
+        // is aimed that little bit further right
+        function turnAim(x0, u, lead) {
+
+            let aim = lead;
+
+            for (let n = 0; n < 3; n++) {
+
+                let low = aim;
+
+                for (let i = 1; i <= 24; i++) {
+                    low = Math.min(low, turnHead({ x0: x0, u: u, lead: aim }, i / 24));
+                }
+
+                aim = lead + (aim - low);
+            }
+
+            return aim;
+        }
+
         // The play head's pace across the view, in views a turn takes
         function turnPace(s) {
             return isFinite(z.pace) && z.pace > 0 ? Math.min(1, z.pace * pageGlide() / s) : 0;
@@ -776,7 +798,9 @@
                 return mark;
             }
 
-            return mark - turnRise(mark, turnPace(s), pageLead());
+            const u = turnPace(s);
+
+            return mark - turnRise(mark, u, turnAim(mark, u, pageLead()));
         }
 
         // The view with the play head in the centre, eased near the ends
@@ -832,7 +856,8 @@
                     // it was as the turn began. Not ahead of where the song
                     // is when it is out of view, say after a seek
                     const u = f > p && f < p + s ? turnPace(s) : 0;
-                    const next = clampStart(f + u * s - s * pageLead());
+                    const aim = turnAim((f - p) / s, u, pageLead());
+                    const next = clampStart(f + u * s - s * aim);
 
                     // Glides there, as after a seek. Landing ahead of the
                     // play head, the page waits for it to come into view
@@ -851,7 +876,7 @@
                     } else if (Math.abs(next - p) > 1e-6) {
 
                         z.glide = { from: p, at: performance.now(), ms: pageGlide(), inOut: true, turn: true,
-                            x0: (f - p) / s, u: u, lead: pageLead(), span: s };
+                            x0: (f - p) / s, u: u, lead: aim, span: s };
                         z.page = next;
                         z.turnFrac = next > f ? f : null;
                     }
@@ -87996,6 +88021,28 @@
             return top - x0;
         }
 
+        // Where a turn aims the play head so that the nearest it comes to the
+        // left edge is the place set: arriving at its pace, it was a little
+        // further left a moment before, more so the faster it goes. So it
+        // is aimed that little bit further right
+        function turnAim(x0, u, lead) {
+
+            let aim = lead;
+
+            for (let n = 0; n < 3; n++) {
+
+                let low = aim;
+
+                for (let i = 1; i <= 24; i++) {
+                    low = Math.min(low, turnHead({ x0: x0, u: u, lead: aim }, i / 24));
+                }
+
+                aim = lead + (aim - low);
+            }
+
+            return aim;
+        }
+
         // The play head's pace across the view, in views a turn takes
         function turnPace(s) {
             return isFinite(z.pace) && z.pace > 0 ? Math.min(1, z.pace * pageGlide() / s) : 0;
@@ -88012,7 +88059,9 @@
                 return mark;
             }
 
-            return mark - turnRise(mark, turnPace(s), pageLead());
+            const u = turnPace(s);
+
+            return mark - turnRise(mark, u, turnAim(mark, u, pageLead()));
         }
 
         // The view with the play head in the centre, eased near the ends
@@ -88068,7 +88117,8 @@
                     // it was as the turn began. Not ahead of where the song
                     // is when it is out of view, say after a seek
                     const u = f > p && f < p + s ? turnPace(s) : 0;
-                    const next = clampStart(f + u * s - s * pageLead());
+                    const aim = turnAim((f - p) / s, u, pageLead());
+                    const next = clampStart(f + u * s - s * aim);
 
                     // Glides there, as after a seek. Landing ahead of the
                     // play head, the page waits for it to come into view
@@ -88087,7 +88137,7 @@
                     } else if (Math.abs(next - p) > 1e-6) {
 
                         z.glide = { from: p, at: performance.now(), ms: pageGlide(), inOut: true, turn: true,
-                            x0: (f - p) / s, u: u, lead: pageLead(), span: s };
+                            x0: (f - p) / s, u: u, lead: aim, span: s };
                         z.page = next;
                         z.turnFrac = next > f ? f : null;
                     }
