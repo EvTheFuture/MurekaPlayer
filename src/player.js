@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.275";
+    const VERSION = "2.0.1.276";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -16087,7 +16087,8 @@
     // onFold(folded), told as it tucks away and comes back. Answers the
     // element, head (the bar it is moved by, for a title and buttons),
     // body, close(),
-    // fold(), unfold(), folded(), badge(n), a count on the tab, lower(),
+    // fold(), unfold(), folded(), badge(n, color), a count on the tab, the
+    // tab and its icon in that color while the count is above 0, lower(),
     // under a dialog it opens, and raise(), over everything again
     function makeFloatWindow(opts) {
 
@@ -16448,10 +16449,17 @@
             raise: function () {
                 el.style.zIndex = String(zTop);
             },
-            badge: function (n) {
+            badge: function (n, color) {
+
+                const lit = n > 0 ? color || "#ffb454" : "";
 
                 tabCount.textContent = n > 99 ? "99+" : n > 0 ? String(n) : "";
                 tabCount.style.display = n > 0 ? "" : "none";
+                tabCount.style.background = lit || "#ffb454";
+
+                // Something new: the icon and the edge in the count's color
+                tab.style.color = lit || "#48e1eb";
+                tab.style.borderColor = lit || "rgba(255,255,255,0.18)";
             },
 
             // Shown where it was left, tucked away or not
@@ -43143,15 +43151,21 @@
 
         chatFollowRoom();
 
-        // The count on the tab of a chat tucked into an edge
+        // The count on the tab of a chat tucked into an edge, the tab
+        // orange while something is unread, pink for a mention
+        const unreadColor = chatUnread() > 0 ? (chatMentionsUnread() > 0 ? "#ff6b9a" : "#ffb454") : "";
+
         if (chatUi && chatUi.win) {
-            chatUi.win.badge(chatUnread());
+            chatUi.win.badge(chatUnread(), unreadColor);
         }
 
         if (controlButtons && controlButtons.chat) {
 
             controlButtons.chat.title = syncInRoom() ? "Chat in " + syncRoomLabel() : "Chat, in a room";
             paintChatCount(controlButtons.chat, chatUnread(), chatMentionsUnread() > 0);
+
+            // The chat icon itself in the same color
+            controlButtons.chat.style.color = unreadColor || "#fff";
         }
 
         if (syncHeadBtn) {
@@ -43492,7 +43506,8 @@
     }
 
     // The chat, from the shared view, in a window floating over the
-    // player. Escape tucks it into its edge, Close closes it
+    // player. Escape and Minimize tuck it into its edge, Escape tucked
+    // away closes it
     let chatUi = null;
 
     // The people to mention: those in the room and those who wrote
@@ -43655,8 +43670,11 @@
             }
         });
         const title = document.createElement("div");
-        const shut = makeButton("Close", "#444", "#fff", function () {
-            done();
+
+        // Minimize tucks it into its edge, as a double tap on its bar
+        // does. Leaving the room closes it
+        const shut = makeButton("Minimize", "#444", "#fff", function () {
+            win.fold();
         });
         const ui = { close: null, win: null, newAfter: chatSeen() };
         const done = function () {
@@ -80067,6 +80085,15 @@
         background: #ff6b9a;
     }
 
+    /* The chat icon in the count's color while something is unread */
+    .ctl.chatUnread {
+        color: #ffb454;
+    }
+
+    .ctl.chatMention {
+        color: #ff6b9a;
+    }
+
     /* The chat window's title, it is moved by it, cut short when narrow */
     .chatWinTitle {
         flex: 1 1 auto;
@@ -91591,7 +91618,8 @@
     // onFold(folded), told as it tucks away and comes back. Answers the
     // element, head (the bar it is moved by, for a title and buttons),
     // body, close(),
-    // fold(), unfold(), folded(), badge(n), a count on the tab, lower(),
+    // fold(), unfold(), folded(), badge(n, color), a count on the tab, the
+    // tab and its icon in that color while the count is above 0, lower(),
     // under a dialog it opens, and raise(), over everything again
     function makeFloatWindow(opts) {
 
@@ -91952,10 +91980,17 @@
             raise: function () {
                 el.style.zIndex = String(zTop);
             },
-            badge: function (n) {
+            badge: function (n, color) {
+
+                const lit = n > 0 ? color || "#ffb454" : "";
 
                 tabCount.textContent = n > 99 ? "99+" : n > 0 ? String(n) : "";
                 tabCount.style.display = n > 0 ? "" : "none";
+                tabCount.style.background = lit || "#ffb454";
+
+                // Something new: the icon and the edge in the count's color
+                tab.style.color = lit || "#48e1eb";
+                tab.style.borderColor = lit || "rgba(255,255,255,0.18)";
             },
 
             // Shown where it was left, tucked away or not
@@ -94362,6 +94397,11 @@
             chat.style.display = unread > 0 ? "" : "none";
             chat.classList.toggle("mention", !!(s && s.togetherChatMention));
         }
+
+        // The chat icon itself orange while something is unread, pink for
+        // a mention
+        $("chatBtn").classList.toggle("chatUnread", unread > 0 && !(s && s.togetherChatMention));
+        $("chatBtn").classList.toggle("chatMention", unread > 0 && !!(s && s.togetherChatMention));
 
         $("chatBtn").title = s && s.togetherIn ? "Chat in " + String(s.togetherRoom || "the room") : "Chat, in a room";
 
@@ -112803,6 +112843,17 @@
         }
     }
 
+    // The color of what is unread in the chat: orange, pink for a mention,
+    // empty for nothing
+    function chatUnreadColor(s) {
+
+        if (!s || !(Number(s.togetherChatUnread) > 0)) {
+            return "";
+        }
+
+        return s.togetherChatMention ? "#ff6b9a" : "#ffb454";
+    }
+
     // tucked opens it tucked into its edge, out of the way
     function openTogetherChat(tucked) {
 
@@ -112878,8 +112929,13 @@
         title.textContent = "Chat";
         shut.type = "button";
         shut.className = "chip";
-        shut.textContent = "Close";
-        shut.addEventListener("click", close);
+
+        // Minimize tucks it into its edge, as a double tap on its bar does.
+        // Leaving the room closes it
+        shut.textContent = "Minimize";
+        shut.addEventListener("click", function () {
+            win.fold();
+        });
 
         // Escape or Back tucks it into its edge. Tucked away it waits there
         // and leaves Escape and Back to the rest
@@ -112918,7 +112974,7 @@
                     view.atEnd();
                 }
 
-                win.badge(folded && state ? Number(state.togetherChatUnread) || 0 : 0);
+                win.badge(folded && state ? Number(state.togetherChatUnread) || 0 : 0, chatUnreadColor(state));
 
                 if (chatClose === close) {
                     backWhileOpen();
@@ -112980,7 +113036,7 @@
             }
 
             if (win) {
-                win.badge(win.folded() && s ? Number(s.togetherChatUnread) || 0 : 0);
+                win.badge(win.folded() && s ? Number(s.togetherChatUnread) || 0 : 0, chatUnreadColor(s));
             }
         };
         load();

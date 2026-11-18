@@ -14,7 +14,8 @@
     // onFold(folded), told as it tucks away and comes back. Answers the
     // element, head (the bar it is moved by, for a title and buttons),
     // body, close(),
-    // fold(), unfold(), folded(), badge(n), a count on the tab, lower(),
+    // fold(), unfold(), folded(), badge(n, color), a count on the tab, the
+    // tab and its icon in that color while the count is above 0, lower(),
     // under a dialog it opens, and raise(), over everything again
     function makeFloatWindow(opts) {
 
@@ -375,10 +376,17 @@
             raise: function () {
                 el.style.zIndex = String(zTop);
             },
-            badge: function (n) {
+            badge: function (n, color) {
+
+                const lit = n > 0 ? color || "#ffb454" : "";
 
                 tabCount.textContent = n > 99 ? "99+" : n > 0 ? String(n) : "";
                 tabCount.style.display = n > 0 ? "" : "none";
+                tabCount.style.background = lit || "#ffb454";
+
+                // Something new: the icon and the edge in the count's color
+                tab.style.color = lit || "#48e1eb";
+                tab.style.borderColor = lit || "rgba(255,255,255,0.18)";
             },
 
             // Shown where it was left, tucked away or not
