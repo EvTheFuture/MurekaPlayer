@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.246";
+    const VERSION = "2.0.1.247";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -24676,7 +24676,11 @@
 
             const pass = /cos-token/.test(what);
             const msg = /\/api\/msg\//.test(what);
-            const long = /playlist\/detail|video\/detail|comment|mention/.test(what) || MAKING.test(what) || (msg && !msgWhole);
+            // Long for the ones being learned: playlists, videos and the music
+            // video maker, comments and mentions, and song making. The music
+            // video maker's list of finished videos, read all the time, short
+            const canvas = /video\/canvas/.test(what) && !/exportable\/list/.test(what);
+            const long = /playlist\/detail|video\/detail|comment|mention/.test(what) || canvas || MAKING.test(what) || (msg && !msgWhole);
 
             if (msg) {
                 msgWhole = true;
