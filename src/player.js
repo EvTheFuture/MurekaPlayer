@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.272";
+    const VERSION = "2.0.1.273";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -37329,6 +37329,9 @@
         const box = "display:flex;align-items:center;gap:8px;flex:0 0 auto";
 
         seekRowEl.style.position = over ? "relative" : "";
+
+        // The times stay within the row, under anything opened over it
+        seekRowEl.style.isolation = over ? "isolate" : "";
         seekRowEl.style.gap = over ? "0" : "8px";
 
         if (!over) {
@@ -79804,8 +79807,11 @@
         display: contents;
     }
 
+    /* The times stay within the row, so the settings and the other sheets
+       opened over it cover them */
     #seek.timesOver {
         position: relative;
+        isolation: isolate;
     }
 
     #seek.timesOver #seekL,

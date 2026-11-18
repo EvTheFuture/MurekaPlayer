@@ -337,8 +337,11 @@
         display: contents;
     }
 
+    /* The times stay within the row, so the settings and the other sheets
+       opened over it cover them */
     #seek.timesOver {
         position: relative;
+        isolation: isolate;
     }
 
     #seek.timesOver #seekL,
