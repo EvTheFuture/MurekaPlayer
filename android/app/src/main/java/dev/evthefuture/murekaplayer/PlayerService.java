@@ -410,6 +410,11 @@ public class PlayerService extends Service implements Hub.Listener {
 
                 Hub.note("Hotspot", "Android says the hotspot is " + apWord(st));
 
+                // Failed just after the player switched it on, tried again
+                if (st == 14 && !isInitialStickyBroadcast()) {
+                    Hotspot.failed(context);
+                }
+
                 // The hotspot changing takes the internet away for a moment,
                 // which the player does not need to announce
                 if (!isInitialStickyBroadcast()) {

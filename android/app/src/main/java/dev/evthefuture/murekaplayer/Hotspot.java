@@ -302,12 +302,55 @@ final class Hotspot {
         return false;
     }
 
+    // A hotspot Android lets fail soon after the player switched it on, as
+    // it can while a Bluetooth link to a car comes up, is switched on again:
+    // up to three times, a few seconds apart
+    private static final long FAIL_WINDOW_MS = 30000;
+    private static final long FAIL_RETRY_MS = 4000;
+    private static final int FAIL_TRIES = 3;
+    private static volatile long onAskedAt = 0;
+    private static volatile int failRetries = 0;
+
     static void start(Context c) {
+
+        onAskedAt = System.currentTimeMillis();
+        failRetries = 0;
         begin(c, "on");
     }
 
     static void stop(Context c) {
+
+        onAskedAt = 0;
         begin(c, "off");
+    }
+
+    // Android said the hotspot failed. Main thread
+    static void failed(Context c) {
+
+        if (onAskedAt == 0 || System.currentTimeMillis() - onAskedAt > FAIL_WINDOW_MS) {
+            return;
+        }
+
+        if (failRetries >= FAIL_TRIES) {
+
+            Hub.note("Hotspot", "the hotspot failed again, not tried any more after " + FAIL_TRIES + " tries");
+            onAskedAt = 0;
+            return;
+        }
+
+        final Context app = c.getApplicationContext();
+
+        failRetries++;
+        onAskedAt = System.currentTimeMillis();
+        Hub.note("Hotspot", "Android let the hotspot fail just after it was switched on, switching it on again in "
+            + (FAIL_RETRY_MS / 1000) + " s, try " + failRetries + " of " + FAIL_TRIES);
+        MAIN.postDelayed(() -> {
+
+            // Not when switched off meanwhile
+            if (onAskedAt != 0) {
+                begin(app, "on");
+            }
+        }, FAIL_RETRY_MS);
     }
 
     // A switch, which replaces one still waiting to be tried again
