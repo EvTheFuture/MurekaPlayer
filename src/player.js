@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.281";
+    const VERSION = "2.0.1.282";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -74182,6 +74182,34 @@
     // here, and once none shown is left unread, or with Mark all read,
     // Mureka's own unread mark is cleared as its page clears it
     const MSG_SEEN_KEY = "mureka_msg_seen_v1";
+
+    // Mureka's list can give a notification as read before it was seen
+    // anywhere, its unread count saying nothing either, so the player keeps
+    // its own mark: the time of the newest one known as read, the first
+    // look and Mark all read setting it. Newer ones are new here until
+    // opened here or all are marked read
+    const MSG_KNOWN_KEY = "mureka_msg_known_v1";
+
+    function msgKnownAt() {
+
+        try {
+
+            const v = localStorage.getItem(MSG_KNOWN_KEY);
+
+            return v === null ? null : Number(v) || 0;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function msgSetKnown(at) {
+
+        try {
+            localStorage.setItem(MSG_KNOWN_KEY, String(Math.max(at, msgKnownAt() || 0)));
+        } catch (e) {
+            // Kept for this visit only
+        }
+    }
     const MSG_READ_KEY = "mureka_msg_read_v1";
     const MSG_EVERY_MS = 10 * 60000;
     const MSG_PAGE = 20;
@@ -74363,7 +74391,7 @@
             title: title,
             cover: cover,
             unreadThere: item.is_read === false,
-            read: item.is_read !== false || readIds.has(id)
+            read: readIds.has(id) || (item.is_read !== false && at <= (msgKnownAt() === null ? Infinity : msgKnownAt()))
         };
 
         if (!msgSampled.has(code)) {
@@ -74489,12 +74517,16 @@
     async function msgMarkAllRead() {
 
         const ids = msgReadIds();
+        let newest = 0;
 
         for (const m of msgById.values()) {
 
             m.read = true;
             ids.add(m.id);
+            newest = Math.max(newest, Math.round(m.at / 1000));
         }
+
+        msgSetKnown(newest);
 
         msgSaveRead(ids);
         msgCount();
@@ -74672,19 +74704,8 @@
 
         try {
 
-            let page = null;
-
-            try {
-                page = await fetchMsgPage("");
-            } catch (e) {
-                dbgLog("Notifications", "could not be read, " + errText(e));
-                return;
-            }
-
-            const list = page.raw;
-            const readIds = msgReadIds();
-
-            // Mureka's own count, as its bell shows it
+            // Mureka's own count, as its bell shows it, asked before the
+            // list, which may count as reading them
             try {
 
                 const res = await murekaFetch("/api/msg/new?time=" + Date.now(), { credentials: "include" });
@@ -74701,6 +74722,27 @@
                 }
             } catch (e) {
                 dbgLog("Notifications", "Mureka's unread count could not be read, " + errText(e));
+            }
+
+            let page = null;
+
+            try {
+                page = await fetchMsgPage("");
+            } catch (e) {
+                dbgLog("Notifications", "could not be read, " + errText(e));
+                return;
+            }
+
+            const list = page.raw;
+            const readIds = msgReadIds();
+
+            // The first look: all there are taken as known
+            if (msgKnownAt() === null) {
+
+                msgSetKnown(list.reduce(function (max, item) {
+                    return Math.max(max, msgTime(item));
+                }, 0));
+                dbgLog("Notifications", "the first look, the ones there are taken as read, newer ones are new here");
             }
 
             msgList = list.map(function (item) {
@@ -74764,7 +74806,9 @@
 
             dbgLog("Notifications", list.filter(function (x) {
                 return msgTime(x) > seen;
-            }).length + " new of " + list.length + ", songs to read again: " + (songs.size || "none"));
+            }).length + " new of " + list.length + ", " + msgList.filter(function (m) {
+                return !m.read;
+            }).length + " unread here, songs to read again: " + (songs.size || "none"));
 
             // Each song read again a moment apart, its comments and plays,
             // after this read is done so an open list is not kept waiting
