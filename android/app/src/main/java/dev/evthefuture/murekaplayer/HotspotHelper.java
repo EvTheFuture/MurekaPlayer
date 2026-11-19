@@ -65,6 +65,8 @@ import java.util.function.Supplier;
 // btdisconnect <address> -> how disconnecting it went
 // btactive <address> -> how making it where the music goes went
 // bton -> how switching Bluetooth on went
+// safevolume -> ok, or why not: Android's warning before loud music on
+//     headphones and Bluetooth taken as confirmed, as its OK does
 // serve -> keeps running in a session of its own, so it outlives the adb
 //     session, until the phone restarts. It hands the app a Binder
 //     through the app's helper provider, and the app sends the commands
@@ -99,6 +101,7 @@ public final class HotspotHelper {
     static final int CODE_BT_DISCONNECT = 7;
     static final int CODE_BT_ACTIVE = 8;
     static final int CODE_BT_ON = 9;
+    static final int CODE_SAFE_VOLUME = 10;
 
     // A Bluetooth address, the only thing a Bluetooth command takes
     private static final String BT_ADDRESS = "^[0-9A-F]{2}(:[0-9A-F]{2}){5}$";
@@ -173,7 +176,7 @@ public final class HotspotHelper {
         // One command, then exit, or serve, which keeps running
         if (args.length < 3) {
 
-            say("usage: HotspotHelper <app uid> <app version code> <ping|state|on|off|serve|bt...> [address]");
+            say("usage: HotspotHelper <app uid> <app version code> <ping|state|on|off|safevolume|serve|bt...> [address]");
             System.exit(2);
         }
 
@@ -257,7 +260,38 @@ public final class HotspotHelper {
             return settle("off");
         }
 
+        if ("safevolume".equals(what)) {
+            return safeVolumeOff();
+        }
+
         return "unknown command";
+    }
+
+    // Android's warning before loud music on headphones and Bluetooth taken
+    // as confirmed, as its OK does. Only the status bar may, and the shell,
+    // which holds the same permission. A raise held back by the warning goes
+    // through with it. Android asks again after about 20 hours of loud music
+    private static String safeVolumeOff() throws Exception {
+
+        Class<?> sm = Class.forName("android.os.ServiceManager");
+        IBinder b = (IBinder) sm.getMethod("getService", String.class).invoke(null, Context.AUDIO_SERVICE);
+
+        if (b == null) {
+            return "no audio service";
+        }
+
+        Object audio = Class.forName("android.media.IAudioService$Stub")
+            .getMethod("asInterface", IBinder.class).invoke(null, b);
+
+        try {
+            audio.getClass().getMethod("disableSafeMediaVolume", String.class).invoke(audio, SHELL);
+        } catch (NoSuchMethodException e) {
+
+            // Before Android 8 it named no caller
+            audio.getClass().getMethod("disableSafeMediaVolume").invoke(audio);
+        }
+
+        return "ok";
     }
 
     // Keeps running and answers the app through a Binder. The main thread
@@ -285,6 +319,8 @@ public final class HotspotHelper {
                         answer = handle("on", version, "");
                     } else if (code == CODE_OFF) {
                         answer = handle("off", version, "");
+                    } else if (code == CODE_SAFE_VOLUME) {
+                        answer = handle("safevolume", version, "");
                     } else if (code == CODE_BT_CONNECT || code == CODE_BT_DISCONNECT || code == CODE_BT_ACTIVE
                         || code == CODE_BT_ON) {
 

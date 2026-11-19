@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.277";
+    const VERSION = "2.0.1.278";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -4575,6 +4575,7 @@
             trimFade: true,
             trimZoom: 3,
             pauseOnDisconnect: false,
+            noLoudWarning: false,
             playOnConnect: "never",
             coverResend: "title",
             controlOrder: "repeat,shuffle,stop,play",
@@ -4844,6 +4845,7 @@
                     trimFade: parsed.trimFade !== false,
                     trimZoom: numberIn(parsed.trimZoom, 0, 10, 3),
                     pauseOnDisconnect: parsed.pauseOnDisconnect === true,
+                    noLoudWarning: parsed.noLoudWarning === true,
                     coverResend: ["art", "id", "title"].indexOf(parsed.coverResend) >= 0
                         ? parsed.coverResend
                         : "title",
@@ -39537,6 +39539,7 @@
             seekActions: settings.webSeekActions !== false,
             artOnResume: settings.artOnResume === true,
             pauseOnDisconnect: settings.pauseOnDisconnect === true,
+            noLoudWarning: settings.noLoudWarning === true,
             playOnConnect: settings.playOnConnect || "never",
             coverResend: settings.coverResend || "title",
             songPublic: song && !creatorSource ? song.publish_state === 1 : null,
@@ -58961,6 +58964,17 @@
                     window.MurekaHost.volumeButtons(v ? "1" : "0");
                 }));
                 soundBox.appendChild(makeHint("More volume steps turns Android's few media volume steps into 100, the player's own sound evening out between them. With the volume buttons on as well, they move it by 1%, with the app on screen and, while its music plays, outside it too, where Android shows its own slider."));
+
+                // Android's warning before loud music, confirmed for it
+                // through the hotspot helper, so the car can turn it up
+                soundBox.appendChild(makeBoolRow("Skip Android's loud volume warning", function () {
+                    return settings.noLoudWarning === true;
+                }, function (v) {
+
+                    settings.noLoudWarning = v;
+                    publishHostSoon();
+                }));
+                soundBox.appendChild(makeHint("Android stops the volume on headphones and Bluetooth at a level it finds loud, until OK is tapped on its warning, so a car cannot turn it up past there without someone at the phone. With this on, the player tells Android the warning was confirmed, as OK does: when it is switched on, when Bluetooth connects and every half hour while the music plays. Android asks again after about 20 hours of loud music, and the player confirms again; it may then have lowered the volume once. It goes through the hotspot helper, which needs the player paired with wireless debugging under Charger and power. Hearing loud music for long can harm your hearing."));
             }
 
             // Which profiles each speaker takes

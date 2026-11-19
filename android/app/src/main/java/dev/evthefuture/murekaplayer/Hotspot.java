@@ -647,6 +647,34 @@ final class Hotspot {
         return answer == null || answer.isEmpty() ? "the helper did not answer" : answer;
     }
 
+    // Android's warning before loud music taken as confirmed, through the
+    // running helper when there is one, else, when asked for, over wireless
+    // debugging. Not on the main thread. ok, or why not
+    static String safeVolumeOff(Context c, boolean viaDebugging) {
+
+        IBinder b = helperBinder;
+        String answer = null;
+
+        if (b != null && b.isBinderAlive()) {
+
+            answer = ask(b, HotspotHelper.CODE_SAFE_VOLUME);
+
+            if (answer == null && "old".equals(helper(c))) {
+                answer = viaDebugging ? null : "the running helper is from an earlier version of the app";
+            }
+        }
+
+        if (answer == null && !viaDebugging) {
+            return "the hotspot helper is not running";
+        }
+
+        if (answer == null) {
+            answer = HelperStart.once(c, "safevolume");
+        }
+
+        return answer == null || answer.isEmpty() ? "the helper did not answer" : answer;
+    }
+
     private static long versionCode(Context c) {
 
         try {

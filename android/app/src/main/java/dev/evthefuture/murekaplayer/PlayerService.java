@@ -154,6 +154,20 @@ public class PlayerService extends Service implements Hub.Listener {
     private String playOnConnect = "never";
     private boolean firstDeviceReport = true;
 
+    // Android's warning before loud music, kept away while the setting is
+    // on: Android is told it was confirmed, as its OK does, through the
+    // hotspot helper. When the setting is switched on, when a Bluetooth
+    // output connects and every half hour while the music plays, sooner
+    // after a try that did not work. Android asks again only after about 20
+    // hours of loud music, so most tries change nothing
+    private static final long LOUD_EVERY_MS = 30 * 60 * 1000L;
+    private static final long LOUD_RETRY_MS = 2 * 60 * 1000L;
+    private boolean noLoudWarning = false;
+    private boolean loudKnown = false;
+    private long loudTriedAt = 0;
+    private volatile boolean loudOk = false;
+    private final ExecutorService loud = Executors.newSingleThreadExecutor();
+
     // Whether the music played as the last Bluetooth output went away, kept
     // on disk so a restart of the app in between does not lose it
     private static final String BT_PREFS = "bluetooth";
@@ -839,6 +853,7 @@ public class PlayerService extends Service implements Hub.Listener {
     public void onDestroy() {
 
         Hub.removeListener(this);
+        loud.shutdownNow();
         ChargeWatch.stop();
         SysVolume.stop();
 
@@ -940,6 +955,21 @@ public class PlayerService extends Service implements Hub.Listener {
         songId = s.optString("id", "");
         pauseOnDisconnect = s.optBoolean("pauseOnDisconnect", false);
         playOnConnect = s.optString("playOnConnect", "never");
+
+        boolean wasNoLoud = noLoudWarning;
+
+        noLoudWarning = s.optBoolean("noLoudWarning", false);
+
+        // Switched on just now, the helper is started for it if need be.
+        // On already as the app starts, the helper is waited for
+        if (noLoudWarning && !wasNoLoud) {
+            quietLoudWarning(loudKnown ? "the setting is on" : "the app started", loudKnown);
+        } else if (noLoudWarning && playing
+            && System.currentTimeMillis() - loudTriedAt > (loudOk ? LOUD_EVERY_MS : LOUD_RETRY_MS)) {
+            quietLoudWarning("as the music plays", false);
+        }
+
+        loudKnown = true;
         soundInBrowser = s.optBoolean("carAudio", false);
         durationMs = (long) (s.optDouble("duration", 0) * 1000);
 
@@ -1253,6 +1283,7 @@ public class PlayerService extends Service implements Hub.Listener {
                 }
 
                 Hub.note("Bluetooth", "Bluetooth audio connected");
+                quietLoudWarning("Bluetooth connected", false);
 
                 if (!title.isEmpty()) {
                     main.postDelayed(PlayerService.this::resendMetadata, 1500);
@@ -1645,6 +1676,34 @@ public class PlayerService extends Service implements Hub.Listener {
     private boolean wasPlayingAtDisconnect() {
 
         return getSharedPreferences(BT_PREFS, MODE_PRIVATE).getBoolean(BT_WAS_PLAYING, false);
+    }
+
+    // Android's loud volume warning taken as confirmed, in the background.
+    // viaDebugging: started over wireless debugging when the helper is not
+    // running, only when the setting was just switched on
+    private void quietLoudWarning(String why, boolean viaDebugging) {
+
+        if (!noLoudWarning) {
+            return;
+        }
+
+        final Context app = getApplicationContext();
+
+        loudTriedAt = System.currentTimeMillis();
+        loud.execute(() -> {
+
+            String answer;
+
+            try {
+                answer = Hotspot.safeVolumeOff(app, viaDebugging);
+            } catch (RuntimeException e) {
+                answer = "failed " + e;
+            }
+
+            loudOk = "ok".equals(answer);
+            Hub.note("Volume", "the loud volume warning confirmed for Android, " + why + ": "
+                + (loudOk ? "done" : answer));
+        });
     }
 
     // Play on the Bluetooth output that just connected, unless the music
