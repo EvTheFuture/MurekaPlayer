@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.283";
+    const VERSION = "2.0.1.284";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -27032,6 +27032,7 @@
     // details read of it: played, prepared, opened or read by the plays job.
     // A song with comments gets a small speech bubble on its row
     const commentCounts = new Map();
+    let commentStamp = 0;
 
     function noteCommentCount(id, data) {
 
@@ -27045,11 +27046,13 @@
         commentCounts.set(key, data.comment_count);
 
         // A song gaining, losing or changing its comments drawn again here
-        // and in the web view
+        // and in the web view. There only the rows shown are painted again,
+        // in place: read again whole, the list blinked each time the plays
+        // job came on a song with comments
         if (before !== data.comment_count && (before > 0 || data.comment_count > 0)) {
 
             hostListStamp += 1;
-            songDataStamp += 1;
+            commentStamp += 1;
             renderList();
         }
     }
@@ -39633,7 +39636,7 @@
                 return { id: String(id), p: p < 0 ? -1 : Math.round(p * 100) };
             }),
             cacheSig: cachedIds.size + "|" + artCachedIds.size + "|" + Array.from(cachingIds).join(",") + "|" + playedMarks
-                + "|" + songEdits + "|" + playCountStamp,
+                + "|" + songEdits + "|" + playCountStamp + "|" + commentStamp,
             seekActions: settings.webSeekActions !== false,
             artOnResume: settings.artOnResume === true,
             pauseOnDisconnect: settings.pauseOnDisconnect === true,
@@ -104332,6 +104335,24 @@
 
             if (heartBtn && typeof item.liked === "boolean") {
                 heartBtn.classList.toggle("liked", item.liked);
+            }
+
+            // Comments come or changed since, on the heart of a row with no
+            // badge, the badge's own painted below
+            if (heartBtn && !row.querySelector(".rowBadge")) {
+
+                const had = heartBtn.querySelector(".rowComments");
+                const n = Number(item.comments) || 0;
+                const want = n <= 0 ? "" : n > 9 ? "9+" : String(n);
+
+                if ((had ? had.textContent : "") !== want) {
+
+                    if (had) {
+                        had.remove();
+                    }
+
+                    commentMarkOn(heartBtn, n);
+                }
             }
 
             // New becomes public or draft once the phone has reported the
