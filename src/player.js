@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.280";
+    const VERSION = "2.0.1.281";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -4600,7 +4600,7 @@
             iosFreshStart: true,
             iosRestartBetween: true,
             iosSettle: true,
-            iosPlayAnew: false,
+            iosStillAfter: true,
             iosAmbientStart: true,
             iosRestSec: 1,
             smartEnabled: true,
@@ -4880,7 +4880,7 @@
                     iosFreshStart: parsed.iosFreshStart !== false,
                     iosRestartBetween: parsed.iosRestartBetween !== false,
                     iosSettle: parsed.iosSettle !== false,
-                    iosPlayAnew: parsed.iosPlayAnew === true,
+                    iosStillAfter: parsed.iosStillAfter !== false,
                     iosAmbientStart: parsed.iosAmbientStart !== false,
                     iosRestSec: iosRestClean(parsed.iosRestSec),
                     smartEnabled: parsed.smartEnabled !== false,
@@ -23437,19 +23437,27 @@
     }
 
     // The test setting Play anew after a song change: a new song through
-    // the sound engine, once it has played a moment, is paused and played
-    // on as the Play / Pause button does, to learn whether that alone, with
-    // no tap, keeps the crackle away. Played on from a timer, Safari may
-    // keep it paused with the screen locked
-    const IOS_ANEW_AFTER_MS = 300;
-    const IOS_ANEW_PAUSE_MS = 700;
+    // the sound engine, once it has started, is stopped and played on as
+    // Song still 1 s does, which ended the crackle where the engine's rest
+    // before the song did not always. Silent from its start until it plays
+    // on, stopped as long as the engine's rest is set, then faded in.
+    // Played on from a timer, Safari may keep it paused with the screen
+    // locked
+    const IOS_ANEW_AFTER_MS = 150;
 
     let iosAnewEl = null;
     let iosAnewSrc = "";
 
+    // The gain held silent meanwhile, the fade back of a load waits
+    let iosAnewHolding = false;
+
+    function iosStillAfterOn() {
+        return settings.iosStillAfter !== false && isIosLike();
+    }
+
     function iosPlayAnewSoon() {
 
-        if (settings.iosPlayAnew !== true || !iosGain || !iosCtx || !audio || !isIosLike() || !currentSong) {
+        if (!iosStillAfterOn() || !iosGain || !iosCtx || !audio || !currentSong) {
             return;
         }
 
@@ -23467,27 +23475,113 @@
             return audio === el && currentSong && currentSong.song_id === id;
         };
 
+        const ms = Math.max(300, iosRestMs());
+        const release = function () {
+            iosAnewHolding = false;
+        };
+
+        // Silent from the start, not a moment of the song before the stop
+        iosAnewHolding = true;
+        iosGain.gain.cancelScheduledValues(iosCtx.currentTime);
+        iosGain.gain.value = 0;
+
         setTimeout(function () {
 
             if (!same() || audio.paused || audio.seeking) {
+
+                release();
+                iosGainBackNow();
                 return;
             }
 
-            dbgLog("Audio", "played anew after the song change, paused and played on as a press does, as set" + (document.hidden ? ", out of view" : ""));
-            iosGain.gain.cancelScheduledValues(iosCtx.currentTime);
-            iosGain.gain.value = 0;
-            userPaused = true;
+            // Out of view, with the screen locked say, Safari may not let
+            // a timer play the song on, so the engine stops instead while
+            // the song goes on, as Engine still does, and the song goes back
+            // to where it was
+            if (document.hidden) {
+
+                iosEngineStillAfterStart(ms, same, release);
+                return;
+            }
+
+            dbgLog("Audio", "the new song stopped " + ms + " ms once it started, then played on, as Song still does");
+
+            // Its pause and play are no press and no interruption
+            heldReleasing = true;
+            clearTimeout(heldReleaseTimer);
+            heldReleaseTimer = setTimeout(function () {
+                heldReleasing = false;
+            }, ms + 2500);
             audio.pause();
 
             setTimeout(function () {
 
-                if (!same() || !audio.paused) {
+                release();
+
+                if (!same() || !audio.paused || userPaused) {
                     return;
                 }
 
-                startAudioPlayback();
-            }, IOS_ANEW_PAUSE_MS);
+                iosGainBackOnPlaying();
+
+                const go = audio.play();
+
+                if (go && go.catch) {
+                    go.catch(function (e) {
+                        dbgLog("Audio", "the song did not play on after its stop, " + errText(e));
+                    });
+                }
+            }, ms);
         }, IOS_ANEW_AFTER_MS);
+    }
+
+    // The engine stopped a while with the new song going on, then the song
+    // back to where it was when the engine stopped, faded in
+    function iosEngineStillAfterStart(ms, same, release) {
+
+        const from = audio.currentTime;
+
+        dbgLog("Audio", "the new song started out of view, the sound engine stopped " + ms + " ms, as Engine still does, the song back to "
+            + dbgNum(from) + " after");
+
+        const back = function () {
+
+            release();
+
+            if (!same()) {
+                return;
+            }
+
+            try {
+                audio.currentTime = from;
+            } catch (e) {
+                // Plays on from where it is
+            }
+
+            iosGainBackNow();
+        };
+
+        iosCtx.suspend().then(function () {
+
+            setTimeout(function () {
+                iosCtx.resume().then(back, back);
+            }, ms);
+        }, back);
+    }
+
+    // The gain up again at once with a short fade, a stop called off
+    function iosGainBackNow() {
+
+        if (!iosGain || !iosCtx) {
+            return;
+        }
+
+        const g = iosGain.gain;
+        const t = iosCtx.currentTime;
+
+        g.cancelScheduledValues(t);
+        g.setValueAtTime(0, t);
+        g.linearRampToValueAtTime(1, t + 0.2);
     }
 
     // The sound engine's rest: stopped for a while and started again. A
@@ -23596,8 +23690,9 @@
             then();
         };
 
-        // The engine resting meanwhile, the wait is its rest
-        if (settings.iosRestartBetween !== false && iosCtx.state === "running" && iosRestMs() > 0) {
+        // The engine resting meanwhile, the wait is its rest. Not before a
+        // new song stopped once it has started instead
+        if (settings.iosRestartBetween !== false && iosCtx.state === "running" && iosRestMs() > 0 && (back || !iosStillAfterOn())) {
 
             dbgLog("Audio", "the song stopped and silent before it is loaded again, " + why);
             iosEngineRest(after, why);
@@ -23629,7 +23724,8 @@
             clearTimeout(safety);
             el.removeEventListener("playing", up);
 
-            if (!iosGain || !iosCtx || audio !== el) {
+            // Played anew, which brings it back itself once it plays on
+            if (!iosGain || !iosCtx || audio !== el || iosAnewHolding) {
                 return;
             }
 
@@ -23656,14 +23752,16 @@
             return;
         }
 
-        // Left out by the test setting, the next song after the moment of
+        // Left out by the test setting, or with the new song stopped once
+        // it has started instead, the next song after the moment of
         // silence alone
-        if (settings.iosRestartBetween === false) {
+        if (settings.iosRestartBetween === false || iosStillAfterOn()) {
 
             const el = audio;
             const src = audio.src;
 
-            dbgLog("Audio", "the sound engine not restarted between two songs, as set");
+            dbgLog("Audio", "the sound engine not restarted between two songs, "
+                + (iosStillAfterOn() ? "the next song is stopped once it has started" : "as set"));
             setTimeout(function () {
 
                 if (audio === el && audio.src === src && audio.ended) {
@@ -58297,7 +58395,7 @@
             const iosRow = function (key, label, hint) {
 
                 devPage.appendChild(withHint(makeBoolRow(label, function () {
-                    return key === "iosPlayAnew" ? settings[key] === true : settings[key] !== false;
+                    return settings[key] !== false;
                 }, function (v) {
 
                     settings[key] = v;
@@ -58323,7 +58421,7 @@
             devPage.appendChild(withHint(restRow, "How long the engine rests. 1 s ended the crackle in a test; shorter is quicker if it still does."));
             iosRow("iosSettle", "A moment of silence before a load", "0.4 s with the song stopped before the next song or a move loads it.");
             iosRow("iosAmbientStart", "Mix with other apps until the first play", "As the player opens, Safari is told the page's sound mixes with other apps, and it becomes music at the first play. Off, it is music from the start, never changed under a running sound engine. Takes effect when the player is opened again.");
-            iosRow("iosPlayAnew", "Play anew after a song change", "A new song is paused and played on once it has played 0.3 s, as Play / Pause does, a second of silence at its start. With the screen locked Safari may keep it paused.");
+            iosRow("iosStillAfter", "Stop a new song once it has started", "A new song, once it has started, is stopped as long as the engine's rest is set and played on, as Song still 1 s does, silent until then and faded in. Out of view, with the screen locked say, the engine stops instead while the song goes on, as Engine still does, and the song goes back to where it was. Both ended the crackle where the engine's rest before the song did not always, so the engine no longer rests before a new song with this on, only before a move in a song.");
 
             // Taps for while it crackles, each one part of what a pause and
             // play does, to learn which part ends it
