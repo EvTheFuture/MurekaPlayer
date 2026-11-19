@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.282";
+    const VERSION = "2.0.1.283";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -6597,7 +6597,7 @@
 
         paint();
 
-        return { el: wrap, paint: paint };
+        return { el: wrap, paint: paint, row: row };
     }
 
     // The star row over the cover for the playing song, and the transport
@@ -48479,6 +48479,39 @@
         // again with every change, which is what made them flicker and go
         nowStarsBar.el.style.willChange = "transform";
 
+        // The heart beside the stars, as in the web view, tapped to like
+        const nowHeart = document.createElement("button");
+        const starsPaint = nowStarsBar.paint;
+
+        nowHeart.type = "button";
+        nowHeart.style.cssText = "background:transparent;border:none;margin:0 0 0 4px;padding:5px;font-size:22px;line-height:20px;"
+            + "height:30px;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent";
+        nowHeart.addEventListener("click", function (ev) {
+
+            // Not taken as a tap on the cover
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            if (currentSong) {
+                toggleLike(currentSong, nowHeart);
+            }
+        });
+        nowStarsBar.row.appendChild(nowHeart);
+        nowStarsBar.paint = function () {
+
+            starsPaint();
+
+            const liked = !!currentSong && currentSong.is_liked === true;
+
+            paintHeart(nowHeart, liked);
+            nowHeart.setAttribute("aria-label", liked ? "Liked" : "Like");
+
+            // Light enough to see on the cover
+            if (!liked) {
+                nowHeart.style.color = "#e8e8e8";
+            }
+        };
+
         refreshNowStars();
 
         // Layer the overlays over the coverflow, the tiles stay swipeable below
@@ -52555,6 +52588,7 @@
     function likeShown() {
 
         songEdits += 1;
+        refreshNowStars();
 
         const top = listEl ? listEl.scrollTop : 0;
 
