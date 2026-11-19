@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.276";
+    const VERSION = "2.0.1.277";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -84847,6 +84847,46 @@
     html.phone #panelBody .pCtl {
         max-width: 58%;
         margin: 0 0 10px 14px;
+    }
+
+    /* On a phone the control stays level with the name, at the right, and
+       the explanation runs the full width under both, rather than in a
+       narrow column beside the control */
+    html.phone #panelBody .pRow.float > .pCol {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) fit-content(62%);
+        column-gap: 12px;
+        align-items: center;
+    }
+
+    html.phone #panelBody .pRow.float > .pCol > .pText {
+        grid-column: 1 / -1;
+    }
+
+    html.phone #panelBody .pRow.float > .pCol > .pCtl {
+        float: none;
+        grid-column: 2;
+        grid-row: 1;
+        justify-self: end;
+        max-width: none;
+        margin: 0;
+    }
+
+    html.phone #panelBody .pRow.float > .pCol > .pCtl + .pText {
+        grid-column: 1;
+        grid-row: 1;
+    }
+
+    /* A name with its control and no explanation: the name wraps rather
+       than push the control onto a line of its own, which keeps to the
+       right like the others */
+    html.phone #panelBody .pRow:not(.top):not(.spread):not(.kv) {
+        justify-content: flex-end;
+    }
+
+    html.phone #panelBody .pRow:not(.top):not(.spread):not(.kv) > .pText:first-child:not(:last-child) {
+        flex: 1 1 0;
+        min-width: 38%;
     }
 
     /* The drawn drop-down: a box like the buttons with the chosen word and
