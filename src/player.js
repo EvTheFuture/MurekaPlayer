@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.279";
+    const VERSION = "2.0.1.280";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -106149,12 +106149,46 @@
     let lostSince = 0;
     let lostWhy = "";
 
+    // Back in view after a while away, the request left from before can be
+    // dead and the network slow to wake, so the phone fine before stays
+    // fine this long while it is asked again: no No connection that goes
+    // away by itself
+    const LOST_BACK_MS = 15000;
+    let shownSince = Date.now();
+    let pollAbort = null;
+    let pollAskedAt = 0;
+    let pollStale = false;
+
+    function pageShown() {
+
+        if (document.hidden) {
+            return;
+        }
+
+        shownSince = Date.now();
+
+        // The request from before, frozen with the page, given up for a
+        // new one at once
+        if (pollAbort && pollAskedAt < shownSince - 1000) {
+
+            pollStale = true;
+            pollAbort.abort();
+        }
+    }
+
+    document.addEventListener("visibilitychange", pageShown);
+    window.addEventListener("pageshow", pageShown);
+
     function poll() {
 
         const askedAt = Date.now();
 
         // A request the network swallowed is given up, and the next asked
         const abort = window.AbortController ? new AbortController() : null;
+
+        pollAbort = abort;
+        pollAskedAt = askedAt;
+        pollStale = false;
         const timer = setTimeout(function () {
 
             if (abort) {
@@ -106200,9 +106234,24 @@
                 return;
             }
 
+            // The request from before the page was away, given up on its
+            // return, or one that ran far past its 10 s, the page frozen
+            // meanwhile: asked again at once, nothing lost
+            if ((pollStale && pollAbort === abort) || Date.now() - askedAt > 20000) {
+
+                pollStale = false;
+                shownSince = Math.max(shownSince, Date.now() - 1000);
+                dbgLog("Net", "back in view, asking the Android device again");
+                seq = -1;
+                nextPoll(0);
+                return;
+            }
+
+            // Counted from the return at the earliest, the time away is not
+            // the phone's
             if (!lostSince) {
 
-                lostSince = askedAt;
+                lostSince = Math.max(askedAt, shownSince);
                 lostWhy = err && err.name === "AbortError" ? "no answer in 10 s"
                     : String((err && err.message) || err || "failed");
                 dbgLog("Net", "the Android device did not answer: " + lostWhy);
@@ -106210,7 +106259,10 @@
 
             seq = -1;
 
-            if (online && Date.now() - lostSince >= LOST_SHOW_MS) {
+            // Just back in view, the phone fine before has longer to answer
+            const showAfter = lostSince - shownSince < LOST_BACK_MS ? Math.max(LOST_SHOW_MS, shownSince + LOST_BACK_MS - lostSince) : LOST_SHOW_MS;
+
+            if (online && Date.now() - lostSince >= showAfter) {
 
                 dbgLog("Net", "lost the Android device");
                 online = false;
