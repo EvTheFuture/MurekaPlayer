@@ -3169,7 +3169,7 @@
         width: min(640px, 90vw);
         max-width: 90vw;
         box-sizing: border-box;
-        text-align: left;
+        text-align: center;
     }
 
     /* A song put in the queue by hand: its turn and title in gold */
@@ -29014,7 +29014,26 @@
             el.appendChild(ring);
         }
 
-        el.appendChild(document.createTextNode(text));
+        // The names the phone marked, in bold
+        const parts = String(text).split("\u0001");
+
+        for (let i = 0; i < parts.length; i++) {
+
+            if (!parts[i]) {
+                continue;
+            }
+
+            if (i % 2 === 1) {
+
+                const b = document.createElement("b");
+
+                b.textContent = parts[i];
+                el.appendChild(b);
+            } else {
+                el.appendChild(document.createTextNode(parts[i]));
+            }
+        }
+
         clearTimeout(toastGoneTimer);
         el.classList.remove("atTop");
         el.style.display = "block";

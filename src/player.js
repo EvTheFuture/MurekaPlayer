@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.288";
+    const VERSION = "2.0.1.289";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -23475,8 +23475,12 @@
     // The gain held silent meanwhile, the fade back of a load waits
     let iosAnewHolding = false;
 
+    // Only with the page in view: out of view, with the screen locked say,
+    // the engine stopped let Safari play the song past it, heard from its
+    // start two or three times, and a timer may not play a stopped song
+    // on, so there the engine rests before the new song as before
     function iosStillAfterOn() {
-        return settings.iosStillAfter !== false && isIosLike();
+        return settings.iosStillAfter !== false && isIosLike() && !document.hidden;
     }
 
     function iosPlayAnewSoon() {
@@ -23522,13 +23526,13 @@
                 return;
             }
 
-            // Out of view, with the screen locked say, Safari may not let
-            // a timer play the song on, so the engine stops instead while
-            // the song goes on, as Engine still does, and the song goes back
-            // to where it was
+            // Gone out of view meanwhile: not stopped, a timer may not play
+            // it on there
             if (document.hidden) {
 
-                iosEngineStillAfterStart(ms, same, release, startAt);
+                release();
+                iosGainUpNow();
+                dbgLog("Audio", "the new song not stopped, the page went out of view");
                 return;
             }
 
@@ -23576,52 +23580,6 @@
                 }
             }, ms);
         }, IOS_ANEW_AFTER_MS);
-    }
-
-    // The engine stopped a while with the new song going on, then the song
-    // back to where it started, at full level at once
-    function iosEngineStillAfterStart(ms, same, release, startAt) {
-
-        const from = typeof startAt === "number" ? startAt : audio.currentTime;
-
-        dbgLog("Audio", "the new song started out of view, the sound engine stopped " + ms + " ms, as Engine still does, the song back to "
-            + dbgNum(from) + " after");
-
-        // The song itself muted meanwhile: with the engine stopped Safari
-        // can let the song out past it, heard from its start and then again
-        // once it went back
-        const el = audio;
-        const wasMuted = el.muted;
-
-        el.muted = true;
-
-        const back = function () {
-
-            release();
-            el.muted = wasMuted;
-
-            if (same()) {
-                iosGainUpNow();
-            }
-        };
-
-        iosCtx.suspend().then(function () {
-
-            setTimeout(function () {
-
-                // Back to where it started while still silent, then on
-                if (same()) {
-
-                    try {
-                        el.currentTime = from;
-                    } catch (e) {
-                        // Plays on from where it is
-                    }
-                }
-
-                iosCtx.resume().then(back, back);
-            }, ms);
-        }, back);
     }
 
     // The gain up at once, over a few milliseconds only, so the step makes
@@ -34401,6 +34359,37 @@
 
     // undo, when given, puts an Undo on the note, which stays a little
     // longer, here and in the web view
+    // A name shown in bold in a toast, here and in the web view: between
+    // two marks the toasts read, taken out anywhere else
+    const TOAST_BOLD = "\u0001";
+
+    function toastBold(text) {
+        return TOAST_BOLD + String(text || "").split(TOAST_BOLD).join("") + TOAST_BOLD;
+    }
+
+    // The words of a toast into an element, the marked names in bold
+    function toastWords(el, text) {
+
+        const parts = String(text).split(TOAST_BOLD);
+
+        for (let i = 0; i < parts.length; i++) {
+
+            if (!parts[i]) {
+                continue;
+            }
+
+            if (i % 2 === 1) {
+
+                const b = document.createElement("b");
+
+                b.textContent = parts[i];
+                el.appendChild(b);
+            } else {
+                el.appendChild(document.createTextNode(parts[i]));
+            }
+        }
+    }
+
     function showToast(text, ok, undo) {
 
         // Three looks: "wait" while Mureka is asked, ringed with a turning
@@ -34474,8 +34463,8 @@
         const lines = String(text).indexOf("\n") >= 0;
         const words = document.createElement("span");
 
-        words.style.cssText = "white-space:pre-line;text-align:" + (lines ? "left" : "center") + ";line-height:1.4";
-        words.textContent = text;
+        words.style.cssText = "white-space:pre-line;text-align:center;line-height:1.35;font-weight:" + (lines ? "500;flex:1 1 auto" : "600");
+        toastWords(words, text);
         panelToastEl.style.width = lines ? "min(420px, calc(100% - 32px))" : "";
         panelToastEl.style.borderRadius = lines ? "14px" : "18px";
         panelToastEl.appendChild(words);
@@ -58566,7 +58555,7 @@
             devPage.appendChild(withHint(restRow, "How long the engine rests. 1 s ended the crackle in a test; shorter is quicker if it still does."));
             iosRow("iosSettle", "A moment of silence before a load", "0.4 s with the song stopped before the next song or a move loads it.");
             iosRow("iosAmbientStart", "Mix with other apps until the first play", "As the player opens, Safari is told the page's sound mixes with other apps, and it becomes music at the first play. Off, it is music from the start, never changed under a running sound engine. Takes effect when the player is opened again.");
-            iosRow("iosStillAfter", "Stop a new song once it has started", "A new song, once it has started, is stopped as long as the engine's rest is set and played on from where it started, as Song still 1 s does, silent until then and at full level at once, so a song that starts with a bang keeps it. Out of view, with the screen locked say, the engine stops instead while the song goes on muted, as Engine still does, and the song goes back to where it started. Both ended the crackle where the engine's rest before the song did not always, so the engine no longer rests before a new song with this on, only before a move in a song.");
+            iosRow("iosStillAfter", "Stop a new song once it has started", "A new song, once it has started, is stopped as long as the engine's rest is set and played on from where it started, as Song still 1 s does, silent until then and at full level at once, so a song that starts with a bang keeps it. Only with the page in view: out of view, with the screen locked say, the engine rests before the new song instead, as it did before. In view the engine does not rest before a new song, the stop after its start takes its place; Song still ended the crackle where the rest before the song did not always.");
 
             // Taps for while it crackles, each one part of what a pause and
             // play does, to learn which part ends it
@@ -69848,7 +69837,8 @@
     // A line about what is going on, shown on the page and in the web view
     function setCreateNote(text, bad) {
 
-        createNote = { text: String(text || ""), bad: bad === true, at: Date.now() };
+        // The bold marks are for toasts, the note is plain
+        createNote = { text: String(text || "").split(TOAST_BOLD).join(""), bad: bad === true, at: Date.now() };
 
         if (createUi) {
             paintCreateStatus();
@@ -70876,10 +70866,10 @@
 
         return {
             ok: true,
-            text: ["Sent to Mureka: two songs" + (body.title ? ", \"" + body.title + "\"" : ""),
+            text: ["Sent to Mureka: two songs" + (body.title ? ", " + toastBold(body.title) : ""),
                 createSetLine(into, set),
                 "They show in the list while they are made",
-                createPlayWords(d.playMode, "They ")].filter(Boolean).join("\n")
+                createPlayWords(d.playMode, "They ")].filter(Boolean).join("\n\n")
         };
     }
 
@@ -70890,10 +70880,10 @@
         if (into.made) {
 
             return set && set.name && !(into.wish && into.wish.nameFromSong)
-                ? "In the new set \"" + set.name + "\"" : "In a new set, named after the first song";
+                ? "In the new set " + toastBold(set.name) : "In a new set, named after the first song";
         }
 
-        return set ? "In the set \"" + set.name + "\"" : "";
+        return set ? "In the set " + toastBold(set.name) : "";
     }
 
     // How the new songs play, in the present: they play when ready or
@@ -71050,10 +71040,10 @@
         return {
             ok: true,
             feedId: feedId,
-            text: [(early ? "Mureka has started making two songs" : "Making two songs") + (body.title ? ", \"" + body.title + "\"" : ""),
+            text: [(early ? "Mureka has started making two songs" : "Making two songs") + (body.title ? ", " + toastBold(body.title) : ""),
                 wait > 0 ? "Number " + wait.toLocaleString() + " in Mureka's line" : "",
                 createSetLine(into, set),
-                createPlayWords(d.playMode, "They ")].filter(Boolean).join("\n")
+                createPlayWords(d.playMode, "They ")].filter(Boolean).join("\n\n")
         };
     }
 
@@ -71061,9 +71051,9 @@
     // view, a line for each thing told
     function createLineToast(title, n, playMode, setLine) {
 
-        showToast([(title ? "\"" + title + "\" is number " : "Number ") + n.toLocaleString() + " in Mureka's line",
+        showToast([(title ? toastBold(title) + " is number " : "Number ") + n.toLocaleString() + " in Mureka's line",
             setLine || "",
-            createPlayWords(playMode, "They ")].filter(Boolean).join("\n"), true);
+            createPlayWords(playMode, "They ")].filter(Boolean).join("\n\n"), true);
     }
 
     // How long Mureka's answer to making songs is waited for, and how
@@ -71278,7 +71268,7 @@
         return {
             ok: true,
             feedId: "",
-            text: ["Mureka's agent is on it, the songs come in a minute or two", createPlayWords(d.playMode, "They ")].filter(Boolean).join("\n")
+            text: ["Mureka's agent is on it, the songs come in a minute or two", createPlayWords(d.playMode, "They ")].filter(Boolean).join("\n\n")
         };
     }
 
@@ -83194,7 +83184,7 @@
         width: min(640px, 90vw);
         max-width: 90vw;
         box-sizing: border-box;
-        text-align: left;
+        text-align: center;
     }
 
     /* A song put in the queue by hand: its turn and title in gold */
@@ -109039,7 +109029,26 @@
             el.appendChild(ring);
         }
 
-        el.appendChild(document.createTextNode(text));
+        // The names the phone marked, in bold
+        const parts = String(text).split("\u0001");
+
+        for (let i = 0; i < parts.length; i++) {
+
+            if (!parts[i]) {
+                continue;
+            }
+
+            if (i % 2 === 1) {
+
+                const b = document.createElement("b");
+
+                b.textContent = parts[i];
+                el.appendChild(b);
+            } else {
+                el.appendChild(document.createTextNode(parts[i]));
+            }
+        }
+
         clearTimeout(toastGoneTimer);
         el.classList.remove("atTop");
         el.style.display = "block";
