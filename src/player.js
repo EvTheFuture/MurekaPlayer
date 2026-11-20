@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.287";
+    const VERSION = "2.0.1.288";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -23504,6 +23504,10 @@
             iosAnewHolding = false;
         };
 
+        // Where the song started, it plays on from there, so nothing of
+        // its beginning is lost
+        const startAt = audio.currentTime || 0;
+
         // Silent from the start, not a moment of the song before the stop
         iosAnewHolding = true;
         iosGain.gain.cancelScheduledValues(iosCtx.currentTime);
@@ -23524,11 +23528,11 @@
             // to where it was
             if (document.hidden) {
 
-                iosEngineStillAfterStart(ms, same, release);
+                iosEngineStillAfterStart(ms, same, release, startAt);
                 return;
             }
 
-            dbgLog("Audio", "the new song stopped " + ms + " ms once it started, then played on, as Song still does");
+            dbgLog("Audio", "the new song stopped " + ms + " ms once it started, then played on from " + dbgNum(startAt) + ", as Song still does");
 
             // Its pause and play are no press and no interruption
             heldReleasing = true;
@@ -23546,7 +23550,22 @@
                     return;
                 }
 
-                iosGainBackOnPlaying();
+                // From where it started, at full level once it plays: a
+                // song that starts with a bang starts with it
+                try {
+                    audio.currentTime = startAt;
+                } catch (e) {
+                    // Plays on from where it stopped
+                }
+
+                const el2 = audio;
+                const up = function () {
+
+                    el2.removeEventListener("playing", up);
+                    iosGainUpNow();
+                };
+
+                el2.addEventListener("playing", up);
 
                 const go = audio.play();
 
@@ -23560,10 +23579,10 @@
     }
 
     // The engine stopped a while with the new song going on, then the song
-    // back to where it was when the engine stopped, faded in
-    function iosEngineStillAfterStart(ms, same, release) {
+    // back to where it started, at full level at once
+    function iosEngineStillAfterStart(ms, same, release, startAt) {
 
-        const from = audio.currentTime;
+        const from = typeof startAt === "number" ? startAt : audio.currentTime;
 
         dbgLog("Audio", "the new song started out of view, the sound engine stopped " + ms + " ms, as Engine still does, the song back to "
             + dbgNum(from) + " after");
@@ -23582,7 +23601,7 @@
             el.muted = wasMuted;
 
             if (same()) {
-                iosGainBackNow();
+                iosGainUpNow();
             }
         };
 
@@ -23603,6 +23622,22 @@
                 iosCtx.resume().then(back, back);
             }, ms);
         }, back);
+    }
+
+    // The gain up at once, over a few milliseconds only, so the step makes
+    // no click: a song's beginning is heard as it is, not faded in
+    function iosGainUpNow() {
+
+        if (!iosGain || !iosCtx) {
+            return;
+        }
+
+        const g = iosGain.gain;
+        const t = iosCtx.currentTime;
+
+        g.cancelScheduledValues(t);
+        g.setValueAtTime(0, t);
+        g.linearRampToValueAtTime(1, t + 0.008);
     }
 
     // The gain up again at once with a short fade, a stop called off
@@ -58531,7 +58566,7 @@
             devPage.appendChild(withHint(restRow, "How long the engine rests. 1 s ended the crackle in a test; shorter is quicker if it still does."));
             iosRow("iosSettle", "A moment of silence before a load", "0.4 s with the song stopped before the next song or a move loads it.");
             iosRow("iosAmbientStart", "Mix with other apps until the first play", "As the player opens, Safari is told the page's sound mixes with other apps, and it becomes music at the first play. Off, it is music from the start, never changed under a running sound engine. Takes effect when the player is opened again.");
-            iosRow("iosStillAfter", "Stop a new song once it has started", "A new song, once it has started, is stopped as long as the engine's rest is set and played on, as Song still 1 s does, silent until then and faded in. Out of view, with the screen locked say, the engine stops instead while the song goes on, as Engine still does, and the song goes back to where it was. Both ended the crackle where the engine's rest before the song did not always, so the engine no longer rests before a new song with this on, only before a move in a song.");
+            iosRow("iosStillAfter", "Stop a new song once it has started", "A new song, once it has started, is stopped as long as the engine's rest is set and played on from where it started, as Song still 1 s does, silent until then and at full level at once, so a song that starts with a bang keeps it. Out of view, with the screen locked say, the engine stops instead while the song goes on muted, as Engine still does, and the song goes back to where it started. Both ended the crackle where the engine's rest before the song did not always, so the engine no longer rests before a new song with this on, only before a move in a song.");
 
             // Taps for while it crackles, each one part of what a pause and
             // play does, to learn which part ends it
