@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.289";
+    const VERSION = "2.0.1.290";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -70866,11 +70866,20 @@
 
         return {
             ok: true,
-            text: ["Sent to Mureka: two songs" + (body.title ? ", " + toastBold(body.title) : ""),
-                createSetLine(into, set),
-                "They show in the list while they are made",
-                createPlayWords(d.playMode, "They ")].filter(Boolean).join("\n\n")
+            text: createToastText("Two songs sent to Mureka" + (body.title ? " named " + toastBold(body.title) : ""),
+                createSetLine(into, set), "They show in the list while they are made", d.playMode)
         };
+    }
+
+    // A toast about songs sent: what and where in one part, how they show
+    // and play in another, a blank line between
+    function createToastText(what, setLine, show, playMode) {
+
+        const play = createPlayWords(playMode, "They ");
+        const first = [what, setLine].filter(Boolean).join("\n");
+        const second = show && play ? show + " and\n" + play : show || play;
+
+        return [first, second].filter(Boolean).join("\n\n");
     }
 
     // Where the new songs go, a line of its own in the toast and the note,
@@ -70880,10 +70889,10 @@
         if (into.made) {
 
             return set && set.name && !(into.wish && into.wish.nameFromSong)
-                ? "In the new set " + toastBold(set.name) : "In a new set, named after the first song";
+                ? "They will be added to the new set " + toastBold(set.name) : "They will be added to a new set, named after the first song";
         }
 
-        return set ? "In the set " + toastBold(set.name) : "";
+        return set ? "They will be added to the set " + toastBold(set.name) : "";
     }
 
     // How the new songs play, in the present: they play when ready or
@@ -71040,10 +71049,10 @@
         return {
             ok: true,
             feedId: feedId,
-            text: [(early ? "Mureka has started making two songs" : "Making two songs") + (body.title ? ", " + toastBold(body.title) : ""),
-                wait > 0 ? "Number " + wait.toLocaleString() + " in Mureka's line" : "",
-                createSetLine(into, set),
-                createPlayWords(d.playMode, "They ")].filter(Boolean).join("\n\n")
+            text: createToastText((early ? "Mureka has started making two songs" : "Mureka is making two songs")
+                + (body.title ? " named " + toastBold(body.title) : "")
+                + (wait > 0 ? "\nNumber " + wait.toLocaleString() + " in Mureka's line" : ""),
+                createSetLine(into, set), "", d.playMode)
         };
     }
 
@@ -71051,9 +71060,8 @@
     // view, a line for each thing told
     function createLineToast(title, n, playMode, setLine) {
 
-        showToast([(title ? toastBold(title) + " is number " : "Number ") + n.toLocaleString() + " in Mureka's line",
-            setLine || "",
-            createPlayWords(playMode, "They ")].filter(Boolean).join("\n\n"), true);
+        showToast(createToastText((title ? toastBold(title) + " is number " : "Number ") + n.toLocaleString() + " in Mureka's line",
+            setLine || "", "", playMode), true);
     }
 
     // How long Mureka's answer to making songs is waited for, and how
@@ -71268,7 +71276,7 @@
         return {
             ok: true,
             feedId: "",
-            text: ["Mureka's agent is on it, the songs come in a minute or two", createPlayWords(d.playMode, "They ")].filter(Boolean).join("\n\n")
+            text: createToastText("Mureka's agent is on it, the songs come in a minute or two", "", "", d.playMode)
         };
     }
 
