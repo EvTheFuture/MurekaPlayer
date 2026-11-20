@@ -3149,6 +3149,8 @@
         bottom: 6vh;
         transform: translateX(-50%);
         max-width: 80vw;
+        white-space: pre-line;
+        line-height: 1.4;
         padding: 12px 18px;
         border-radius: 12px;
         background: rgba(20, 20, 20, 0.95);
@@ -3159,6 +3161,15 @@
         z-index: 60;
         opacity: 0;
         transition: opacity 0.5s ease;
+    }
+
+    /* A toast of several lines, one for each thing told: wider, left
+       aligned */
+    #toast.lines {
+        width: min(640px, 90vw);
+        max-width: 90vw;
+        box-sizing: border-box;
+        text-align: left;
     }
 
     /* A song put in the queue by hand: its turn and title in gold */
@@ -28989,6 +29000,9 @@
         el.classList.toggle("wait", kind === "wait");
         el.classList.toggle("online", kind === "online");
         el.classList.toggle("note", kind === "note");
+
+        // Several lines, one for each thing told, in a wider toast
+        el.classList.toggle("lines", String(text).indexOf("\n") >= 0);
 
         // While the phone waits for Mureka, a turning ring before the words,
         // and the note stays until the answer replaces it

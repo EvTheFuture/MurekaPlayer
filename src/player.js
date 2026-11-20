@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.285";
+    const VERSION = "2.0.1.286";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -34422,7 +34422,16 @@
             panelToastEl.style.boxShadow = "0 4px 14px rgba(0,0,0,0.5)";
         }
 
-        panelToastEl.appendChild(document.createTextNode(text));
+        // Several lines, one for each thing told, left aligned in a wider
+        // toast
+        const lines = String(text).indexOf("\n") >= 0;
+        const words = document.createElement("span");
+
+        words.style.cssText = "white-space:pre-line;text-align:" + (lines ? "left" : "center") + ";line-height:1.4";
+        words.textContent = text;
+        panelToastEl.style.width = lines ? "min(420px, calc(100% - 32px))" : "";
+        panelToastEl.style.borderRadius = lines ? "14px" : "18px";
+        panelToastEl.appendChild(words);
 
         if (toastUndo) {
 
@@ -70820,10 +70829,24 @@
 
         return {
             ok: true,
-            text: "Sent to Mureka: two songs" + (body.title ? " of \"" + body.title + "\"" : "")
-                + (into.made ? ", in a new set" : set ? ", in " + set.name : "")
-                + ". They show in the list while they are made" + createPlayWords(d.playMode, " and ")
+            text: ["Sent to Mureka: two songs" + (body.title ? ", \"" + body.title + "\"" : ""),
+                createSetLine(into, set),
+                "They show in the list while they are made",
+                createPlayWords(d.playMode, "They ")].filter(Boolean).join("\n")
         };
+    }
+
+    // Where the new songs go, a line of its own in the toast and the note,
+    // empty for no set
+    function createSetLine(into, set) {
+
+        if (into.made) {
+
+            return set && set.name && !(into.wish && into.wish.nameFromSong)
+                ? "In the new set \"" + set.name + "\"" : "In a new set, named after the first song";
+        }
+
+        return set ? "In the set \"" + set.name + "\"" : "";
     }
 
     // How the new songs play, in the present: they play when ready or
@@ -70901,7 +70924,7 @@
 
                     // Its place in Mureka's line, once it comes
                     if (Number(feed.wait_num) > 0) {
-                        createLineToast(body.title, Number(feed.wait_num), d.playMode);
+                        createLineToast(body.title, Number(feed.wait_num), d.playMode, createSetLine(into, into.setId ? songSets.get(into.setId) : null));
                     }
                 }, function (e) {
                     dbgLog("Create", "Mureka's answer did not come, the songs are being made anyway: " + errText(e));
@@ -70974,24 +70997,26 @@
         // The place in Mureka's line told, as it was before the songs went
         // in the background
         if (wait > 0) {
-            createLineToast(body.title, wait, d.playMode);
+            createLineToast(body.title, wait, d.playMode, createSetLine(into, set));
         }
 
         return {
             ok: true,
             feedId: feedId,
-            text: (early ? "Mureka has started making two songs" : "Making two songs") + (body.title ? " of \"" + body.title + "\"" : "")
-                + (wait > 0 ? ", number " + wait + " in Mureka's line" : "")
-                + (into.made ? ", in a new set" : set ? ", in " + set.name : "")
-                + createPlayWords(d.playMode, ". They ")
+            text: [(early ? "Mureka has started making two songs" : "Making two songs") + (body.title ? ", \"" + body.title + "\"" : ""),
+                wait > 0 ? "Number " + wait.toLocaleString() + " in Mureka's line" : "",
+                createSetLine(into, set),
+                createPlayWords(d.playMode, "They ")].filter(Boolean).join("\n")
         };
     }
 
-    // The songs' place in Mureka's line, as a toast here and in the web view
-    function createLineToast(title, n, playMode) {
+    // The songs' place in Mureka's line, as a toast here and in the web
+    // view, a line for each thing told
+    function createLineToast(title, n, playMode, setLine) {
 
-        showToast((title ? "\"" + title + "\": " : "") + "number " + n.toLocaleString() + " in Mureka's line"
-            + createPlayWords(playMode, ", they "), true);
+        showToast([(title ? "\"" + title + "\" is number " : "Number ") + n.toLocaleString() + " in Mureka's line",
+            setLine || "",
+            createPlayWords(playMode, "They ")].filter(Boolean).join("\n"), true);
     }
 
     // How long Mureka's answer to making songs is waited for, and how
@@ -71206,7 +71231,7 @@
         return {
             ok: true,
             feedId: "",
-            text: "Mureka's agent is on it, the songs come in a minute or two" + createPlayWords(d.playMode, " and ")
+            text: ["Mureka's agent is on it, the songs come in a minute or two", createPlayWords(d.playMode, "They ")].filter(Boolean).join("\n")
         };
     }
 
@@ -83102,6 +83127,8 @@
         bottom: 6vh;
         transform: translateX(-50%);
         max-width: 80vw;
+        white-space: pre-line;
+        line-height: 1.4;
         padding: 12px 18px;
         border-radius: 12px;
         background: rgba(20, 20, 20, 0.95);
@@ -83112,6 +83139,15 @@
         z-index: 60;
         opacity: 0;
         transition: opacity 0.5s ease;
+    }
+
+    /* A toast of several lines, one for each thing told: wider, left
+       aligned */
+    #toast.lines {
+        width: min(640px, 90vw);
+        max-width: 90vw;
+        box-sizing: border-box;
+        text-align: left;
     }
 
     /* A song put in the queue by hand: its turn and title in gold */
@@ -108942,6 +108978,9 @@
         el.classList.toggle("wait", kind === "wait");
         el.classList.toggle("online", kind === "online");
         el.classList.toggle("note", kind === "note");
+
+        // Several lines, one for each thing told, in a wider toast
+        el.classList.toggle("lines", String(text).indexOf("\n") >= 0);
 
         // While the phone waits for Mureka, a turning ring before the words,
         // and the note stays until the answer replaces it
