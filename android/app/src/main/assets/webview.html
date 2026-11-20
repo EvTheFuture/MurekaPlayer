@@ -2307,6 +2307,24 @@
         box-sizing: border-box;
     }
 
+    /* How far an upload has come */
+    #crWaitBar {
+        display: none;
+        width: min(320px, 80%);
+        height: 8px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.18);
+        overflow: hidden;
+    }
+
+    #crWaitFill {
+        height: 100%;
+        width: 0;
+        border-radius: 4px;
+        background: var(--accent);
+        transition: width 0.2s linear;
+    }
+
     .crWaitRing {
         width: 72px;
         height: 72px;
@@ -7878,7 +7896,7 @@
             </div>
             <div id="crPickRows"></div>
         </div>
-        <div id="crWait"><span class="crWaitRing"></span><span id="crWaitText"></span><button class="chip fail" id="crStop" type="button">Stop</button></div>
+        <div id="crWait"><span class="crWaitRing"></span><span id="crWaitText"></span><div id="crWaitBar"><div id="crWaitFill"></div></div><button class="chip fail" id="crStop" type="button">Stop</button></div>
     </div>
 </div>
 <div id="songMenu">
@@ -31648,6 +31666,11 @@
 
     // The form as the phone has it. Fields being typed in, or with typing
     // not yet sent, are left as they are unless all is to be put in
+    // The form as the phone last told it, and this browser sending a song
+    // to the phone: {text, share}, null while not
+    let crLastState = null;
+    let crSending = null;
+
     // The credits as the phone last told them, and whether the details show
     let crCreditsLast = null;
     let crCreditsOpen = false;
@@ -31702,6 +31725,7 @@
 
         const ui = crUi;
 
+        crLastState = c;
         crPaintCredits(c.credits || null, c.creditsLooking === true);
 
         if (c.draft) {
@@ -31863,9 +31887,15 @@
             $("crStatus").style.display = text ? "block" : "none";
             $("crStatus").classList.toggle("bad", !!(c.note && c.note.bad));
 
-            // While the phone asks Mureka the form dims under a large ring
-            $("crWait").style.display = c.busy ? "flex" : "none";
-            $("crWaitText").textContent = c.busy || "";
+            // While the phone asks Mureka the form dims under a large ring,
+            // a bar under it for how far an upload has come, this browser's
+            // own sending to the phone first
+            const share = crSending ? crSending.share : typeof c.progress === "number" ? c.progress : null;
+
+            $("crWait").style.display = c.busy || crSending ? "flex" : "none";
+            $("crWaitText").textContent = crSending ? crSending.text : c.busy || "";
+            $("crWaitBar").style.display = typeof share === "number" ? "block" : "none";
+            $("crWaitFill").style.width = Math.round((share || 0) * 100) + "%";
 
             for (const b of ui.acts) {
                 b.disabled = !!c.busy;
@@ -32013,24 +32043,68 @@
             }
 
             showCrPick(false);
-            toast("Sending the song to the Android device", "wait");
-            fetch("/createUpload?name=" + encodeURIComponent(file.name || "song.mp3") + "&type=" + encodeURIComponent(file.type || "audio/mpeg"), {
-                method: "POST",
-                headers: { "Content-Type": file.type || "audio/mpeg" },
-                body: file,
-                cache: "no-store"
-            }).then(function (res) {
-                return res.json();
-            }).then(function (r) {
+
+            // Sent by XMLHttpRequest, which tells how much has gone, shown
+            // as a bar under the ring; the phone's upload to Mureka follows
+            // with a bar of its own
+            const mb = Math.round(file.size / 1048576 * 10) / 10 + " MB";
+            const xhr = new XMLHttpRequest();
+            const show = function (share) {
+
+                crSending = share === null ? null : { text: "Sending the song to the Android device, " + Math.round(share * 100) + " % of " + mb, share: share, xhr: xhr };
+
+                if (crLastState) {
+                    paintCreatePop(crLastState, false);
+                }
+            };
+            const done = function (r) {
+
+                show(null);
 
                 if (r && r.ok) {
                     toast("The song is ready to remix", "ok");
                 } else {
                     toast(r && r.why ? r.why : "The song could not be uploaded", "bad");
                 }
-            }).catch(function () {
+            };
+
+            show(0);
+            xhr.open("POST", "/createUpload?name=" + encodeURIComponent(file.name || "song.mp3") + "&type=" + encodeURIComponent(file.type || "audio/mpeg"), true);
+            xhr.setRequestHeader("Content-Type", file.type || "audio/mpeg");
+            xhr.upload.addEventListener("progress", function (ev) {
+
+                if (ev.lengthComputable && ev.total > 0) {
+                    show(Math.min(1, ev.loaded / ev.total));
+                }
+            });
+
+            // Sent whole, the phone's own steps show from here
+            xhr.upload.addEventListener("load", function () {
+                show(null);
+            });
+            xhr.addEventListener("load", function () {
+
+                let r = null;
+
+                try {
+                    r = JSON.parse(xhr.responseText);
+                } catch (e) {
+                    r = null;
+                }
+
+                done(r);
+            });
+            xhr.addEventListener("error", function () {
+
+                show(null);
                 toast("The Android device could not be reached", "bad");
             });
+            xhr.addEventListener("abort", function () {
+
+                show(null);
+                toast("Stopped, the song was not sent", "");
+            });
+            xhr.send(file);
         });
         input.click();
     }
@@ -32436,6 +32510,14 @@
     $("miniCreate").addEventListener("click", openCreatePop);
     $("crClose").addEventListener("click", closeCreatePop);
     $("crStop").addEventListener("click", function () {
+
+        // A song still on its way to the phone is let go here
+        if (crSending && crSending.xhr) {
+
+            crSending.xhr.abort();
+            return;
+        }
+
         crAsk({ op: "stop" });
     });
     $("crReset").addEventListener("click", function () {

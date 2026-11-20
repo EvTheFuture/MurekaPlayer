@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.290";
+    const VERSION = "2.0.1.291";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -68144,7 +68144,8 @@
     // One signed request to the storage. The signature covers the method,
     // the type, the time, the storage headers in order and the file with
     // the part of the query that names what is done, as the storage asks
-    async function ossRequest(token, method, key, query, signed, type, body) {
+    // onProgress: told the share of a file sent so far, 0 to 1, as it goes
+    async function ossRequest(token, method, key, query, signed, type, body, onProgress) {
 
         const date = new Date().toUTCString();
         const canonical = [
@@ -68157,16 +68158,20 @@
             "/" + token.bucket + "/" + key + signed
         ].join("\n");
         const sig = await hmacSha1Base64(token.tmp_secret_key, canonical);
-        const res = await timedFetch("https://" + token.bucket + "." + token.endpoint + "/" + key + query, {
-            method: method,
-            headers: {
-                "Content-Type": type,
-                "x-oss-date": date,
-                "x-oss-security-token": token.session_token,
-                "authorization": "OSS " + token.tmp_secret_id + ":" + sig
-            },
-            body: body
-        }, body && body.size ? Math.max(60000, Math.round(body.size / 50)) : 60000);
+        const url = "https://" + token.bucket + "." + token.endpoint + "/" + key + query;
+        const headers = {
+            "Content-Type": type,
+            "x-oss-date": date,
+            "x-oss-security-token": token.session_token,
+            "authorization": "OSS " + token.tmp_secret_id + ":" + sig
+        };
+        const wait = body && body.size ? Math.max(60000, Math.round(body.size / 50)) : 60000;
+
+        // A file whose progress is shown goes by XMLHttpRequest, which
+        // tells how much is sent, fetch does not
+        const res = typeof onProgress === "function" && body && body.size && typeof XMLHttpRequest === "function"
+            ? await xhrSend(method, url, headers, body, wait, onProgress)
+            : await timedFetch(url, { method: method, headers: headers, body: body }, wait);
 
         if (!res.ok) {
 
@@ -68187,6 +68192,54 @@
         return res;
     }
 
+    // A request by XMLHttpRequest, told how much of the body is sent.
+    // Answers what fetch would, as far as used here: ok, status, a header
+    // and the text
+    function xhrSend(method, url, headers, body, wait, onProgress) {
+
+        return new Promise(function (resolve, reject) {
+
+            const xhr = new XMLHttpRequest();
+
+            xhr.open(method, url, true);
+            xhr.timeout = wait;
+
+            for (const name of Object.keys(headers)) {
+                xhr.setRequestHeader(name, headers[name]);
+            }
+
+            xhr.upload.addEventListener("progress", function (ev) {
+
+                if (ev.lengthComputable && ev.total > 0) {
+                    onProgress(Math.min(1, ev.loaded / ev.total));
+                }
+            });
+            xhr.addEventListener("load", function () {
+
+                onProgress(1);
+                resolve({
+                    ok: xhr.status >= 200 && xhr.status < 300,
+                    status: xhr.status,
+                    headers: {
+                        get: function (name) {
+                            return xhr.getResponseHeader(name);
+                        }
+                    },
+                    text: function () {
+                        return Promise.resolve(xhr.responseText || "");
+                    }
+                });
+            });
+            xhr.addEventListener("error", function () {
+                reject(new Error("no connection"));
+            });
+            xhr.addEventListener("timeout", function () {
+                reject(new Error("no answer in " + Math.round(wait / 1000) + " s"));
+            });
+            xhr.send(body);
+        });
+    }
+
     // The picture into Mureka's storage. Answers the file's path
     async function uploadCover(blob) {
 
@@ -68196,8 +68249,9 @@
     }
 
     // A file into Mureka's storage: a short lived key from Mureka, then an
-    // upload in one part. Answers the file's path
-    async function uploadToStorage(blob, type, ext, what) {
+    // upload in one part. Answers the file's path. onProgress: told the
+    // share sent, 0 to 1
+    async function uploadToStorage(blob, type, ext, what, onProgress) {
 
         const res = await timedFetch("/api/misc/cos-token?time=" + Date.now(), {
             credentials: "include",
@@ -68224,7 +68278,7 @@
 
         const uploadId = found[1];
         const part = await ossRequest(token, "PUT", key, "?partNumber=1&uploadId=" + uploadId,
-            "?partNumber=1&uploadId=" + uploadId, type, blob);
+            "?partNumber=1&uploadId=" + uploadId, type, blob, onProgress);
         const etag = part.headers.get("ETag");
 
         if (!etag) {
@@ -69431,6 +69485,10 @@
     let createWebUntil = 0;
     let createUi = null;
 
+    // How far an upload has come, 0 to 1, shown as a bar under what is
+    // being done; null for nothing to measure
+    let createProgress = null;
+
     // The account's credits, looked up when Create opens, after songs are
     // sent and when tapped. null until the first answer
     let creditsNow = null;
@@ -70619,10 +70677,14 @@
         const type = blob.type && blob.type.indexOf("audio/") === 0 ? blob.type : (ext === "mp3" ? "audio/mpeg" : "audio/" + ext);
         const title = String(name || "").replace(/\.[^.]+$/, "").trim().slice(0, 100) || "Uploaded song";
 
-        tell("Uploading the song, " + Math.round(blob.size / 1048576 * 10) / 10 + " MB");
+        const mb = Math.round(blob.size / 1048576 * 10) / 10 + " MB";
+
+        tell("Uploading the song, " + mb, 0);
         userTry("an upload");
 
-        const key = await uploadToStorage(blob, type, ext, "a song");
+        const key = await uploadToStorage(blob, type, ext, "a song", function (share) {
+            tell("Uploading the song, " + Math.round(share * 100) + " % of " + mb, share);
+        });
 
         tell("Mureka takes the song in");
 
@@ -70875,9 +70937,8 @@
     // and play in another, a blank line between
     function createToastText(what, setLine, show, playMode) {
 
-        const play = createPlayWords(playMode, "They ");
         const first = [what, setLine].filter(Boolean).join("\n");
-        const second = show && play ? show + " and\n" + play : show || play;
+        const second = show ? show + createPlayWords(playMode, ", and they ") : createPlayWords(playMode, "They ");
 
         return [first, second].filter(Boolean).join("\n\n");
     }
@@ -73447,8 +73508,15 @@
 
         stopBtn.style.flex = "0 0 auto";
         stopBtn.style.padding = "8px 28px";
+        // How far an upload has come
+        ui.waitBar = document.createElement("div");
+        ui.waitBar.style.cssText = "width:min(260px, 80%);height:6px;border-radius:3px;background:rgba(255,255,255,0.18);overflow:hidden;display:none";
+        ui.waitFill = document.createElement("div");
+        ui.waitFill.style.cssText = "height:100%;width:0;background:" + ACCENT + ";border-radius:3px;transition:width 0.2s linear";
+        ui.waitBar.appendChild(ui.waitFill);
         ui.wait.appendChild(waitRing);
         ui.wait.appendChild(ui.waitText);
+        ui.wait.appendChild(ui.waitBar);
         ui.wait.appendChild(stopBtn);
 
         // Each part keeps its own height, the page scrolls instead
@@ -73532,6 +73600,8 @@
         ui.status.style.color = createNote.bad ? "#ffb0b0" : "#ccc";
         ui.wait.style.display = createBusy && isShown(createEl) ? "flex" : "none";
         ui.waitText.textContent = createBusy;
+        ui.waitBar.style.display = createBusy && typeof createProgress === "number" ? "block" : "none";
+        ui.waitFill.style.width = Math.round((createProgress || 0) * 100) + "%";
 
         for (const b of ui.acts) {
 
@@ -73723,6 +73793,7 @@
             }
 
             createBusy = "";
+            createProgress = null;
 
             if (createUi) {
                 paintCreate(true);
@@ -74405,9 +74476,10 @@
 
         const res = await createRun("Uploading the song", function () {
 
-            return createUpload(file, file.name, function (text) {
+            return createUpload(file, file.name, function (text, share) {
 
                 createBusy = text;
+                createProgress = typeof share === "number" ? share : null;
                 paintCreateStatus();
                 publishHostSoon();
             });
@@ -76038,6 +76110,7 @@
         return {
             draft: loadCreateDraft(),
             busy: createBusy,
+            progress: createBusy && typeof createProgress === "number" ? Math.round(createProgress * 1000) / 1000 : null,
             note: createNote,
             lengths: createLengths(),
             sets: createSetChoices(),
@@ -82330,6 +82403,24 @@
         box-sizing: border-box;
     }
 
+    /* How far an upload has come */
+    #crWaitBar {
+        display: none;
+        width: min(320px, 80%);
+        height: 8px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.18);
+        overflow: hidden;
+    }
+
+    #crWaitFill {
+        height: 100%;
+        width: 0;
+        border-radius: 4px;
+        background: var(--accent);
+        transition: width 0.2s linear;
+    }
+
     .crWaitRing {
         width: 72px;
         height: 72px;
@@ -87901,7 +87992,7 @@
             </div>
             <div id="crPickRows"></div>
         </div>
-        <div id="crWait"><span class="crWaitRing"></span><span id="crWaitText"></span><button class="chip fail" id="crStop" type="button">Stop</button></div>
+        <div id="crWait"><span class="crWaitRing"></span><span id="crWaitText"></span><div id="crWaitBar"><div id="crWaitFill"></div></div><button class="chip fail" id="crStop" type="button">Stop</button></div>
     </div>
 </div>
 <div id="songMenu">
@@ -111671,6 +111762,11 @@
 
     // The form as the phone has it. Fields being typed in, or with typing
     // not yet sent, are left as they are unless all is to be put in
+    // The form as the phone last told it, and this browser sending a song
+    // to the phone: {text, share}, null while not
+    let crLastState = null;
+    let crSending = null;
+
     // The credits as the phone last told them, and whether the details show
     let crCreditsLast = null;
     let crCreditsOpen = false;
@@ -111725,6 +111821,7 @@
 
         const ui = crUi;
 
+        crLastState = c;
         crPaintCredits(c.credits || null, c.creditsLooking === true);
 
         if (c.draft) {
@@ -111886,9 +111983,15 @@
             $("crStatus").style.display = text ? "block" : "none";
             $("crStatus").classList.toggle("bad", !!(c.note && c.note.bad));
 
-            // While the phone asks Mureka the form dims under a large ring
-            $("crWait").style.display = c.busy ? "flex" : "none";
-            $("crWaitText").textContent = c.busy || "";
+            // While the phone asks Mureka the form dims under a large ring,
+            // a bar under it for how far an upload has come, this browser's
+            // own sending to the phone first
+            const share = crSending ? crSending.share : typeof c.progress === "number" ? c.progress : null;
+
+            $("crWait").style.display = c.busy || crSending ? "flex" : "none";
+            $("crWaitText").textContent = crSending ? crSending.text : c.busy || "";
+            $("crWaitBar").style.display = typeof share === "number" ? "block" : "none";
+            $("crWaitFill").style.width = Math.round((share || 0) * 100) + "%";
 
             for (const b of ui.acts) {
                 b.disabled = !!c.busy;
@@ -112036,24 +112139,68 @@
             }
 
             showCrPick(false);
-            toast("Sending the song to the Android device", "wait");
-            fetch("/createUpload?name=" + encodeURIComponent(file.name || "song.mp3") + "&type=" + encodeURIComponent(file.type || "audio/mpeg"), {
-                method: "POST",
-                headers: { "Content-Type": file.type || "audio/mpeg" },
-                body: file,
-                cache: "no-store"
-            }).then(function (res) {
-                return res.json();
-            }).then(function (r) {
+
+            // Sent by XMLHttpRequest, which tells how much has gone, shown
+            // as a bar under the ring; the phone's upload to Mureka follows
+            // with a bar of its own
+            const mb = Math.round(file.size / 1048576 * 10) / 10 + " MB";
+            const xhr = new XMLHttpRequest();
+            const show = function (share) {
+
+                crSending = share === null ? null : { text: "Sending the song to the Android device, " + Math.round(share * 100) + " % of " + mb, share: share, xhr: xhr };
+
+                if (crLastState) {
+                    paintCreatePop(crLastState, false);
+                }
+            };
+            const done = function (r) {
+
+                show(null);
 
                 if (r && r.ok) {
                     toast("The song is ready to remix", "ok");
                 } else {
                     toast(r && r.why ? r.why : "The song could not be uploaded", "bad");
                 }
-            }).catch(function () {
+            };
+
+            show(0);
+            xhr.open("POST", "/createUpload?name=" + encodeURIComponent(file.name || "song.mp3") + "&type=" + encodeURIComponent(file.type || "audio/mpeg"), true);
+            xhr.setRequestHeader("Content-Type", file.type || "audio/mpeg");
+            xhr.upload.addEventListener("progress", function (ev) {
+
+                if (ev.lengthComputable && ev.total > 0) {
+                    show(Math.min(1, ev.loaded / ev.total));
+                }
+            });
+
+            // Sent whole, the phone's own steps show from here
+            xhr.upload.addEventListener("load", function () {
+                show(null);
+            });
+            xhr.addEventListener("load", function () {
+
+                let r = null;
+
+                try {
+                    r = JSON.parse(xhr.responseText);
+                } catch (e) {
+                    r = null;
+                }
+
+                done(r);
+            });
+            xhr.addEventListener("error", function () {
+
+                show(null);
                 toast("The Android device could not be reached", "bad");
             });
+            xhr.addEventListener("abort", function () {
+
+                show(null);
+                toast("Stopped, the song was not sent", "");
+            });
+            xhr.send(file);
         });
         input.click();
     }
@@ -112459,6 +112606,14 @@
     $("miniCreate").addEventListener("click", openCreatePop);
     $("crClose").addEventListener("click", closeCreatePop);
     $("crStop").addEventListener("click", function () {
+
+        // A song still on its way to the phone is let go here
+        if (crSending && crSending.xhr) {
+
+            crSending.xhr.abort();
+            return;
+        }
+
         crAsk({ op: "stop" });
     });
     $("crReset").addEventListener("click", function () {
