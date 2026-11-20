@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.291";
+    const VERSION = "2.0.1.292";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -23469,6 +23469,9 @@
     // locked
     const IOS_ANEW_AFTER_MS = 150;
 
+    // How soon after the song plays on the engine's clock is looked at
+    const IOS_ANEW_CHECK_MS = 400;
+
     let iosAnewEl = null;
     let iosAnewSrc = "";
 
@@ -23543,43 +23546,128 @@
             clearTimeout(heldReleaseTimer);
             heldReleaseTimer = setTimeout(function () {
                 heldReleasing = false;
-            }, ms + 2500);
+            }, ms + 4000);
             audio.pause();
+
+            // Back to where it started at once, while it stands: a move
+            // made as it played on left the engine's clock standing, the
+            // song moving on unheard, and the play head going back and forth
+            iosAnewBack(startAt);
+
+            setTimeout(function () {
+                iosAnewPlayOn(el, same, startAt, release, true);
+            }, ms);
+        }, IOS_ANEW_AFTER_MS);
+    }
+
+    // The song moved back to where it started, while it is stopped
+    function iosAnewBack(startAt) {
+
+        if (Math.abs((audio.currentTime || 0) - startAt) < 0.02) {
+            return;
+        }
+
+        try {
+            audio.currentTime = startAt;
+        } catch (e) {
+            // Plays on from where it stopped
+        }
+    }
+
+    // The stopped new song played on, at full level once it plays: a song
+    // that starts with a bang starts with it. The engine's clock looked at
+    // soon after: standing, the song is stopped again, the engine stopped
+    // and started, and the song played on from its start once more
+    function iosAnewPlayOn(el, same, startAt, release, first) {
+
+        release();
+
+        if (!same() || !audio.paused || userPaused) {
+            return;
+        }
+
+        const play = function () {
+
+            if (!same() || !audio.paused || userPaused) {
+                return;
+            }
+
+            let ctxAt = -1;
+            const up = function () {
+
+                el.removeEventListener("playing", up);
+                ctxAt = iosCtx ? iosCtx.currentTime : -1;
+                iosGainUpNow();
+            };
+
+            el.addEventListener("playing", up);
+
+            const go = audio.play();
+
+            if (go && go.catch) {
+                go.catch(function (e) {
+
+                    el.removeEventListener("playing", up);
+                    dbgLog("Audio", "the song did not play on after its stop, " + errText(e));
+                });
+            }
 
             setTimeout(function () {
 
-                release();
-
-                if (!same() || !audio.paused || userPaused) {
+                if (!first || ctxAt < 0 || !iosCtx || !same() || audio.paused || document.hidden) {
                     return;
                 }
 
-                // From where it started, at full level once it plays: a
-                // song that starts with a bang starts with it
-                try {
-                    audio.currentTime = startAt;
-                } catch (e) {
-                    // Plays on from where it stopped
+                const moved = iosCtx.currentTime - ctxAt;
+
+                if (moved >= 0.15) {
+                    return;
                 }
 
-                const el2 = audio;
-                const up = function () {
+                dbgLog("Audio", "the engine's clock stood after the song played on, " + dbgNum(moved) + " s in "
+                    + IOS_ANEW_CHECK_MS + " ms, the engine stopped and started, the song played on from " + dbgNum(startAt) + " again");
+                iosAnewHolding = true;
+                iosGain.gain.cancelScheduledValues(iosCtx.currentTime);
+                iosGain.gain.value = 0;
+                heldReleasing = true;
+                clearTimeout(heldReleaseTimer);
+                heldReleaseTimer = setTimeout(function () {
+                    heldReleasing = false;
+                }, 4000);
+                audio.pause();
+                iosAnewBack(startAt);
 
-                    el2.removeEventListener("playing", up);
-                    iosGainUpNow();
+                const again = function () {
+                    iosAnewPlayOn(el, same, startAt, function () {
+                        iosAnewHolding = false;
+                    }, false);
+                };
+                const resume = function () {
+                    return iosCtx.resume();
                 };
 
-                el2.addEventListener("playing", up);
+                Promise.resolve().then(function () {
+                    return iosCtx.suspend();
+                }).then(resume, resume).then(again, again);
+            }, IOS_ANEW_CHECK_MS);
+        };
 
-                const go = audio.play();
+        // A move back still under way is let finish first
+        if (audio.seeking) {
 
-                if (go && go.catch) {
-                    go.catch(function (e) {
-                        dbgLog("Audio", "the song did not play on after its stop, " + errText(e));
-                    });
-                }
-            }, ms);
-        }, IOS_ANEW_AFTER_MS);
+            const done = function () {
+
+                el.removeEventListener("seeked", done);
+                clearTimeout(late);
+                play();
+            };
+            const late = setTimeout(done, 600);
+
+            el.addEventListener("seeked", done);
+            return;
+        }
+
+        play();
     }
 
     // The gain up at once, over a few milliseconds only, so the step makes
@@ -71939,9 +72027,22 @@
                 }
 
                 // Played when ready, both are asked to play at once: the one
-                // ready first plays, the other after it
+                // ready first plays, the other after it. One of them ready
+                // already when Mureka tells their ids, or playing by then,
+                // the other one asked to play at once would cut it off, so
+                // it plays after it
                 if (w.play) {
-                    playWhenReady(id, w.play === "now" ? "now" : "after");
+
+                    const ownPlays = !!currentSong && String(currentSong.feed_id) === w.feedId;
+                    const now = w.play === "now" && !w.nowStarted && !ownPlays;
+
+                    if (now && isUsableSong(song)) {
+                        w.nowStarted = true;
+                    }
+
+                    if (!currentSong || String(currentSong.song_id) !== id) {
+                        playWhenReady(id, now ? "now" : "after");
+                    }
                 }
 
                 dbgLog("Create", "new song " + id + " of " + w.feedId + (w.play ? ", plays when ready" : "")
