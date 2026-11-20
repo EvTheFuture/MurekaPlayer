@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.286";
+    const VERSION = "2.0.1.287";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -23568,26 +23568,38 @@
         dbgLog("Audio", "the new song started out of view, the sound engine stopped " + ms + " ms, as Engine still does, the song back to "
             + dbgNum(from) + " after");
 
+        // The song itself muted meanwhile: with the engine stopped Safari
+        // can let the song out past it, heard from its start and then again
+        // once it went back
+        const el = audio;
+        const wasMuted = el.muted;
+
+        el.muted = true;
+
         const back = function () {
 
             release();
+            el.muted = wasMuted;
 
-            if (!same()) {
-                return;
+            if (same()) {
+                iosGainBackNow();
             }
-
-            try {
-                audio.currentTime = from;
-            } catch (e) {
-                // Plays on from where it is
-            }
-
-            iosGainBackNow();
         };
 
         iosCtx.suspend().then(function () {
 
             setTimeout(function () {
+
+                // Back to where it started while still silent, then on
+                if (same()) {
+
+                    try {
+                        el.currentTime = from;
+                    } catch (e) {
+                        // Plays on from where it is
+                    }
+                }
+
                 iosCtx.resume().then(back, back);
             }, ms);
         }, back);
