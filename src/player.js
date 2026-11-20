@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.294";
+    const VERSION = "2.0.1.295";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -22971,6 +22971,10 @@
     // While a fade runs, for the browsers: its number and its length
     let hostFade = null;
 
+    // Room a fade keeps before the song's end, and the shortest fade worth it
+    const FADE_END_ROOM_MS = 400;
+    const FADE_SHORTEST_MS = 250;
+
     function fadeThen(ms, then, quit) {
 
         endReadyFade();
@@ -22990,6 +22994,26 @@
             dbgLog("Song", "no fade, Safari on an iPhone or iPad ignores a page's volume and the gain could not be put in");
             then();
             return;
+        }
+
+        // A song about to end has its fade done before it ends, else it ends
+        // during the fade and the next song in the queue plays instead of
+        // the new one. Too close to its end for a fade, it switches at once
+        const left = (Number(audio.duration) || 0) - (Number(audio.currentTime) || 0);
+
+        if (isFinite(left) && left > 0 && left * 1000 < ms + FADE_END_ROOM_MS) {
+
+            const room = Math.round(left * 1000 - FADE_END_ROOM_MS);
+
+            if (room < FADE_SHORTEST_MS) {
+
+                dbgLog("Song", "no fade, the song ends in " + dbgNum(left) + " s");
+                then();
+                return;
+            }
+
+            dbgLog("Song", "the fade made " + (room / 1000) + " s instead of " + (ms / 1000) + ", the song ends in " + dbgNum(left) + " s");
+            ms = room;
         }
 
         const start = fadeLevel();
