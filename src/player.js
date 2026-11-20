@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.292";
+    const VERSION = "2.0.1.293";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -34478,6 +34478,56 @@
         }
     }
 
+    // A bar under the words of the waiting toast shown now, for an upload:
+    // the function answered fills it, told the share sent, 0 to 1, and does
+    // nothing once another toast took its place. The web view shows it too
+    function toastBarFn() {
+
+        const n = toastSeq;
+
+        return function (share) {
+            toastProgress(n, share);
+        };
+    }
+
+    function toastProgress(n, share) {
+
+        if (!lastToast || lastToast.n !== n || lastToast.kind !== "wait") {
+            return;
+        }
+
+        const p = Math.max(0, Math.min(100, Math.round((Number(share) || 0) * 100)));
+
+        if (lastToast.p === p) {
+            return;
+        }
+
+        lastToast.p = p;
+        publishHostSoon();
+
+        if (!panelToastEl || !panelToastEl.parentNode) {
+            return;
+        }
+
+        let bar = panelToastEl.querySelector("[data-bar]");
+
+        if (!bar) {
+
+            const fill = document.createElement("span");
+
+            bar = document.createElement("span");
+            bar.dataset.bar = "1";
+            bar.style.cssText = "position:absolute;left:16px;right:16px;bottom:6px;height:3px;border-radius:2px;overflow:hidden;"
+                + "background:rgba(" + ACCENT_RGB + ",0.25)";
+            fill.style.cssText = "display:block;height:100%;width:0;background:" + ACCENT + ";transition:width 0.2s linear";
+            bar.appendChild(fill);
+            panelToastEl.appendChild(bar);
+            panelToastEl.style.paddingBottom = "16px";
+        }
+
+        bar.firstChild.style.width = p + "%";
+    }
+
     function showToast(text, ok, undo) {
 
         // Three looks: "wait" while Mureka is asked, ringed with a turning
@@ -34529,6 +34579,7 @@
 
         panelEl.appendChild(panelToastEl);
         panelToastEl.textContent = "";
+        panelToastEl.style.paddingBottom = "";
 
         if (kind === "wait") {
 
@@ -68329,11 +68380,11 @@
     }
 
     // The picture into Mureka's storage. Answers the file's path
-    async function uploadCover(blob) {
+    async function uploadCover(blob, onProgress) {
 
         const kind = coverFileType(blob);
 
-        return uploadToStorage(blob, kind.type, kind.ext, "a cover");
+        return uploadToStorage(blob, kind.type, kind.ext, "a cover", onProgress);
     }
 
     // A file into Mureka's storage: a short lived key from Mureka, then an
@@ -68623,7 +68674,7 @@
 
             try {
 
-                key = await uploadCover(square);
+                key = await uploadCover(square, toastBarFn());
                 break;
             } catch (e) {
 
@@ -77137,7 +77188,8 @@
 
                 try {
 
-                    const key = await uploadCover(await coverSquare(file, crop));
+                    const bar = toastBarFn();
+                    const key = await uploadCover(await coverSquare(file, crop), bar);
 
                     await changePlaylist(pl, { cover: key }, "The cover of " + pl.name + " changed");
                 } catch (e) {
@@ -77681,7 +77733,8 @@
 
         try {
 
-            const key = await uploadCover(await coverSquare(blob, crop));
+            const bar = toastBarFn();
+            const key = await uploadCover(await coverSquare(blob, crop), bar);
             const ok = await changePlaylist(pl, { cover: key }, "The cover of " + pl.name + " changed");
 
             return ok ? { ok: true } : { ok: false, why: "Mureka did not take the cover" };
@@ -83410,6 +83463,30 @@
     #toast.atTop {
         bottom: auto;
         top: 6vh;
+    }
+
+    /* An upload under way: a bar under the words fills as it is sent */
+    #toast.hasBar {
+        padding-bottom: 20px;
+    }
+
+    #toast .toastBar {
+        position: absolute;
+        left: 18px;
+        right: 18px;
+        bottom: 8px;
+        height: 4px;
+        border-radius: 2px;
+        overflow: hidden;
+        background: rgba(128, 128, 128, 0.35);
+    }
+
+    #toast .toastBar > span {
+        display: block;
+        height: 100%;
+        width: 0;
+        background: var(--accent);
+        transition: width 0.2s linear;
     }
 
     /* In view, it fades out again when the class goes */
@@ -104880,6 +104957,17 @@
                 }
             }
 
+            // A cover changed since the list was drawn
+            const thumb = row.querySelector(".thumb");
+
+            if (thumb && typeof item.cover === "string" && item.cover && (thumb.dataset.src || "") !== item.cover) {
+
+                const fresh = makeThumb(item.cover);
+
+                thumb.replaceWith(fresh);
+                thumbsFor(box, row);
+            }
+
             // A heart liked or unliked since the list was drawn
             const heartBtn = row.querySelector(".rowHeart");
 
@@ -109132,6 +109220,12 @@
         }
 
         if (!t || key === toastSeen) {
+
+            // The same waiting toast, its upload further along
+            if (t && t.kind === "wait" && typeof t.p === "number") {
+                toastBar(t.p / 100);
+            }
+
             return;
         }
 
@@ -109146,6 +109240,10 @@
         }
 
         toast(t.text, t.kind === "wait" || t.kind === "online" ? t.kind : (t.ok === false ? "bad" : "ok"));
+
+        if (t.kind === "wait" && typeof t.p === "number") {
+            toastBar(t.p / 100);
+        }
 
         // A note with Undo, pressed here, undone on the phone
         if (t.undo) {
@@ -109205,11 +109303,16 @@
         el.classList.toggle("atTop", covered);
     }
 
+    // Each toast counted, so a bar for one is not put on the next
+    let toastSerial = 0;
+
     function toast(text, kind, waitMs) {
 
         const el = $("toast");
 
+        toastSerial += 1;
         el.textContent = "";
+        el.classList.remove("hasBar");
         el.classList.toggle("ok", kind === "ok");
         el.classList.toggle("bad", kind === "bad");
         el.classList.toggle("wait", kind === "wait");
@@ -109259,6 +109362,73 @@
         // Waiting stays until the answer replaces it, a minute at the most,
         // or as long as asked when no answer ever comes, a download for one
         toastTimer = setTimeout(fadeToastOut, kind === "wait" ? (waitMs || 60000) : toastShowMs(text, kind));
+    }
+
+    // The bar of a waiting toast, filled to the share sent, 0 to 1. serial:
+    // the toast it is for, left out for the phone's own
+    function toastBar(share, serial) {
+
+        const el = $("toast");
+
+        if (!el.classList.contains("wait") || (serial !== undefined && serial !== toastSerial)) {
+            return;
+        }
+
+        let bar = el.querySelector(":scope > .toastBar");
+
+        if (!bar) {
+
+            bar = document.createElement("div");
+            bar.className = "toastBar";
+            bar.appendChild(document.createElement("span"));
+            el.appendChild(bar);
+            el.classList.add("hasBar");
+        }
+
+        bar.firstChild.style.width = Math.round(Math.max(0, Math.min(1, Number(share) || 0)) * 100) + "%";
+    }
+
+    // A picture sent to the phone with a bar for how much has gone. Answers
+    // the phone's answer, null when it was not one
+    function postWithBar(url, file, text) {
+
+        toast(text, "wait");
+
+        const serial = toastSerial;
+
+        toastBar(0, serial);
+
+        return new Promise(function (resolve, reject) {
+
+            const xhr = new XMLHttpRequest();
+
+            xhr.open("POST", url, true);
+            xhr.timeout = 180000;
+            xhr.setRequestHeader("Content-Type", file.type || "image/jpeg");
+            xhr.upload.addEventListener("progress", function (ev) {
+
+                if (ev.lengthComputable && ev.total > 0) {
+                    toastBar(ev.loaded / ev.total, serial);
+                }
+            });
+            xhr.addEventListener("load", function () {
+
+                toastBar(1, serial);
+
+                try {
+                    resolve(JSON.parse(xhr.responseText));
+                } catch (e) {
+                    resolve(null);
+                }
+            });
+            xhr.addEventListener("error", function () {
+                reject(new Error("no connection"));
+            });
+            xhr.addEventListener("timeout", function () {
+                reject(new Error("no answer"));
+            });
+            xhr.send(file);
+        });
     }
 
     // Loading from Mureka asked for here: under way until the phone's state
@@ -111116,17 +111286,9 @@
 
     function sendPlaylistCover(id, file, crop) {
 
-        toast("Sending the cover to the Android device", "wait");
-
-        fetch("/setCover?playlist=" + encodeURIComponent(id) + "&x=" + crop.x + "&y=" + crop.y + "&s=" + crop.s
-            + "&w=" + crop.w + "&h=" + crop.h + "&type=" + encodeURIComponent(file.type || "image/jpeg"), {
-            method: "POST",
-            headers: { "Content-Type": file.type || "image/jpeg" },
-            body: file,
-            cache: "no-store"
-        }).then(function (res) {
-            return res.json();
-        }).then(function (r) {
+        postWithBar("/setCover?playlist=" + encodeURIComponent(id) + "&x=" + crop.x + "&y=" + crop.y + "&s=" + crop.s
+            + "&w=" + crop.w + "&h=" + crop.h + "&type=" + encodeURIComponent(file.type || "image/jpeg"), file,
+            "Sending the cover to the Android device").then(function (r) {
 
             dbgLog("Cover", r && r.ok ? "new cover set for playlist " + id : "playlist cover failed, " + (r && r.why ? r.why : "no reason"));
 
@@ -115113,17 +115275,9 @@
     // says it only when the phone could not be reached
     function sendCover(m, file, crop) {
 
-        toast("Sending the cover to the Android device", "wait");
-
-        fetch("/setCover?id=" + encodeURIComponent(m.id) + "&x=" + crop.x + "&y=" + crop.y + "&s=" + crop.s
-            + "&w=" + crop.w + "&h=" + crop.h + "&type=" + encodeURIComponent(file.type || "image/jpeg"), {
-            method: "POST",
-            headers: { "Content-Type": file.type || "image/jpeg" },
-            body: file,
-            cache: "no-store"
-        }).then(function (res) {
-            return res.json();
-        }).then(function (r) {
+        postWithBar("/setCover?id=" + encodeURIComponent(m.id) + "&x=" + crop.x + "&y=" + crop.y + "&s=" + crop.s
+            + "&w=" + crop.w + "&h=" + crop.h + "&type=" + encodeURIComponent(file.type || "image/jpeg"), file,
+            "Sending the cover to the Android device").then(function (r) {
 
             dbgLog("Cover", r && r.ok ? "new cover set for " + m.id : "new cover failed, " + (r && r.why ? r.why : "no reason"));
 
