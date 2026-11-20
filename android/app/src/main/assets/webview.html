@@ -6603,6 +6603,24 @@
         pointer-events: none;
     }
 
+    /* A song made by remixing, a small purple R on the top left corner */
+    .rowRemix {
+        position: absolute;
+        top: -0.4em;
+        left: -0.3em;
+        width: 1.05em;
+        height: 1.05em;
+        border-radius: 50%;
+        background: #9b7be0;
+        color: var(--bg);
+        font-size: 0.75em;
+        line-height: 1.05em;
+        font-weight: 700;
+        text-align: center;
+        opacity: 0.9;
+        pointer-events: none;
+    }
+
     .rowTrim {
         position: absolute;
         top: -0.4em;
@@ -15019,6 +15037,10 @@
             $("pubBadge").appendChild(trimMark());
         }
 
+        if (pub !== null && s.songRemixed === true) {
+            $("pubBadge").appendChild(remixMark());
+        }
+
         $("pubBadge").removeAttribute("title");
 
         if (pub !== null) {
@@ -18980,6 +19002,10 @@
                 heart.appendChild(trimMark());
             }
 
+            if (song.remixed) {
+                heart.appendChild(remixMark());
+            }
+
             noteMarkOn(heart, song.note);
             commentMarkOn(heart, song.comments);
         }
@@ -19063,6 +19089,10 @@
                 badge.appendChild(trimMark());
             }
 
+            if (song.remixed) {
+                badge.appendChild(remixMark());
+            }
+
             noteMarkOn(badge, song.note);
             commentMarkOn(badge, song.comments);
             return;
@@ -19084,6 +19114,10 @@
 
         if (song.trimmed) {
             badge.appendChild(trimMark());
+        }
+
+        if (song.remixed) {
+            badge.appendChild(remixMark());
         }
 
         noteMarkOn(badge, song.note);
@@ -19127,6 +19161,17 @@
 
     // The small yellow T on the corner of a badge, for a song made by
     // trimming
+    function remixMark() {
+
+        const mark = document.createElement("span");
+
+        mark.className = "rowRemix";
+        mark.textContent = "R";
+        mark.title = "Remix";
+
+        return mark;
+    }
+
     function trimMark() {
 
         const mark = document.createElement("span");
@@ -31413,14 +31458,23 @@
                 crSet({ style: crDraft.remixStyle, stylePromptId: "", stylePromptText: "" });
             }
         }, "ring");
+        ui.remixPart = crChip("Choose the part", function () {
+
+            if (crDraft && crDraft.remixSource) {
+
+                crRemixPart(crDraft.remixSource, crDraft.remix
+                    ? { start: crDraft.remix.trim_start_ms || 0, end: crDraft.remix.trim_end_ms || 0 } : null);
+            }
+        });
         ui.remixClear = crChip("No remix", function () {
-            crSet({ remix: null, remixName: "", remixStyle: "" });
+            crSet({ remix: null, remixName: "", remixStyle: "", remixSource: null });
         }, "fail");
         remix.appendChild(crRow([
             crChip("Choose a song", function () {
                 openCrPick("resources");
             }, "crFill"),
             crChip("Upload a song", crUpload, "crFill"),
+            ui.remixPart,
             ui.remixStyle,
             ui.remixClear
         ]));
@@ -31690,7 +31744,10 @@
             ui.characterRow.style.display = character ? "flex" : "none";
             ui.characterName.textContent = fresh.characterId ? fresh.characterName || "Character " + fresh.characterId : "No character chosen yet";
             ui.advBox.style.display = character || fresh.remix ? "none" : "flex";
-            ui.remixName.textContent = fresh.remix ? "Remixing " + (fresh.remixName || fresh.remix.title || "a song") : "None, a new song";
+            ui.remixName.textContent = fresh.remix ? "Remixing " + (fresh.remixName || fresh.remix.title || "a song")
+                + (fresh.remix.trim_end_ms ? ", " + (fresh.remix.trim_start_ms > 0 ? "from " + trimTimeText(fresh.remix.trim_start_ms / 1000) + ", " : "")
+                    + trimTimeText((fresh.remix.trim_end_ms - (fresh.remix.trim_start_ms || 0)) / 1000) : "") : "None, a new song";
+            ui.remixPart.style.display = fresh.remix && fresh.remixSource ? "" : "none";
             ui.remixName.classList.toggle("crNone", !fresh.remix);
             ui.remixStyle.style.display = fresh.remix && fresh.remixStyle && fresh.remixStyle.trim() !== String(fresh.style || "").trim() ? "" : "none";
             ui.remixClear.style.display = fresh.remix ? "" : "none";
@@ -31852,6 +31909,47 @@
             }
 
             crAnswered(r);
+        });
+    }
+
+    // The part of an uploaded song to remix, chosen in the trimmer with the
+    // same waveform and precision as a trim, then made ready by the phone.
+    // An old phone without the song's file makes the whole song ready
+    function crRemixPart(x, from) {
+
+        const use = function (range) {
+
+            const ask = { op: "use", id: x.id, title: x.title, ms: x.ms, url: x.url || "" };
+
+            if (range) {
+
+                ask.start = range.start;
+                ask.end = range.end;
+            }
+
+            crAsk(ask).then(crAnswered);
+        };
+
+        if (!x.url || !(x.ms > 0)) {
+
+            use(null);
+            return;
+        }
+
+        openTrimmer({
+            id: "upload " + x.id,
+            title: x.title || "Uploaded song",
+            durationMs: x.ms,
+            src: "https://static-cos.mureka.ai/" + String(x.url).replace(/^\/+/, "")
+        }, {
+            min: 10,
+            max: 480,
+            start: from && from.start > 0 ? from.start / 1000 : 0,
+            end: from && from.end > 0 ? from.end / 1000 : 0,
+            done: use,
+            cancel: function () {
+                toast(from ? "The part stays as it was" : "Nothing chosen to remix", "");
+            }
         });
     }
 
@@ -32250,7 +32348,7 @@
                         rows.appendChild(crPickRow(x.title, [crTime(x.ms), when].filter(Boolean).join(", "), function () {
 
                             showCrPick(false);
-                            crAsk({ op: "use", id: x.id, title: x.title, ms: x.ms }).then(crAnswered);
+                            crRemixPart(x, null);
                         }));
                     }
                 }
@@ -39598,9 +39696,11 @@
         ui.titleInput.maxLength = 50;
         ui.titleInput.className = "pField trimGrow";
         titleRow.appendChild(ui.titleInput);
+        ui.titleRow = titleRow;
 
         const hint = document.createElement("div");
 
+        ui.hint = hint;
         hint.className = "pText small";
         hint.textContent = "Drag the ends on the whole song, or pick an end and drag it in the close up, which zooms down to single samples. Dragging up or down in the close up, Shift with the wheel, or More gain and Less gain magnify its height, so quiet clicks show. A tap plays from there to the end. Play end plays what the close up shows before the end and stops exactly where the song will end, so zooming in plays a shorter piece. Repeat the end plays it again and again, also while the end is moved. Play and Pause play the kept part and stop where it is. Mureka fades out the last two seconds of a trimmed song, the switch does the same when listening here once the end is moved. Trim makes a new song on Mureka, the original stays unless Delete original is ticked. Mureka cuts to within about 26 ms. Times are typed as 1:23.456, or as 1.23.456 on a number pad without a colon.";
 
@@ -39694,7 +39794,10 @@
 
     // Open the trimmer for a song from the song menu: its id, title, length
     // and the link to its file
-    async function openTrimmer(m) {
+    // pick: the part of an uploaded song to remix is chosen instead of a
+    // trim, {min, max, start, end} in seconds and done(range in ms) or
+    // cancel() once chosen or closed
+    async function openTrimmer(m, pick) {
 
         if (!trimUi) {
             buildTrimmer();
@@ -39755,11 +39858,20 @@
             // The close up's height magnified, the song itself is not changed
             waveGain: 1,
             overviewPeaks: null,
-            drag: null
+            drag: null,
+            pick: pick || null
         };
 
-        trimUi.heading.textContent = "Trim: " + (m.title || "Untitled");
+        trimUi.heading.textContent = (pick ? "Part to remix: " : "Trim: ") + (m.title || "Untitled");
         trimUi.titleInput.value = (m.title === "Untitled" ? "" : m.title || "").slice(0, 50);
+        trimUi.titleRow.style.display = pick ? "none" : "";
+        trimUi.fadeRow.style.display = pick ? "none" : "";
+
+        // What the page does, for a trim or for the part of a remix
+        trimUi.hint.dataset.trim = trimUi.hint.dataset.trim || trimUi.hint.textContent;
+        trimUi.hint.textContent = pick
+            ? "Drag the ends on the whole song, or pick an end and drag it in the close up, which zooms down to single samples, as in the trimmer. Play start, Play end and Play all listen to the part, Repeat the end plays it again and again. Use this part makes Mureka take that part of the uploaded song, " + trimTimeText(pick.min) + " to " + trimTimeText(pick.max) + " long, to remix it. Times are typed as 1:23.456, or as 1.23.456 on a number pad without a colon."
+            : trimUi.hint.dataset.trim;
         trimUi.ask.style.display = "none";
         trimWorking("");
         trimBusy(false);
@@ -39832,6 +39944,15 @@
             // it, so the song ends where Mureka says
             tr.duration = said > 0 ? Math.min(buffer.duration, said) : buffer.duration;
             tr.end = tr.duration;
+
+            // The part chosen before, else from the start as far as a remix
+            // may go
+            if (tr.pick) {
+
+                tr.start = Math.max(0, Math.min(tr.pick.start || 0, tr.duration - TRIM_MIN_LEN));
+                tr.end = tr.pick.end > tr.start ? Math.min(tr.pick.end, tr.duration) : Math.min(tr.duration, tr.start + tr.pick.max);
+            }
+
             tr.viewC = tr.end;
             trimUi.trimBtn.disabled = false;
             trimLoading("");
@@ -39934,6 +40055,8 @@
 
     function closeTrimmer() {
 
+        const pick = tr && tr.pick && !tr.pick.chosen ? tr.pick : null;
+
         // Open or not, the phone lets go of the music it held for it
         if (tr) {
             send("trimResume");
@@ -39942,6 +40065,11 @@
         trimToken += 1;
         trimStop();
         tr = null;
+
+        // Closed without a part to remix
+        if (pick) {
+            setTimeout(pick.cancel, 0);
+        }
 
         // A song still coming in is not wanted any more
         if (trimFetch) {
@@ -40090,7 +40218,7 @@
     let trimPhoneSeq = 0;
 
     function trimOnPhone() {
-        return !!(state && !state.carAudio && state.trimRemote === true && tr && !tr.phoneFailed);
+        return !!(state && !state.carAudio && state.trimRemote === true && tr && !tr.phoneFailed && !tr.pick);
     }
 
     // The piece asked of the phone. The play head waits at its start until
@@ -40174,7 +40302,7 @@
     // Whether the preview fades out the last two seconds: with the switch on and
     // the end actually cut
     function trimFades() {
-        return trimFadeOn && tr !== null && tr.end < tr.duration - 0.05;
+        return trimFadeOn && tr !== null && !tr.pick && tr.end < tr.duration - 0.05;
     }
 
     function trimStop() {
@@ -40245,8 +40373,11 @@
 
         trimUi.startInput.value = document.activeElement === trimUi.startInput ? trimUi.startInput.value : trimTimeText(tr.start);
         trimUi.endInput.value = document.activeElement === trimUi.endInput ? trimUi.endInput.value : trimTimeText(tr.end);
-        trimUi.info.textContent = "ID " + tr.song.id + " · Original " + trimTimeText(tr.duration)
-            + " · New " + trimTimeText(tr.end - tr.start);
+        trimUi.info.textContent = tr.pick
+            ? "Uploaded song " + trimTimeText(tr.duration) + " · Part " + trimTimeText(tr.end - tr.start)
+                + " · A remix takes " + trimTimeText(tr.pick.min) + " to " + trimTimeText(tr.pick.max)
+            : "ID " + tr.song.id + " · Original " + trimTimeText(tr.duration)
+                + " · New " + trimTimeText(tr.end - tr.start);
         trimUi.pauseBtn.textContent = tr.src ? "Pause" : "Play";
 
         // The button of what plays is ringed. The zoom buttons dim at the
@@ -40643,7 +40774,7 @@
             trimUi.trimBtn.appendChild(ring);
             trimUi.trimBtn.appendChild(document.createTextNode("Trimming"));
         } else {
-            trimUi.trimBtn.textContent = "Trim";
+            trimUi.trimBtn.textContent = tr && tr.pick ? "Use this part" : "Trim";
         }
 
         trimUi.trimBtn.disabled = on || !tr || !tr.buffer;
@@ -40653,6 +40784,27 @@
     function askTrim() {
 
         if (!tr || !tr.buffer || tr.busy) {
+            return;
+        }
+
+        // The part to remix: within Mureka's limits, handed on as it is
+        if (tr.pick) {
+
+            const len = tr.end - tr.start;
+
+            if (len < tr.pick.min - 0.0005 || len > tr.pick.max + 0.0005) {
+
+                trimStatus("A remix takes a part of " + trimTimeText(tr.pick.min) + " to " + trimTimeText(tr.pick.max)
+                    + ", this is " + trimTimeText(len));
+                return;
+            }
+
+            const pick = tr.pick;
+            const range = { start: Math.round(tr.start * 1000), end: Math.round(tr.end * 1000) };
+
+            pick.chosen = true;
+            closeTrimmer();
+            pick.done(range);
             return;
         }
 
