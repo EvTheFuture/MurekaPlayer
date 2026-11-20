@@ -2307,9 +2307,9 @@
         box-sizing: border-box;
     }
 
-    /* How far an upload has come */
+    /* How far an upload has come, its room kept while it is not there */
     #crWaitBar {
-        display: none;
+        visibility: hidden;
         width: min(320px, 80%);
         height: 8px;
         border-radius: 4px;
@@ -7920,7 +7920,7 @@
             </div>
             <div id="crPickRows"></div>
         </div>
-        <div id="crWait"><span class="crWaitRing"></span><span id="crWaitText"></span><div id="crWaitBar"><div id="crWaitFill"></div></div><button class="chip fail" id="crStop" type="button">Stop</button></div>
+        <div id="crWait"><span class="crWaitRing"></span><span id="crWaitText"></span><div id="crWaitBar"><div id="crWaitFill"></div></div><button class="chip fail" id="crStop" type="button">Abort</button></div>
     </div>
 </div>
 <div id="songMenu">
@@ -32003,7 +32003,7 @@
 
             $("crWait").style.display = c.busy || crSending ? "flex" : "none";
             $("crWaitText").textContent = crSending ? crSending.text : c.busy || "";
-            $("crWaitBar").style.display = typeof share === "number" ? "block" : "none";
+            $("crWaitBar").style.visibility = typeof share === "number" ? "visible" : "hidden";
             $("crWaitFill").style.width = Math.round((share || 0) * 100) + "%";
 
             for (const b of ui.acts) {

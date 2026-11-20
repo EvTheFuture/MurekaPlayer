@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.293";
+    const VERSION = "2.0.1.294";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -193,6 +193,10 @@
     // localStorage key for songs made by trimming in the player, which the
     // list marks with a small T on their badge
     const TRIMMED_KEY = "mureka_trimmed_v1";
+
+    // Songs trimmed here from a remix, which Mureka gives without its Remix
+    // mark: they keep the R on their badge
+    const REMIX_KEPT_KEY = "mureka_remix_kept_v1";
 
     // localStorage key for songs marked ignored, which a queue made from
     // the list leaves out. Played when asked for by name all the same
@@ -5891,7 +5895,7 @@
     }
 
     function isRemixed(song) {
-        return !!song && song.remixed === true;
+        return !!song && (song.remixed === true || remixKept.has(String(song.song_id)));
     }
 
     // Song ids the user marked as instrumental by hand, loaded once on startup
@@ -7003,6 +7007,34 @@
     // mark here only bridges the time from a trim to the next Load or
     // Rescan, and is dropped once Mureka's mark is seen
     let trimmedIds = loadTrimmed();
+
+    // Songs trimmed here from a remix, a remix as well
+    const remixKept = loadRemixKept();
+
+    function loadRemixKept() {
+
+        try {
+
+            const raw = JSON.parse(localStorage.getItem(REMIX_KEPT_KEY));
+
+            if (Array.isArray(raw)) {
+                return new Set(raw.map(String));
+            }
+        } catch (e) {
+            // None kept
+        }
+
+        return new Set();
+    }
+
+    function saveRemixKept() {
+
+        try {
+            localStorage.setItem(REMIX_KEPT_KEY, JSON.stringify(Array.from(remixKept)));
+        } catch (e) {
+            // Full, kept for this visit only
+        }
+    }
 
     dropConfirmedTrimMarks(cache.songs);
 
@@ -34485,6 +34517,9 @@
 
         const n = toastSeq;
 
+        // The bar there from the start, so the toast keeps its size
+        toastProgress(n, 0);
+
         return function (share) {
             toastProgress(n, share);
         };
@@ -34579,7 +34614,7 @@
 
         panelEl.appendChild(panelToastEl);
         panelToastEl.textContent = "";
-        panelToastEl.style.paddingBottom = "";
+        panelToastEl.style.paddingBottom = "9px";
 
         if (kind === "wait") {
 
@@ -69139,6 +69174,13 @@
 
             noteTrimOrigin(song, s);
 
+            // A remix trimmed is still a remix, though Mureka drops the mark
+            if (isRemixed(song)) {
+
+                remixKept.add(String(s.song_id));
+                saveRemixKept();
+            }
+
             if (copySongTweaks(song, s)) {
                 carried = true;
             }
@@ -73656,13 +73698,14 @@
         waitRing.style.cssText = "width:56px;height:56px;box-sizing:border-box;border:5px solid rgba(" + ACCENT_RGB + ",0.25);border-top-color:" + ACCENT + ";border-radius:50%;animation:mureka-spin 0.8s linear infinite";
         ui.waitText = document.createElement("span");
 
-        const stopBtn = createRing(makeButton("Stop", "#333", "#fff", stopCreate), DANGER);
+        const stopBtn = createRing(makeButton("Abort", "#333", "#fff", stopCreate), DANGER);
 
         stopBtn.style.flex = "0 0 auto";
         stopBtn.style.padding = "8px 28px";
-        // How far an upload has come
+        // How far an upload has come. Its room kept while it is not there,
+        // so nothing moves as it comes and goes
         ui.waitBar = document.createElement("div");
-        ui.waitBar.style.cssText = "width:min(260px, 80%);height:6px;border-radius:3px;background:rgba(255,255,255,0.18);overflow:hidden;display:none";
+        ui.waitBar.style.cssText = "width:min(260px, 80%);height:6px;border-radius:3px;background:rgba(255,255,255,0.18);overflow:hidden;visibility:hidden";
         ui.waitFill = document.createElement("div");
         ui.waitFill.style.cssText = "height:100%;width:0;background:" + ACCENT + ";border-radius:3px;transition:width 0.2s linear";
         ui.waitBar.appendChild(ui.waitFill);
@@ -73752,7 +73795,7 @@
         ui.status.style.color = createNote.bad ? "#ffb0b0" : "#ccc";
         ui.wait.style.display = createBusy && isShown(createEl) ? "flex" : "none";
         ui.waitText.textContent = createBusy;
-        ui.waitBar.style.display = createBusy && typeof createProgress === "number" ? "block" : "none";
+        ui.waitBar.style.visibility = createBusy && typeof createProgress === "number" ? "visible" : "hidden";
         ui.waitFill.style.width = Math.round((createProgress || 0) * 100) + "%";
 
         for (const b of ui.acts) {
@@ -82557,9 +82600,9 @@
         box-sizing: border-box;
     }
 
-    /* How far an upload has come */
+    /* How far an upload has come, its room kept while it is not there */
     #crWaitBar {
-        display: none;
+        visibility: hidden;
         width: min(320px, 80%);
         height: 8px;
         border-radius: 4px;
@@ -88170,7 +88213,7 @@
             </div>
             <div id="crPickRows"></div>
         </div>
-        <div id="crWait"><span class="crWaitRing"></span><span id="crWaitText"></span><div id="crWaitBar"><div id="crWaitFill"></div></div><button class="chip fail" id="crStop" type="button">Stop</button></div>
+        <div id="crWait"><span class="crWaitRing"></span><span id="crWaitText"></span><div id="crWaitBar"><div id="crWaitFill"></div></div><button class="chip fail" id="crStop" type="button">Abort</button></div>
     </div>
 </div>
 <div id="songMenu">
@@ -112253,7 +112296,7 @@
 
             $("crWait").style.display = c.busy || crSending ? "flex" : "none";
             $("crWaitText").textContent = crSending ? crSending.text : c.busy || "";
-            $("crWaitBar").style.display = typeof share === "number" ? "block" : "none";
+            $("crWaitBar").style.visibility = typeof share === "number" ? "visible" : "hidden";
             $("crWaitFill").style.width = Math.round((share || 0) * 100) + "%";
 
             for (const b of ui.acts) {
