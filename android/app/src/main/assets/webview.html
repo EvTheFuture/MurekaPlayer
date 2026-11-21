@@ -27968,6 +27968,18 @@
 
     $("stopBtn").addEventListener("click", function () {
 
+        // Stopped already: asked whether to clear the queue Play goes on with
+        const n = state && !state.id && typeof state.stoppedQueue === "number" ? state.stoppedQueue : 0;
+
+        if (n > 0) {
+
+            askConfirm("Clear the queue? Play goes on with the queue Stop kept, " + n + (n === 1 ? " song" : " songs")
+                + ". Cleared, Play starts from the list instead.", "Clear", true, function () {
+                send("clearQueue");
+            });
+            return;
+        }
+
         roomAsk("stop", function () {
             send("stop");
         });

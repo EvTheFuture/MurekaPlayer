@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.296";
+    const VERSION = "2.0.1.297";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -28134,6 +28134,44 @@
         updateSeekDisplay();
     }
 
+    // Stopped, the songs of the queue Play goes on with, else 0
+    function stoppedQueueLength() {
+        return !currentSong && resumeState && Array.isArray(resumeState.queue) ? resumeState.queue.length : 0;
+    }
+
+    function askClearQueue() {
+
+        const n = stoppedQueueLength();
+
+        askYesNo("Clear the queue?", "Play goes on with the queue Stop kept, " + n + (n === 1 ? " song" : " songs")
+            + ". Cleared, Play starts from the list instead.", "Clear", clearStoppedQueue, null, true);
+    }
+
+    // The queue Stop kept let go, and with it the songs put in by hand and
+    // those asked to play once ready that are ready. Play starts from the list
+    function clearStoppedQueue() {
+
+        if (stoppedQueueLength() === 0) {
+            return;
+        }
+
+        const n = resumeState.queue.length;
+
+        resumeState = null;
+        dropNextReady();
+        playNextMarks.clear();
+        playLastMarks.clear();
+        runMarks.clear();
+        pruneAskedShown();
+        hostListMemo = null;
+        saveQueue();
+        renderList();
+        publishHostSoon();
+        setStatus("Queue cleared");
+        showToast("Queue cleared, " + n + (n === 1 ? " song" : " songs"));
+        dbgLog("Song", "the queue Stop kept cleared, " + n + " songs");
+    }
+
     // Stop playback and clear the queue
     function stopPlay() {
 
@@ -39891,6 +39929,9 @@
             coverVideo: coverVideoUrl(song),
             src: song ? (songUrl(song) || "") : "",
             playing: hasAudio && !audio.paused,
+
+            // Stopped with a queue kept, its length: Stop then asks to clear it
+            stoppedQueue: stoppedQueueLength(),
             position: hasAudio ? songClockAt() : times.at,
             duration: duration,
             rating: song ? getRating(song) : null,
@@ -46539,6 +46580,8 @@
             }
         } else if (cmd === "stop") {
             stopPlay();
+        } else if (cmd === "clearQueue") {
+            clearStoppedQueue();
         } else if (cmd === "songAction") {
             hostSongAction(arg || {});
         } else if (cmd === "trimSong") {
@@ -49085,6 +49128,15 @@
             }),
             play: playPauseBtn,
             stop: makeIconButton(iconStopTransport(), "Stop", function () {
+
+                // Stopped already: Stop asks whether to clear the queue Play
+                // would go on with
+                if (stoppedQueueLength() > 0) {
+
+                    askClearQueue();
+                    return;
+                }
+
                 syncAskFirst("stop", stopPlay);
             }),
             next: makeIconButton(iconNext(), "Next", function () {
@@ -108298,6 +108350,18 @@
     }
 
     $("stopBtn").addEventListener("click", function () {
+
+        // Stopped already: asked whether to clear the queue Play goes on with
+        const n = state && !state.id && typeof state.stoppedQueue === "number" ? state.stoppedQueue : 0;
+
+        if (n > 0) {
+
+            askConfirm("Clear the queue? Play goes on with the queue Stop kept, " + n + (n === 1 ? " song" : " songs")
+                + ". Cleared, Play starts from the list instead.", "Clear", true, function () {
+                send("clearQueue");
+            });
+            return;
+        }
 
         roomAsk("stop", function () {
             send("stop");
