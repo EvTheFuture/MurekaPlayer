@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.297";
+    const VERSION = "2.0.1.298";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -15247,7 +15247,7 @@
     // BEGIN SHARED misc
     // Written by embed-webview.sh from src/shared/misc.js. Change that
     // file and run make embed, never the lines up to END SHARED misc
-    // Small helpers: the debug log's values, a percent as shown, toast times, the cover editor, the kinds of notifications, the credits.
+    // Small helpers: the debug log's values, a percent as shown, toast times, the cover editor, the kinds of notifications, the credits, a bar for a song heard before it is taken.
     // Shared by the player and the web view's page, src/shared/misc.js,
     // inlined into both by embed-webview.sh
 
@@ -15556,6 +15556,100 @@
         }
 
         return rows;
+    }
+
+    // A bar for a song heard before it is taken, a template's: how far it has
+    // played and how long it is, and a tap or a drag on it moves there. The
+    // row it sits in never hears the tap
+    function hearBar(el, color) {
+
+        const bar = document.createElement("div");
+        const hit = document.createElement("div");
+        const track = document.createElement("div");
+        const fill = document.createElement("div");
+        const time = document.createElement("div");
+        let dragging = false;
+
+        bar.style.cssText = "display:flex;align-items:center;gap:8px;padding:0 4px;flex-shrink:0";
+        hit.style.cssText = "position:relative;flex:1 1 auto;height:24px;cursor:pointer;touch-action:none";
+        track.style.cssText = "position:absolute;left:0;right:0;top:10px;height:4px;border-radius:2px;overflow:hidden;"
+            + "background:rgba(128,128,128,0.35);pointer-events:none";
+        fill.style.cssText = "height:100%;width:0;background:" + color;
+        time.style.cssText = "flex:0 0 auto;font-size:11px;color:#999;font-variant-numeric:tabular-nums";
+        track.appendChild(fill);
+        hit.appendChild(track);
+        bar.appendChild(hit);
+        bar.appendChild(time);
+
+        const clock = function (s) {
+
+            const n = Math.max(0, Math.floor(Number(s) || 0));
+
+            return Math.floor(n / 60) + ":" + String(n % 60).padStart(2, "0");
+        };
+
+        const paint = function () {
+
+            const d = el.duration;
+            const known = isFinite(d) && d > 0;
+
+            fill.style.width = (known ? Math.min(100, el.currentTime / d * 100) : 0) + "%";
+            time.textContent = clock(el.currentTime) + (known ? " / " + clock(d) : "");
+        };
+
+        const moveTo = function (ev) {
+
+            const r = hit.getBoundingClientRect();
+            const d = el.duration;
+
+            if (!(isFinite(d) && d > 0) || r.width <= 0) {
+                return;
+            }
+
+            try {
+                el.currentTime = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)) * d;
+            } catch (e) {
+                // Not seekable yet
+            }
+
+            paint();
+        };
+
+        hit.addEventListener("pointerdown", function (ev) {
+
+            ev.preventDefault();
+            ev.stopPropagation();
+            dragging = true;
+
+            try {
+                hit.setPointerCapture(ev.pointerId);
+            } catch (e) {
+                // Followed without it
+            }
+
+            moveTo(ev);
+        });
+        hit.addEventListener("pointermove", function (ev) {
+
+            if (dragging) {
+                moveTo(ev);
+            }
+        });
+        hit.addEventListener("pointerup", function () {
+            dragging = false;
+        });
+        hit.addEventListener("pointercancel", function () {
+            dragging = false;
+        });
+        bar.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+        });
+        el.addEventListener("timeupdate", paint);
+        el.addEventListener("loadedmetadata", paint);
+        el.addEventListener("durationchange", paint);
+        paint();
+
+        return bar;
     }
     // END SHARED misc
 
@@ -70693,7 +70787,7 @@
     // paused meanwhile and going on after
     let templateHear = null;
 
-    function hearTemplate(t, btn) {
+    function hearTemplate(t, btn, slot) {
 
         const again = templateHear && templateHear.id === t.id;
 
@@ -70710,8 +70804,17 @@
             togglePlayPause();
         }
 
-        templateHear = { el: el, id: t.id, resume: resume, btn: btn };
+        templateHear = { el: el, id: t.id, resume: resume, btn: btn, slot: slot || null };
         el.src = t.audio;
+
+        // How far it has played, and a tap or a drag to move in it
+        if (slot) {
+
+            slot.textContent = "";
+            slot.appendChild(hearBar(el, ACCENT));
+            slot.style.display = "";
+        }
+
         el.addEventListener("ended", stopTemplateHear);
         el.play().catch(function (e) {
 
@@ -70749,9 +70852,71 @@
             h.btn.textContent = "Listen";
         }
 
+        if (h.slot) {
+
+            h.slot.textContent = "";
+            h.slot.style.display = "none";
+        }
+
         if (h.resume && audio && audio.paused) {
             togglePlayPause();
         }
+    }
+
+    // Templates' styles read before, by id, so a copy asked again is at hand
+    const templateStyles = new Map();
+
+    // A template's style read, without telling Mureka it was used
+    async function createTemplateStyle(id) {
+
+        const key = String(id);
+
+        if (templateStyles.has(key)) {
+            return templateStyles.get(key);
+        }
+
+        const data = await createGet("/api/pgc/creation-template/detail?id=" + encodeURIComponent(key));
+        const text = String(data && data.prompt && data.prompt.content || "").trim();
+
+        if (!text) {
+            throw new Error("the template has no style");
+        }
+
+        const got = { text: text, title: String(data && data.title || "").slice(0, 120) };
+
+        templateStyles.set(key, got);
+
+        return got;
+    }
+
+    // A template's style copied. A browser that copies only right after a
+    // tap, and Mureka's answer came later, shows the style with a button
+    // to copy it
+    async function copyTemplateStyle(t) {
+
+        let got = null;
+
+        try {
+            got = await createTemplateStyle(t.id);
+        } catch (e) {
+
+            showToast("The template's style could not be read, " + errText(e), false);
+            return;
+        }
+
+        if (await copyText(got.text)) {
+
+            showToast("The style of " + toastBold(got.title || t.title) + " copied", true);
+            dbgLog("Create", "template " + t.id + " style copied, " + got.text.length + " characters");
+            return;
+        }
+
+        askYesNo("The style of " + (got.title || t.title), got.text, "Copy", function () {
+
+            copyText(got.text).then(function (ok) {
+                showToast(ok ? "Style copied" : "The style could not be copied", ok);
+            });
+        });
     }
 
     // A template's style read and taken, Mureka told it was used as its
@@ -70789,9 +70954,12 @@
             value: t,
             lines: 2,
             cover: t.cover,
-            listen: t.audio ? function (btn) {
-                hearTemplate(t, btn);
-            } : null
+            listen: t.audio ? function (btn, slot) {
+                hearTemplate(t, btn, slot);
+            } : null,
+            copy: function () {
+                copyTemplateStyle(t);
+            }
         };
     }
 
@@ -74270,10 +74438,12 @@
                 const row = document.createElement("button");
                 const main = document.createElement("div");
                 let holder = row;
+                let outer = null;
 
-                // A picture before it and a button to listen after it, the
-                // row between them
-                if (r.cover || r.listen) {
+                // A picture before it and buttons to listen and to copy after
+                // it, the row between them, and under them a bar for the
+                // song heard
+                if (r.cover || r.listen || r.copy) {
 
                     holder = document.createElement("div");
                     holder.style.cssText = "display:flex;align-items:center;gap:8px;flex-shrink:0";
@@ -74294,16 +74464,42 @@
 
                     holder.appendChild(row);
 
+                    const btns = document.createElement("div");
+                    const slot = document.createElement("div");
+
+                    btns.style.cssText = "display:flex;flex-direction:column;gap:4px;flex:0 0 auto";
+                    slot.style.display = "none";
+
                     if (r.listen) {
 
                         const hear = makeButton("Listen", "#333", "#fff", function () {
-                            r.listen(hear);
+                            r.listen(hear, slot);
                         });
 
-                        hear.style.flex = "0 0 auto";
-                        hear.style.padding = "8px 12px";
-                        holder.appendChild(hear);
+                        hear.style.padding = "7px 12px";
+                        hear.style.minWidth = "66px";
+                        btns.appendChild(hear);
                     }
+
+                    if (r.copy) {
+
+                        const copy = makeButton("Copy", "#333", "#fff", function () {
+                            r.copy(copy);
+                        });
+
+                        copy.style.padding = "7px 12px";
+                        copy.style.minWidth = "66px";
+                        btns.appendChild(copy);
+                    }
+
+                    if (btns.firstChild) {
+                        holder.appendChild(btns);
+                    }
+
+                    outer = document.createElement("div");
+                    outer.style.cssText = "display:flex;flex-direction:column;gap:2px;flex-shrink:0";
+                    outer.appendChild(holder);
+                    outer.appendChild(slot);
                 }
 
                 // Each row as tall as its text, which a short list in a
@@ -74348,7 +74544,7 @@
                     close();
                     onPick(r.value);
                 });
-                list.appendChild(holder);
+                list.appendChild(outer || holder);
             }
         };
 
@@ -74495,9 +74691,23 @@
             readMore();
         });
 
+        let busy = false;
+
+        // Near the end of the list read so far, the next page is read
+        pick.list.addEventListener("scroll", function () {
+
+            const l = pick.list;
+
+            if (more && !busy && l.scrollTop + l.clientHeight > l.scrollHeight - 400) {
+                readMore();
+            }
+        });
+
         const readMore = async function () {
 
             const mine = ++reading;
+
+            busy = true;
 
             try {
 
@@ -74525,6 +74735,10 @@
                 }
 
                 more = false;
+            }
+
+            if (mine === reading) {
+                busy = false;
             }
 
             if (moreBtn) {
@@ -76577,6 +76791,11 @@
 
             createTemplates(String(a.tag || "").slice(0, 40), String(a.last || "0").replace(/[^0-9]/g, "") || "0").then(function (page) {
                 reply({ ok: true, list: page.list, last: page.last, more: page.more });
+            }, failed);
+        } else if (op === "templateStyle") {
+
+            createTemplateStyle(String(a.id || "").replace(/[^0-9]/g, "")).then(function (got) {
+                reply({ ok: true, text: got.text, title: got.title });
             }, failed);
         } else if (op === "template") {
 
@@ -82755,6 +82974,30 @@
         flex: 0 0 auto;
     }
 
+    /* Listen over Copy after a template, and under it a bar for its song */
+    .crPickRow .crPickBtns {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex: 0 0 auto;
+    }
+
+    /* Smaller than the bar's chips, two to a row, all as wide */
+    .crPickRow .crPickBtns .chip {
+        height: auto;
+        min-width: 5.2em;
+        padding: 6px 12px;
+        justify-content: center;
+        font-size: 0.9em;
+    }
+
+    .crPickOuter {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        flex-shrink: 0;
+    }
+
     /* A row's second line may run to a few lines in the lists to pick from */
     .crPickRow .plRowCount {
         white-space: normal;
@@ -85326,6 +85569,14 @@
         display: none;
         align-items: center;
         justify-content: center;
+    }
+
+    /* A question's lines as written, a long one scrolled */
+    #confirmText {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        max-height: 60vh;
+        overflow-y: auto;
     }
 
     /* A field in the question, shown when something is to be typed */
@@ -91672,7 +91923,7 @@
     // BEGIN SHARED misc
     // Written by embed-webview.sh from src/shared/misc.js. Change that
     // file and run make embed, never the lines up to END SHARED misc
-    // Small helpers: the debug log's values, a percent as shown, toast times, the cover editor, the kinds of notifications, the credits.
+    // Small helpers: the debug log's values, a percent as shown, toast times, the cover editor, the kinds of notifications, the credits, a bar for a song heard before it is taken.
     // Shared by the player and the web view's page, src/shared/misc.js,
     // inlined into both by embed-webview.sh
 
@@ -91981,6 +92232,100 @@
         }
 
         return rows;
+    }
+
+    // A bar for a song heard before it is taken, a template's: how far it has
+    // played and how long it is, and a tap or a drag on it moves there. The
+    // row it sits in never hears the tap
+    function hearBar(el, color) {
+
+        const bar = document.createElement("div");
+        const hit = document.createElement("div");
+        const track = document.createElement("div");
+        const fill = document.createElement("div");
+        const time = document.createElement("div");
+        let dragging = false;
+
+        bar.style.cssText = "display:flex;align-items:center;gap:8px;padding:0 4px;flex-shrink:0";
+        hit.style.cssText = "position:relative;flex:1 1 auto;height:24px;cursor:pointer;touch-action:none";
+        track.style.cssText = "position:absolute;left:0;right:0;top:10px;height:4px;border-radius:2px;overflow:hidden;"
+            + "background:rgba(128,128,128,0.35);pointer-events:none";
+        fill.style.cssText = "height:100%;width:0;background:" + color;
+        time.style.cssText = "flex:0 0 auto;font-size:11px;color:#999;font-variant-numeric:tabular-nums";
+        track.appendChild(fill);
+        hit.appendChild(track);
+        bar.appendChild(hit);
+        bar.appendChild(time);
+
+        const clock = function (s) {
+
+            const n = Math.max(0, Math.floor(Number(s) || 0));
+
+            return Math.floor(n / 60) + ":" + String(n % 60).padStart(2, "0");
+        };
+
+        const paint = function () {
+
+            const d = el.duration;
+            const known = isFinite(d) && d > 0;
+
+            fill.style.width = (known ? Math.min(100, el.currentTime / d * 100) : 0) + "%";
+            time.textContent = clock(el.currentTime) + (known ? " / " + clock(d) : "");
+        };
+
+        const moveTo = function (ev) {
+
+            const r = hit.getBoundingClientRect();
+            const d = el.duration;
+
+            if (!(isFinite(d) && d > 0) || r.width <= 0) {
+                return;
+            }
+
+            try {
+                el.currentTime = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)) * d;
+            } catch (e) {
+                // Not seekable yet
+            }
+
+            paint();
+        };
+
+        hit.addEventListener("pointerdown", function (ev) {
+
+            ev.preventDefault();
+            ev.stopPropagation();
+            dragging = true;
+
+            try {
+                hit.setPointerCapture(ev.pointerId);
+            } catch (e) {
+                // Followed without it
+            }
+
+            moveTo(ev);
+        });
+        hit.addEventListener("pointermove", function (ev) {
+
+            if (dragging) {
+                moveTo(ev);
+            }
+        });
+        hit.addEventListener("pointerup", function () {
+            dragging = false;
+        });
+        hit.addEventListener("pointercancel", function () {
+            dragging = false;
+        });
+        bar.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+        });
+        el.addEventListener("timeupdate", paint);
+        el.addEventListener("loadedmetadata", paint);
+        el.addEventListener("durationchange", paint);
+        paint();
+
+        return bar;
     }
     // END SHARED misc
 
@@ -112626,7 +112971,7 @@
         }
     }
 
-    function crPickRow(label, sub, then, color, cover, listen) {
+    function crPickRow(label, sub, then, color, cover, listen, copy) {
 
         const row = document.createElement("div");
         const text = document.createElement("div");
@@ -112676,7 +113021,19 @@
         row.appendChild(text);
         row.addEventListener("click", then);
 
-        // A button to listen first, which leaves the row where it is
+        // Buttons to listen first and to copy, which leave the row where it
+        // is, and under the row a bar for the song heard
+        if (!listen && !copy) {
+            return row;
+        }
+
+        const btns = document.createElement("div");
+        const slot = document.createElement("div");
+        const outer = document.createElement("div");
+
+        btns.className = "crPickBtns";
+        slot.style.display = "none";
+
         if (listen) {
 
             const hear = document.createElement("button");
@@ -112687,19 +113044,39 @@
             hear.addEventListener("click", function (ev) {
 
                 ev.stopPropagation();
-                listen(hear);
+                listen(hear, slot);
             });
-            row.appendChild(hear);
+            btns.appendChild(hear);
         }
 
-        return row;
+        if (copy) {
+
+            const cp = document.createElement("button");
+
+            cp.type = "button";
+            cp.className = "chip crFill crHear";
+            cp.textContent = "Copy";
+            cp.addEventListener("click", function (ev) {
+
+                ev.stopPropagation();
+                copy(cp);
+            });
+            btns.appendChild(cp);
+        }
+
+        row.appendChild(btns);
+        outer.className = "crPickOuter";
+        outer.appendChild(row);
+        outer.appendChild(slot);
+
+        return outer;
     }
 
     // A template's song heard here before it is taken, the phone's song
     // paused meanwhile and going on after
     let crHearing = null;
 
-    function crHear(x, btn) {
+    function crHear(x, btn, slot) {
 
         const again = crHearing && crHearing.id === x.id;
 
@@ -112716,8 +113093,17 @@
             send("pause");
         }
 
-        crHearing = { el: el, id: x.id, resume: resume, btn: btn };
+        crHearing = { el: el, id: x.id, resume: resume, btn: btn, slot: slot || null };
         el.src = x.audio;
+
+        // How far it has played, and a tap or a drag to move in it
+        if (slot) {
+
+            slot.textContent = "";
+            slot.appendChild(hearBar(el, getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#48e1eb"));
+            slot.style.display = "";
+        }
+
         el.addEventListener("ended", crStopHear);
         el.play().catch(function () {
 
@@ -112748,9 +113134,42 @@
 
         h.btn.textContent = "Listen";
 
+        if (h.slot) {
+
+            h.slot.textContent = "";
+            h.slot.style.display = "none";
+        }
+
         if (h.resume) {
             send("play");
         }
+    }
+
+    // A template's style copied, read on the phone. A browser that copies
+    // only right after a tap, and the answer came later, shows the style
+    // with a button to copy it
+    function crCopyStyle(x) {
+
+        crAsk({ op: "templateStyle", id: x.id }).then(function (r) {
+
+            if (!r || !r.ok || !r.text) {
+
+                toast("The template's style could not be read" + (r && r.why ? ", " + r.why : ""), "bad");
+                return;
+            }
+
+            const title = r.title || x.title;
+
+            if (copyText(r.text)) {
+
+                toast("The style of " + title + " copied", "ok");
+                return;
+            }
+
+            askConfirm("The style of " + title + ":\n\n" + r.text, "Copy", false, function () {
+                toast(copyText(r.text) ? "Style copied" : "The style could not be copied", "ok");
+            });
+        });
     }
 
     function crPickNote(text) {
@@ -112855,6 +113274,7 @@
         let more = false;
         let tag = "";
         let reading = 0;
+        let busy = false;
 
         crPickKind = kind;
         $("crPickTitle").textContent = titles[kind] || "";
@@ -112895,6 +113315,9 @@
         const read = function () {
 
             const mine = ++reading;
+
+            busy = true;
+
             const ask = kind === "resources" ? { op: "resources", last: last }
                 : kind === "templates" ? { op: "templates", tag: tag, last: last } : { op: kind };
 
@@ -112903,6 +113326,8 @@
                 if (crPickKind !== kind || mine !== reading) {
                     return;
                 }
+
+                busy = false;
 
                 if (!r || !r.ok) {
 
@@ -112935,9 +113360,11 @@
 
                             showCrPick(false);
                             crAsk({ op: "template", id: x.id }).then(crAnswered);
-                        }, "", x.cover, x.audio ? function (btn) {
-                            crHear(x, btn);
-                        } : null));
+                        }, "", x.cover, x.audio ? function (btn, slot) {
+                            crHear(x, btn, slot);
+                        } : null, function () {
+                            crCopyStyle(x);
+                        }));
                     } else if (kind === "prompts") {
 
                         rows.appendChild(crPickRow(x.text, "", function () {
@@ -112973,6 +113400,16 @@
         $("crPickMore").onclick = function () {
 
             if (more) {
+                read();
+            }
+        };
+
+        // Near the end of the list read so far, the next page is read
+        $("crPickRows").onscroll = function () {
+
+            const l = $("crPickRows");
+
+            if (crPickKind === kind && more && !busy && l.scrollTop + l.clientHeight > l.scrollHeight - 400) {
                 read();
             }
         };

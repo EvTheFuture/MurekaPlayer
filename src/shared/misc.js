@@ -1,4 +1,4 @@
-    // Small helpers: the debug log's values, a percent as shown, toast times, the cover editor, the kinds of notifications, the credits.
+    // Small helpers: the debug log's values, a percent as shown, toast times, the cover editor, the kinds of notifications, the credits, a bar for a song heard before it is taken.
     // Shared by the player and the web view's page, src/shared/misc.js,
     // inlined into both by embed-webview.sh
 
@@ -307,4 +307,98 @@
         }
 
         return rows;
+    }
+
+    // A bar for a song heard before it is taken, a template's: how far it has
+    // played and how long it is, and a tap or a drag on it moves there. The
+    // row it sits in never hears the tap
+    function hearBar(el, color) {
+
+        const bar = document.createElement("div");
+        const hit = document.createElement("div");
+        const track = document.createElement("div");
+        const fill = document.createElement("div");
+        const time = document.createElement("div");
+        let dragging = false;
+
+        bar.style.cssText = "display:flex;align-items:center;gap:8px;padding:0 4px;flex-shrink:0";
+        hit.style.cssText = "position:relative;flex:1 1 auto;height:24px;cursor:pointer;touch-action:none";
+        track.style.cssText = "position:absolute;left:0;right:0;top:10px;height:4px;border-radius:2px;overflow:hidden;"
+            + "background:rgba(128,128,128,0.35);pointer-events:none";
+        fill.style.cssText = "height:100%;width:0;background:" + color;
+        time.style.cssText = "flex:0 0 auto;font-size:11px;color:#999;font-variant-numeric:tabular-nums";
+        track.appendChild(fill);
+        hit.appendChild(track);
+        bar.appendChild(hit);
+        bar.appendChild(time);
+
+        const clock = function (s) {
+
+            const n = Math.max(0, Math.floor(Number(s) || 0));
+
+            return Math.floor(n / 60) + ":" + String(n % 60).padStart(2, "0");
+        };
+
+        const paint = function () {
+
+            const d = el.duration;
+            const known = isFinite(d) && d > 0;
+
+            fill.style.width = (known ? Math.min(100, el.currentTime / d * 100) : 0) + "%";
+            time.textContent = clock(el.currentTime) + (known ? " / " + clock(d) : "");
+        };
+
+        const moveTo = function (ev) {
+
+            const r = hit.getBoundingClientRect();
+            const d = el.duration;
+
+            if (!(isFinite(d) && d > 0) || r.width <= 0) {
+                return;
+            }
+
+            try {
+                el.currentTime = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)) * d;
+            } catch (e) {
+                // Not seekable yet
+            }
+
+            paint();
+        };
+
+        hit.addEventListener("pointerdown", function (ev) {
+
+            ev.preventDefault();
+            ev.stopPropagation();
+            dragging = true;
+
+            try {
+                hit.setPointerCapture(ev.pointerId);
+            } catch (e) {
+                // Followed without it
+            }
+
+            moveTo(ev);
+        });
+        hit.addEventListener("pointermove", function (ev) {
+
+            if (dragging) {
+                moveTo(ev);
+            }
+        });
+        hit.addEventListener("pointerup", function () {
+            dragging = false;
+        });
+        hit.addEventListener("pointercancel", function () {
+            dragging = false;
+        });
+        bar.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+        });
+        el.addEventListener("timeupdate", paint);
+        el.addEventListener("loadedmetadata", paint);
+        el.addEventListener("durationchange", paint);
+        paint();
+
+        return bar;
     }

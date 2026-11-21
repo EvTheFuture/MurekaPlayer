@@ -2372,6 +2372,30 @@
         flex: 0 0 auto;
     }
 
+    /* Listen over Copy after a template, and under it a bar for its song */
+    .crPickRow .crPickBtns {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex: 0 0 auto;
+    }
+
+    /* Smaller than the bar's chips, two to a row, all as wide */
+    .crPickRow .crPickBtns .chip {
+        height: auto;
+        min-width: 5.2em;
+        padding: 6px 12px;
+        justify-content: center;
+        font-size: 0.9em;
+    }
+
+    .crPickOuter {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        flex-shrink: 0;
+    }
+
     /* A row's second line may run to a few lines in the lists to pick from */
     .crPickRow .plRowCount {
         white-space: normal;
@@ -4943,6 +4967,14 @@
         display: none;
         align-items: center;
         justify-content: center;
+    }
+
+    /* A question's lines as written, a long one scrolled */
+    #confirmText {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        max-height: 60vh;
+        overflow-y: auto;
     }
 
     /* A field in the question, shown when something is to be typed */
@@ -11289,7 +11321,7 @@
     // BEGIN SHARED misc
     // Written by embed-webview.sh from src/shared/misc.js. Change that
     // file and run make embed, never the lines up to END SHARED misc
-    // Small helpers: the debug log's values, a percent as shown, toast times, the cover editor, the kinds of notifications, the credits.
+    // Small helpers: the debug log's values, a percent as shown, toast times, the cover editor, the kinds of notifications, the credits, a bar for a song heard before it is taken.
     // Shared by the player and the web view's page, src/shared/misc.js,
     // inlined into both by embed-webview.sh
 
@@ -11598,6 +11630,100 @@
         }
 
         return rows;
+    }
+
+    // A bar for a song heard before it is taken, a template's: how far it has
+    // played and how long it is, and a tap or a drag on it moves there. The
+    // row it sits in never hears the tap
+    function hearBar(el, color) {
+
+        const bar = document.createElement("div");
+        const hit = document.createElement("div");
+        const track = document.createElement("div");
+        const fill = document.createElement("div");
+        const time = document.createElement("div");
+        let dragging = false;
+
+        bar.style.cssText = "display:flex;align-items:center;gap:8px;padding:0 4px;flex-shrink:0";
+        hit.style.cssText = "position:relative;flex:1 1 auto;height:24px;cursor:pointer;touch-action:none";
+        track.style.cssText = "position:absolute;left:0;right:0;top:10px;height:4px;border-radius:2px;overflow:hidden;"
+            + "background:rgba(128,128,128,0.35);pointer-events:none";
+        fill.style.cssText = "height:100%;width:0;background:" + color;
+        time.style.cssText = "flex:0 0 auto;font-size:11px;color:#999;font-variant-numeric:tabular-nums";
+        track.appendChild(fill);
+        hit.appendChild(track);
+        bar.appendChild(hit);
+        bar.appendChild(time);
+
+        const clock = function (s) {
+
+            const n = Math.max(0, Math.floor(Number(s) || 0));
+
+            return Math.floor(n / 60) + ":" + String(n % 60).padStart(2, "0");
+        };
+
+        const paint = function () {
+
+            const d = el.duration;
+            const known = isFinite(d) && d > 0;
+
+            fill.style.width = (known ? Math.min(100, el.currentTime / d * 100) : 0) + "%";
+            time.textContent = clock(el.currentTime) + (known ? " / " + clock(d) : "");
+        };
+
+        const moveTo = function (ev) {
+
+            const r = hit.getBoundingClientRect();
+            const d = el.duration;
+
+            if (!(isFinite(d) && d > 0) || r.width <= 0) {
+                return;
+            }
+
+            try {
+                el.currentTime = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)) * d;
+            } catch (e) {
+                // Not seekable yet
+            }
+
+            paint();
+        };
+
+        hit.addEventListener("pointerdown", function (ev) {
+
+            ev.preventDefault();
+            ev.stopPropagation();
+            dragging = true;
+
+            try {
+                hit.setPointerCapture(ev.pointerId);
+            } catch (e) {
+                // Followed without it
+            }
+
+            moveTo(ev);
+        });
+        hit.addEventListener("pointermove", function (ev) {
+
+            if (dragging) {
+                moveTo(ev);
+            }
+        });
+        hit.addEventListener("pointerup", function () {
+            dragging = false;
+        });
+        hit.addEventListener("pointercancel", function () {
+            dragging = false;
+        });
+        bar.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+        });
+        el.addEventListener("timeupdate", paint);
+        el.addEventListener("loadedmetadata", paint);
+        el.addEventListener("durationchange", paint);
+        paint();
+
+        return bar;
     }
     // END SHARED misc
 
@@ -32243,7 +32369,7 @@
         }
     }
 
-    function crPickRow(label, sub, then, color, cover, listen) {
+    function crPickRow(label, sub, then, color, cover, listen, copy) {
 
         const row = document.createElement("div");
         const text = document.createElement("div");
@@ -32293,7 +32419,19 @@
         row.appendChild(text);
         row.addEventListener("click", then);
 
-        // A button to listen first, which leaves the row where it is
+        // Buttons to listen first and to copy, which leave the row where it
+        // is, and under the row a bar for the song heard
+        if (!listen && !copy) {
+            return row;
+        }
+
+        const btns = document.createElement("div");
+        const slot = document.createElement("div");
+        const outer = document.createElement("div");
+
+        btns.className = "crPickBtns";
+        slot.style.display = "none";
+
         if (listen) {
 
             const hear = document.createElement("button");
@@ -32304,19 +32442,39 @@
             hear.addEventListener("click", function (ev) {
 
                 ev.stopPropagation();
-                listen(hear);
+                listen(hear, slot);
             });
-            row.appendChild(hear);
+            btns.appendChild(hear);
         }
 
-        return row;
+        if (copy) {
+
+            const cp = document.createElement("button");
+
+            cp.type = "button";
+            cp.className = "chip crFill crHear";
+            cp.textContent = "Copy";
+            cp.addEventListener("click", function (ev) {
+
+                ev.stopPropagation();
+                copy(cp);
+            });
+            btns.appendChild(cp);
+        }
+
+        row.appendChild(btns);
+        outer.className = "crPickOuter";
+        outer.appendChild(row);
+        outer.appendChild(slot);
+
+        return outer;
     }
 
     // A template's song heard here before it is taken, the phone's song
     // paused meanwhile and going on after
     let crHearing = null;
 
-    function crHear(x, btn) {
+    function crHear(x, btn, slot) {
 
         const again = crHearing && crHearing.id === x.id;
 
@@ -32333,8 +32491,17 @@
             send("pause");
         }
 
-        crHearing = { el: el, id: x.id, resume: resume, btn: btn };
+        crHearing = { el: el, id: x.id, resume: resume, btn: btn, slot: slot || null };
         el.src = x.audio;
+
+        // How far it has played, and a tap or a drag to move in it
+        if (slot) {
+
+            slot.textContent = "";
+            slot.appendChild(hearBar(el, getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#48e1eb"));
+            slot.style.display = "";
+        }
+
         el.addEventListener("ended", crStopHear);
         el.play().catch(function () {
 
@@ -32365,9 +32532,42 @@
 
         h.btn.textContent = "Listen";
 
+        if (h.slot) {
+
+            h.slot.textContent = "";
+            h.slot.style.display = "none";
+        }
+
         if (h.resume) {
             send("play");
         }
+    }
+
+    // A template's style copied, read on the phone. A browser that copies
+    // only right after a tap, and the answer came later, shows the style
+    // with a button to copy it
+    function crCopyStyle(x) {
+
+        crAsk({ op: "templateStyle", id: x.id }).then(function (r) {
+
+            if (!r || !r.ok || !r.text) {
+
+                toast("The template's style could not be read" + (r && r.why ? ", " + r.why : ""), "bad");
+                return;
+            }
+
+            const title = r.title || x.title;
+
+            if (copyText(r.text)) {
+
+                toast("The style of " + title + " copied", "ok");
+                return;
+            }
+
+            askConfirm("The style of " + title + ":\n\n" + r.text, "Copy", false, function () {
+                toast(copyText(r.text) ? "Style copied" : "The style could not be copied", "ok");
+            });
+        });
     }
 
     function crPickNote(text) {
@@ -32472,6 +32672,7 @@
         let more = false;
         let tag = "";
         let reading = 0;
+        let busy = false;
 
         crPickKind = kind;
         $("crPickTitle").textContent = titles[kind] || "";
@@ -32512,6 +32713,9 @@
         const read = function () {
 
             const mine = ++reading;
+
+            busy = true;
+
             const ask = kind === "resources" ? { op: "resources", last: last }
                 : kind === "templates" ? { op: "templates", tag: tag, last: last } : { op: kind };
 
@@ -32520,6 +32724,8 @@
                 if (crPickKind !== kind || mine !== reading) {
                     return;
                 }
+
+                busy = false;
 
                 if (!r || !r.ok) {
 
@@ -32552,9 +32758,11 @@
 
                             showCrPick(false);
                             crAsk({ op: "template", id: x.id }).then(crAnswered);
-                        }, "", x.cover, x.audio ? function (btn) {
-                            crHear(x, btn);
-                        } : null));
+                        }, "", x.cover, x.audio ? function (btn, slot) {
+                            crHear(x, btn, slot);
+                        } : null, function () {
+                            crCopyStyle(x);
+                        }));
                     } else if (kind === "prompts") {
 
                         rows.appendChild(crPickRow(x.text, "", function () {
@@ -32590,6 +32798,16 @@
         $("crPickMore").onclick = function () {
 
             if (more) {
+                read();
+            }
+        };
+
+        // Near the end of the list read so far, the next page is read
+        $("crPickRows").onscroll = function () {
+
+            const l = $("crPickRows");
+
+            if (crPickKind === kind && more && !busy && l.scrollTop + l.clientHeight > l.scrollHeight - 400) {
                 read();
             }
         };
