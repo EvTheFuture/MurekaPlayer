@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.295";
+    const VERSION = "2.0.1.296";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -10437,10 +10437,24 @@
             return true;
         }
 
+        return passesOwnFilters(song);
+    }
+
+    // The filters alone. A song asked to play that they leave out is still
+    // listed, but greyed as the others they leave out, so white in the list
+    // means the filters let it through
+    function passesOwnFilters(song) {
+
         return passesVocalFilter(song) && passesPublishFilter(song)
             && passesTagFilter(song) && passesBpmFilter(song)
             && passesModelFilter(song) && passesDateFilter(song)
             && passesRatingFilter(song);
+    }
+
+    // Listed greyed: the filters leave it out. Asked to play, it is listed
+    // all the same, the left-out songs shown or not, and never folded away
+    function listedGreyed(song) {
+        return !passesOwnFilters(song);
     }
 
     function showLeftOut() {
@@ -10511,7 +10525,7 @@
     // of one song. A folded set's row stays, its songs fold under it, and
     // so do the songs of a set opened
     function leftOutFoldable(x) {
-        return !!x.greyed && !(x.setCount > 1) && !x.setMember && !isPendingSong(x.song);
+        return !!x.greyed && !(x.setCount > 1) && !x.setMember && !isPendingSong(x.song) && !askedToPlay(x.song);
     }
 
     // The songs of a set, together in the list, folded under the first of
@@ -42212,9 +42226,9 @@
                 continue;
             }
 
-            const greyed = !passesSongFilters(song);
+            const greyed = listedGreyed(song);
 
-            if (!greyed || showAll) {
+            if (!greyed || showAll || askedToPlay(song)) {
                 entries.push({ song: song, greyed: greyed });
             }
         }
@@ -54294,9 +54308,9 @@
             return false;
         }
 
-        const greyed = !passesSongFilters(s);
+        const greyed = listedGreyed(s);
 
-        if (greyed !== was.greyed || (greyed && !showLeftOut())) {
+        if (greyed !== was.greyed || (greyed && !showLeftOut() && !askedToPlay(s))) {
             return false;
         }
 
@@ -54449,9 +54463,9 @@
                     return;
                 }
 
-                greyed = !passesSongFilters(song);
+                greyed = listedGreyed(song);
 
-                if (greyed && !showAll) {
+                if (greyed && !showAll && !askedToPlay(song)) {
                     return;
                 }
             }
