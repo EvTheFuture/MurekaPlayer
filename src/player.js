@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.298";
+    const VERSION = "2.0.1.299";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -30553,8 +30553,9 @@
             }
         }
 
-        // Never fight a pause the user asked for, and nothing to do after Stop
-        if (!currentSong || userPaused || !audio.src) {
+        // Never fight a pause the user asked for, and nothing to do after
+        // Stop. A template heard keeps the song paused until it is done
+        if (!currentSong || userPaused || !audio.src || templateHear) {
             return;
         }
 
@@ -70791,16 +70792,23 @@
 
         const again = templateHear && templateHear.id === t.id;
 
-        stopTemplateHear();
+        // One template after another: the player's song stays paused, and
+        // goes on after the last one. Played on in between, the next
+        // template's start cut it off as an interruption, which coming back
+        // to the page played on
+        const carried = !again && !!t.audio && templateHear ? templateHear.resume : false;
+
+        stopTemplateHear(!again && !!t.audio);
 
         if (again || !t.audio) {
             return;
         }
 
         const el = new Audio();
-        const resume = !!(audio && audio.src && !audio.paused);
+        const playing = !!(audio && audio.src && !audio.paused);
+        const resume = carried || playing;
 
-        if (resume) {
+        if (playing) {
             togglePlayPause();
         }
 
@@ -70815,7 +70823,9 @@
             slot.style.display = "";
         }
 
-        el.addEventListener("ended", stopTemplateHear);
+        el.addEventListener("ended", function () {
+            stopTemplateHear();
+        });
         el.play().catch(function (e) {
 
             dbgLog("Create", "the template's song could not play, " + errText(e));
@@ -70829,7 +70839,8 @@
         dbgLog("Create", "listening to the template " + t.title);
     }
 
-    function stopTemplateHear() {
+    // handOver: another template is heard next, the player's song kept paused
+    function stopTemplateHear(handOver) {
 
         const h = templateHear;
 
@@ -70858,7 +70869,7 @@
             h.slot.style.display = "none";
         }
 
-        if (h.resume && audio && audio.paused) {
+        if (h.resume && !handOver && audio && audio.paused) {
             togglePlayPause();
         }
     }
@@ -113080,16 +113091,23 @@
 
         const again = crHearing && crHearing.id === x.id;
 
-        crStopHear();
+        // One template after another: the phone's song stays paused, and
+        // goes on after the last one. Its state here is not told yet that
+        // it plays again, so asking it to play in between left it playing
+        // under the next template
+        const carried = !again && !!x.audio && crHearing ? crHearing.resume : false;
+
+        crStopHear(!again && !!x.audio);
 
         if (again || !x.audio) {
             return;
         }
 
         const el = new Audio();
-        const resume = !!(state && state.playing);
+        const playing = !!(state && state.playing);
+        const resume = carried || playing;
 
-        if (resume) {
+        if (playing) {
             send("pause");
         }
 
@@ -113104,7 +113122,9 @@
             slot.style.display = "";
         }
 
-        el.addEventListener("ended", crStopHear);
+        el.addEventListener("ended", function () {
+            crStopHear();
+        });
         el.play().catch(function () {
 
             toast("The template's song could not play", "bad");
@@ -113113,7 +113133,8 @@
         btn.textContent = "Stop";
     }
 
-    function crStopHear() {
+    // handOver: another template is heard next, the phone's song kept paused
+    function crStopHear(handOver) {
 
         const h = crHearing;
 
@@ -113140,7 +113161,7 @@
             h.slot.style.display = "none";
         }
 
-        if (h.resume) {
+        if (h.resume && !handOver) {
             send("play");
         }
     }

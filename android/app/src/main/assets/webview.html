@@ -32478,16 +32478,23 @@
 
         const again = crHearing && crHearing.id === x.id;
 
-        crStopHear();
+        // One template after another: the phone's song stays paused, and
+        // goes on after the last one. Its state here is not told yet that
+        // it plays again, so asking it to play in between left it playing
+        // under the next template
+        const carried = !again && !!x.audio && crHearing ? crHearing.resume : false;
+
+        crStopHear(!again && !!x.audio);
 
         if (again || !x.audio) {
             return;
         }
 
         const el = new Audio();
-        const resume = !!(state && state.playing);
+        const playing = !!(state && state.playing);
+        const resume = carried || playing;
 
-        if (resume) {
+        if (playing) {
             send("pause");
         }
 
@@ -32502,7 +32509,9 @@
             slot.style.display = "";
         }
 
-        el.addEventListener("ended", crStopHear);
+        el.addEventListener("ended", function () {
+            crStopHear();
+        });
         el.play().catch(function () {
 
             toast("The template's song could not play", "bad");
@@ -32511,7 +32520,8 @@
         btn.textContent = "Stop";
     }
 
-    function crStopHear() {
+    // handOver: another template is heard next, the phone's song kept paused
+    function crStopHear(handOver) {
 
         const h = crHearing;
 
@@ -32538,7 +32548,7 @@
             h.slot.style.display = "none";
         }
 
-        if (h.resume) {
+        if (h.resume && !handOver) {
             send("play");
         }
     }
