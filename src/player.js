@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.302";
+    const VERSION = "2.0.1.303";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -116543,6 +116543,16 @@
 
         setTile(tiles[2], s && s.id ? { id: s.id, cover: s.cover } : null);
         setCoverVideo(tiles[2], s && s.id ? String(s.coverVideo || "") : "");
+
+        // Only the playing cover moves. A tile turned to a side, or round
+        // to the far side and given another song, kept playing the moving
+        // cover it had, over that other song's picture
+        for (let i = 0; i < tiles.length; i++) {
+
+            if (i !== 2) {
+                setCoverVideo(tiles[i], "");
+            }
+        }
         setTile(tiles[1], s && s.prevSong ? s.prevSong : null);
         setTile(tiles[3], s && s.upNext ? s.upNext : null);
         setTile(tiles[0], s && s.prevSong2 ? s.prevSong2 : null);
@@ -116576,7 +116586,19 @@
         // tile that came in stays where it is as the playing cover
         if (flowPending) {
 
-            if (!id || id === flowPending.id) {
+            if (id === flowPending.id) {
+                return;
+            }
+
+            // Stopped before the song it asked for came: nothing plays, the
+            // covers and the moving cover go
+            if (!id) {
+
+                flowPending = null;
+                glideToken += 1;
+                flowOffset = 0;
+                applyFlowSongs(s);
+
                 return;
             }
 
