@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.299";
+    const VERSION = "2.0.1.300";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -15247,7 +15247,7 @@
     // BEGIN SHARED misc
     // Written by embed-webview.sh from src/shared/misc.js. Change that
     // file and run make embed, never the lines up to END SHARED misc
-    // Small helpers: the debug log's values, a percent as shown, toast times, the cover editor, the kinds of notifications, the credits, a bar for a song heard before it is taken.
+    // Small helpers: the debug log's values, a percent as shown, toast times, the cover editor, the kinds of notifications, the credits, a bar for a song heard before it is taken, a slot under a row eased open and shut.
     // Shared by the player and the web view's page, src/shared/misc.js,
     // inlined into both by embed-webview.sh
 
@@ -15570,7 +15570,7 @@
         const time = document.createElement("div");
         let dragging = false;
 
-        bar.style.cssText = "display:flex;align-items:center;gap:8px;padding:0 4px;flex-shrink:0";
+        bar.style.cssText = "display:flex;align-items:center;gap:8px;padding:2px 4px 0;flex-shrink:0";
         hit.style.cssText = "position:relative;flex:1 1 auto;height:24px;cursor:pointer;touch-action:none";
         track.style.cssText = "position:absolute;left:0;right:0;top:10px;height:4px;border-radius:2px;overflow:hidden;"
             + "background:rgba(128,128,128,0.35);pointer-events:none";
@@ -15650,6 +15650,77 @@
         paint();
 
         return bar;
+    }
+
+    // A slot under a row opened with what it shows, its height eased from
+    // nothing and its content faded up, so the rows under it move smoothly
+    function slotOpen(slot, child) {
+
+        const seq = String((Number(slot.dataset.slotSeq) || 0) + 1);
+
+        slot.dataset.slotSeq = seq;
+        slot.dataset.slotOpen = "1";
+        slot.textContent = "";
+        slot.appendChild(child);
+        slot.style.overflow = "hidden";
+        slot.style.transition = "none";
+        slot.style.display = "";
+        slot.style.height = "0px";
+        slot.style.opacity = "0";
+
+        const h = slot.scrollHeight;
+
+        // The start drawn before the move, else it jumps to its end
+        void slot.offsetHeight;
+        slot.style.transition = "height 0.22s ease-in-out, opacity 0.22s ease-in-out";
+        slot.style.height = h + "px";
+        slot.style.opacity = "1";
+
+        // Its own height again once there, so it follows what it shows
+        setTimeout(function () {
+
+            if (slot.dataset.slotSeq === seq) {
+
+                slot.style.transition = "none";
+                slot.style.height = "";
+                slot.style.overflow = "";
+            }
+        }, 260);
+    }
+
+    // The slot closed the same way, emptied once it is
+    function slotClose(slot) {
+
+        if (slot.style.display === "none" || slot.dataset.slotOpen !== "1") {
+
+            slot.textContent = "";
+            slot.style.display = "none";
+            return;
+        }
+
+        const seq = String((Number(slot.dataset.slotSeq) || 0) + 1);
+
+        slot.dataset.slotSeq = seq;
+        slot.dataset.slotOpen = "";
+        slot.style.overflow = "hidden";
+        slot.style.transition = "none";
+        slot.style.height = slot.offsetHeight + "px";
+        void slot.offsetHeight;
+        slot.style.transition = "height 0.2s ease-in-out, opacity 0.16s ease-in-out";
+        slot.style.height = "0px";
+        slot.style.opacity = "0";
+
+        setTimeout(function () {
+
+            if (slot.dataset.slotSeq === seq) {
+
+                slot.textContent = "";
+                slot.style.display = "none";
+                slot.style.transition = "none";
+                slot.style.height = "";
+                slot.style.opacity = "";
+            }
+        }, 240);
     }
     // END SHARED misc
 
@@ -70817,10 +70888,7 @@
 
         // How far it has played, and a tap or a drag to move in it
         if (slot) {
-
-            slot.textContent = "";
-            slot.appendChild(hearBar(el, ACCENT));
-            slot.style.display = "";
+            slotOpen(slot, hearBar(el, ACCENT));
         }
 
         el.addEventListener("ended", function () {
@@ -70864,9 +70932,7 @@
         }
 
         if (h.slot) {
-
-            h.slot.textContent = "";
-            h.slot.style.display = "none";
+            slotClose(h.slot);
         }
 
         if (h.resume && !handOver && audio && audio.paused) {
@@ -74508,7 +74574,7 @@
                     }
 
                     outer = document.createElement("div");
-                    outer.style.cssText = "display:flex;flex-direction:column;gap:2px;flex-shrink:0";
+                    outer.style.cssText = "display:flex;flex-direction:column;flex-shrink:0";
                     outer.appendChild(holder);
                     outer.appendChild(slot);
                 }
@@ -83005,7 +83071,6 @@
     .crPickOuter {
         display: flex;
         flex-direction: column;
-        gap: 2px;
         flex-shrink: 0;
     }
 
@@ -91934,7 +91999,7 @@
     // BEGIN SHARED misc
     // Written by embed-webview.sh from src/shared/misc.js. Change that
     // file and run make embed, never the lines up to END SHARED misc
-    // Small helpers: the debug log's values, a percent as shown, toast times, the cover editor, the kinds of notifications, the credits, a bar for a song heard before it is taken.
+    // Small helpers: the debug log's values, a percent as shown, toast times, the cover editor, the kinds of notifications, the credits, a bar for a song heard before it is taken, a slot under a row eased open and shut.
     // Shared by the player and the web view's page, src/shared/misc.js,
     // inlined into both by embed-webview.sh
 
@@ -92257,7 +92322,7 @@
         const time = document.createElement("div");
         let dragging = false;
 
-        bar.style.cssText = "display:flex;align-items:center;gap:8px;padding:0 4px;flex-shrink:0";
+        bar.style.cssText = "display:flex;align-items:center;gap:8px;padding:2px 4px 0;flex-shrink:0";
         hit.style.cssText = "position:relative;flex:1 1 auto;height:24px;cursor:pointer;touch-action:none";
         track.style.cssText = "position:absolute;left:0;right:0;top:10px;height:4px;border-radius:2px;overflow:hidden;"
             + "background:rgba(128,128,128,0.35);pointer-events:none";
@@ -92337,6 +92402,77 @@
         paint();
 
         return bar;
+    }
+
+    // A slot under a row opened with what it shows, its height eased from
+    // nothing and its content faded up, so the rows under it move smoothly
+    function slotOpen(slot, child) {
+
+        const seq = String((Number(slot.dataset.slotSeq) || 0) + 1);
+
+        slot.dataset.slotSeq = seq;
+        slot.dataset.slotOpen = "1";
+        slot.textContent = "";
+        slot.appendChild(child);
+        slot.style.overflow = "hidden";
+        slot.style.transition = "none";
+        slot.style.display = "";
+        slot.style.height = "0px";
+        slot.style.opacity = "0";
+
+        const h = slot.scrollHeight;
+
+        // The start drawn before the move, else it jumps to its end
+        void slot.offsetHeight;
+        slot.style.transition = "height 0.22s ease-in-out, opacity 0.22s ease-in-out";
+        slot.style.height = h + "px";
+        slot.style.opacity = "1";
+
+        // Its own height again once there, so it follows what it shows
+        setTimeout(function () {
+
+            if (slot.dataset.slotSeq === seq) {
+
+                slot.style.transition = "none";
+                slot.style.height = "";
+                slot.style.overflow = "";
+            }
+        }, 260);
+    }
+
+    // The slot closed the same way, emptied once it is
+    function slotClose(slot) {
+
+        if (slot.style.display === "none" || slot.dataset.slotOpen !== "1") {
+
+            slot.textContent = "";
+            slot.style.display = "none";
+            return;
+        }
+
+        const seq = String((Number(slot.dataset.slotSeq) || 0) + 1);
+
+        slot.dataset.slotSeq = seq;
+        slot.dataset.slotOpen = "";
+        slot.style.overflow = "hidden";
+        slot.style.transition = "none";
+        slot.style.height = slot.offsetHeight + "px";
+        void slot.offsetHeight;
+        slot.style.transition = "height 0.2s ease-in-out, opacity 0.16s ease-in-out";
+        slot.style.height = "0px";
+        slot.style.opacity = "0";
+
+        setTimeout(function () {
+
+            if (slot.dataset.slotSeq === seq) {
+
+                slot.textContent = "";
+                slot.style.display = "none";
+                slot.style.transition = "none";
+                slot.style.height = "";
+                slot.style.opacity = "";
+            }
+        }, 240);
     }
     // END SHARED misc
 
@@ -113116,10 +113252,7 @@
 
         // How far it has played, and a tap or a drag to move in it
         if (slot) {
-
-            slot.textContent = "";
-            slot.appendChild(hearBar(el, getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#48e1eb"));
-            slot.style.display = "";
+            slotOpen(slot, hearBar(el, getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#48e1eb"));
         }
 
         el.addEventListener("ended", function () {
@@ -113156,9 +113289,7 @@
         h.btn.textContent = "Listen";
 
         if (h.slot) {
-
-            h.slot.textContent = "";
-            h.slot.style.display = "none";
+            slotClose(h.slot);
         }
 
         if (h.resume && !handOver) {
