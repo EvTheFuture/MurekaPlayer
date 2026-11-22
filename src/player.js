@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.301";
+    const VERSION = "2.0.1.302";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -28331,6 +28331,10 @@
         hostListMemo = null;
         saveQueue();
         renderList();
+
+        // The stopped song's cover, its moving cover and its neighbors,
+        // which Stop leaves in place, go with the queue
+        setArtSources();
         publishHostSoon();
         setStatus("Queue cleared");
         showToast("Queue cleared, " + n + (n === 1 ? " song" : " songs"));
