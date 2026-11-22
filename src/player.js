@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.300";
+    const VERSION = "2.0.1.301";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -71036,6 +71036,13 @@
             } : null,
             copy: function () {
                 copyTemplateStyle(t);
+            },
+            confirm: function (go) {
+
+                const written = String(loadCreateDraft().style || "").trim() !== "";
+
+                askYesNo("Use the template " + t.title + "?", "Its style goes into the style prompt"
+                    + (written ? ", in place of the style written there" : "") + ".", "Use it", go);
             }
         };
     }
@@ -74618,6 +74625,18 @@
 
                 row.addEventListener("click", function () {
 
+                    // A row that asks first: taken only on a yes, the list
+                    // left open on a no
+                    if (r.confirm) {
+
+                        r.confirm(function () {
+
+                            close();
+                            onPick(r.value);
+                        });
+                        return;
+                    }
+
                     close();
                     onPick(r.value);
                 });
@@ -74727,6 +74746,10 @@
     }
 
     // Mureka's templates to pick from, by kind of music, a page at a time
+    // The templates read this visit and where the list stood, so the list
+    // opens again where it was left
+    let templatesSeen = null;
+
     async function createTemplatesFromPage() {
 
         let last = "0";
@@ -74764,6 +74787,7 @@
 
             tag = kinds.value;
             last = "0";
+            templatesSeen = null;
             pick.empty("Reading the templates");
             readMore();
         });
@@ -74774,6 +74798,10 @@
         pick.list.addEventListener("scroll", function () {
 
             const l = pick.list;
+
+            if (templatesSeen && templatesSeen.tag === tag) {
+                templatesSeen.scroll = l.scrollTop;
+            }
 
             if (more && !busy && l.scrollTop + l.clientHeight > l.scrollHeight - 400) {
                 readMore();
@@ -74803,6 +74831,14 @@
                 }
 
                 pick.add(page.list.map(createTemplateRow));
+
+                if (last === "0" || !templatesSeen || templatesSeen.tag !== tag) {
+                    templatesSeen = { tag: tag, items: [], last: "0", more: false, scroll: 0 };
+                }
+
+                templatesSeen.items = templatesSeen.items.concat(page.list);
+                templatesSeen.last = page.last;
+                templatesSeen.more = page.more;
                 last = page.last;
                 more = page.more;
             } catch (e) {
@@ -74823,7 +74859,6 @@
             }
         };
 
-        pick.empty("Reading the templates");
         createTemplateTags().then(function (tags) {
 
             for (const t of tags) {
@@ -74832,9 +74867,35 @@
                     kinds.appendChild(new Option(t.label, t.value));
                 }
             }
+
+            kinds.value = tag;
         }, function () {
             kinds.style.display = "none";
         });
+
+        // Opened before this visit: the templates read then, where the
+        // list stood
+        const seen = templatesSeen;
+
+        if (seen && seen.items.length > 0) {
+
+            tag = seen.tag;
+            last = seen.last;
+            more = seen.more;
+            pick.list.textContent = "";
+            pick.add(seen.items.map(createTemplateRow));
+
+            if (moreBtn) {
+                moreBtn.style.opacity = more ? "1" : "0.5";
+            }
+
+            requestAnimationFrame(function () {
+                pick.list.scrollTop = seen.scroll;
+            });
+            return;
+        }
+
+        pick.empty("Reading the templates");
         await readMore();
     }
 
@@ -113418,6 +113479,32 @@
         });
     }
 
+    // The templates read this visit and where the list stood, so the list
+    // opens again where it was left
+    let crTplSeen = null;
+
+    // A template's row: taken once asked, listened to, its style copied
+    function crTplRow(x) {
+
+        const sub = [x.genres, x.about, x.made ? "used " + Number(x.made).toLocaleString() + " times" : ""].filter(Boolean).join(" \u00b7 ");
+
+        return crPickRow(x.title, sub, function () {
+
+            const written = !!(crDraft && String(crDraft.style || "").trim());
+
+            askConfirm("Use the template " + x.title + "? Its style goes into the style prompt"
+                + (written ? ", in place of the style written there" : "") + ".", "Use it", false, function () {
+
+                showCrPick(false);
+                crAsk({ op: "template", id: x.id }).then(crAnswered);
+            });
+        }, "", x.cover, x.audio ? function (btn, slot) {
+            crHear(x, btn, slot);
+        } : null, function () {
+            crCopyStyle(x);
+        });
+    }
+
     function openCrPick(kind) {
 
         const titles = { prompts: "My styles", characters: "Characters", resources: "Songs uploaded to Mureka", sets: "Put them in",
@@ -113505,18 +113592,7 @@
                 for (const x of list) {
 
                     if (kind === "templates") {
-
-                        const sub = [x.genres, x.about, x.made ? "used " + Number(x.made).toLocaleString() + " times" : ""].filter(Boolean).join(" \u00b7 ");
-
-                        rows.appendChild(crPickRow(x.title, sub, function () {
-
-                            showCrPick(false);
-                            crAsk({ op: "template", id: x.id }).then(crAnswered);
-                        }, "", x.cover, x.audio ? function (btn, slot) {
-                            crHear(x, btn, slot);
-                        } : null, function () {
-                            crCopyStyle(x);
-                        }));
+                        rows.appendChild(crTplRow(x));
                     } else if (kind === "prompts") {
 
                         rows.appendChild(crPickRow(x.text, "", function () {
@@ -113543,6 +113619,17 @@
                     }
                 }
 
+                if (kind === "templates") {
+
+                    if (last === "0" || !crTplSeen || crTplSeen.tag !== tag) {
+                        crTplSeen = { tag: tag, items: [], last: "0", more: false, scroll: 0 };
+                    }
+
+                    crTplSeen.items = crTplSeen.items.concat(list);
+                    crTplSeen.last = String(r.last || "");
+                    crTplSeen.more = r.more === true;
+                }
+
                 more = r.more === true;
                 last = String(r.last || "");
                 $("crPickMore").style.display = more ? "" : "none";
@@ -113561,6 +113648,10 @@
 
             const l = $("crPickRows");
 
+            if (kind === "templates" && crPickKind === kind && crTplSeen && crTplSeen.tag === tag) {
+                crTplSeen.scroll = l.scrollTop;
+            }
+
             if (crPickKind === kind && more && !busy && l.scrollTop + l.clientHeight > l.scrollHeight - 400) {
                 read();
             }
@@ -113577,6 +113668,7 @@
 
                 tag = select.value;
                 last = "0";
+                crTplSeen = null;
                 crPickNote("Asking Mureka");
                 read();
             };
@@ -113592,7 +113684,33 @@
                         select.appendChild(new Option(t.label, t.value));
                     }
                 }
+
+                select.value = tag;
             });
+
+            // Opened before this visit: the templates read then, where the
+            // list stood
+            const seen = crTplSeen;
+
+            if (seen && seen.items.length > 0) {
+
+                const rows = $("crPickRows");
+
+                tag = seen.tag;
+                last = seen.last;
+                more = seen.more;
+                rows.textContent = "";
+
+                for (const x of seen.items) {
+                    rows.appendChild(crTplRow(x));
+                }
+
+                $("crPickMore").style.display = more ? "" : "none";
+                requestAnimationFrame(function () {
+                    rows.scrollTop = seen.scroll;
+                });
+                return;
+            }
         }
 
         read();
