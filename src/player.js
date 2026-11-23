@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.304";
+    const VERSION = "2.0.1.305";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -15224,11 +15224,13 @@
 
     // How many levels lie between off and the phone's first step, 0 for
     // one at each whole percent under it
+    // The steps from Off up to step 1 set for a speaker, 0 for Auto. The app
+    // takes the levels between them, one fewer
     function cleanLowSteps(v) {
 
         const n = Math.round(Number(v));
 
-        return isFinite(n) && n >= 1 ? Math.min(40, n) : 0;
+        return isFinite(n) && n >= 2 ? Math.min(40, n) : 0;
     }
 
     // How far the app goes down under the first step on its own: the
@@ -16773,7 +16775,7 @@
             }
 
             if (s.devices[a].lowSteps > 0) {
-                lowSteps[a] = s.devices[a].lowSteps;
+                lowSteps[a] = s.devices[a].lowSteps - 1;
             }
 
             // The highest volume as it connects, for the speakers it is on for
@@ -16794,7 +16796,7 @@
                 lows: lows,
                 fallbackLow: s.fallback.lowDb || 0,
                 lowSteps: lowSteps,
-                fallbackLowSteps: s.fallback.lowSteps || 0
+                fallbackLowSteps: s.fallback.lowSteps > 0 ? s.fallback.lowSteps - 1 : 0
             }));
         } catch (e) {
             dbgLog("Sound", "volume step sizes not taken: " + errText(e));
@@ -17773,7 +17775,7 @@
         const low = Number(rec.lowDb) || 0;
         const lowSteps = Number(rec.lowSteps) > 0 ? Number(rec.lowSteps) : (!phone && sound().fallback.lowSteps > 0 ? sound().fallback.lowSteps : 0);
         const lowShown = low > 0 ? low
-            : (!phone && sound().fallback.lowDb > 0 ? sound().fallback.lowDb : defaultLowDb(Number(fineInfo().max) || 0, lowSteps));
+            : (!phone && sound().fallback.lowDb > 0 ? sound().fallback.lowDb : defaultLowDb(Number(fineInfo().max) || 0, lowSteps > 0 ? lowSteps - 1 : 0));
         const hasOwn = Object.keys(gaps).length > 0;
         const useFb = !hasOwn && !(own > 0) && Object.keys(fb).length > 0;
 
@@ -60042,22 +60044,40 @@
                 into.appendChild(buttons);
                 into.appendChild(forgetRow);
 
-                // How many levels lie between off and step 1, finer for a
-                // speaker whose lowest step is loud already
+                // How many steps the volume buttons take from Off up to step
+                // 1, finer for a speaker whose lowest step is loud already.
+                // Only counts that part step 1's percent into even tenths
+                // are offered, so every level shows as a round number
                 const max = Number(fineInfo().max) || 0;
                 const high = max > 0 ? Math.round(100 / max) : 0;
                 const apart = function (n) {
-                    return high > 0 ? " (" + pctText(high / (n + 1)) + "% apart)" : "";
+                    return high > 0 ? ", " + pctText(high / n) + "% apart" : "";
+                };
+                const evenly = function (n) {
+
+                    const tenths = high * 10 / n;
+
+                    return Math.abs(tenths - Math.round(tenths)) < 1e-9;
                 };
                 const fbLow = sound().fallback.lowSteps || 0;
+                const setNow = Number(get("lowSteps")) || 0;
+                const counts = [];
+
+                for (let n = 2; n <= 40; n++) {
+
+                    if (n !== high && (evenly(n) || n === setNow)) {
+                        counts.push(n);
+                    }
+                }
+
                 const lowChoices = [{
                     value: 0,
-                    label: !phone && fbLow > 0 ? "Same as default, " + fbLow : "Auto" + (high > 1 ? ", " + (high - 1) + apart(high - 1) : "")
-                }].concat([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 40].map(function (n) {
-                    return { value: n, label: String(n) + apart(n) };
+                    label: !phone && fbLow > 0 ? "Same as default, " + fbLow + " steps" : "Auto" + (high > 1 ? ", " + high + " steps" + apart(high) : "")
+                }].concat(counts.map(function (n) {
+                    return { value: n, label: n + " steps" + apart(n) };
                 }));
 
-                into.appendChild(even(makeDropRow("Levels under step 1", lowChoices, function () {
+                into.appendChild(even(makeDropRow("Steps up to step 1", lowChoices, function () {
                     return Number(get("lowSteps")) || 0;
                 }, function (v) {
 
@@ -60065,8 +60085,8 @@
                     pushStepSizes();
                     paint();
                 })));
-                into.appendChild(makeHint("The levels between Off and step 1, which the volume buttons go through one at a time. "
-                    + "More of them for a speaker whose lowest step is loud already. Auto has one at each whole percent."));
+                into.appendChild(makeHint("How many presses of the volume buttons it takes from Off up to step 1, all equally far apart. "
+                    + "More of them for a speaker whose lowest step is loud already. Auto takes a whole percent at a time."));
                 paint();
                 settingsRefreshers.push(paint);
                 tryPaints.push(paint);
@@ -103383,6 +103403,9 @@
     // The reading the settings were last drawn from, as text
     let panelDrawn = "";
 
+    // The page the panel drew last, to tell a new page from the same again
+    let panelPageDrawn = "";
+
     function renderPanel(items) {
 
         const active = document.activeElement;
@@ -103436,9 +103459,15 @@
 
         // Kept for drawing this page at once next time, and as the one the
         // panel showed last
-        panelPages[panelPageKey(panelPage(box))] = items;
+        const pageKey = panelPageKey(panelPage(box));
+
+        panelPages[pageKey] = items;
         panelPages[panelName + ":last"] = items;
-        scroller.scrollTop = keep;
+
+        // Another page than the one drawn before starts at its top, the
+        // same page brought up to date stays where it was
+        scroller.scrollTop = pageKey === panelPageDrawn ? keep : 0;
+        panelPageDrawn = pageKey;
     }
 
     $("panelBody").addEventListener("change", function (ev) {

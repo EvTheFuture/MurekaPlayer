@@ -22599,6 +22599,9 @@
     // The reading the settings were last drawn from, as text
     let panelDrawn = "";
 
+    // The page the panel drew last, to tell a new page from the same again
+    let panelPageDrawn = "";
+
     function renderPanel(items) {
 
         const active = document.activeElement;
@@ -22652,9 +22655,15 @@
 
         // Kept for drawing this page at once next time, and as the one the
         // panel showed last
-        panelPages[panelPageKey(panelPage(box))] = items;
+        const pageKey = panelPageKey(panelPage(box));
+
+        panelPages[pageKey] = items;
         panelPages[panelName + ":last"] = items;
-        scroller.scrollTop = keep;
+
+        // Another page than the one drawn before starts at its top, the
+        // same page brought up to date stays where it was
+        scroller.scrollTop = pageKey === panelPageDrawn ? keep : 0;
+        panelPageDrawn = pageKey;
     }
 
     $("panelBody").addEventListener("change", function (ev) {
