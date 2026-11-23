@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.307";
+    const VERSION = "2.0.1.308";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -23715,6 +23715,55 @@
     // The gain held silent meanwhile, the fade back of a load waits
     let iosAnewHolding = false;
 
+    // Held silent already as the new song was asked for: Safari had played
+    // its first tenths of a second, and the speaker's delay more, before it
+    // was told it plays, so its start was heard, then heard again. Let go
+    // after a while should the song never play
+    let iosAnewPre = false;
+    let iosAnewPreTimer = 0;
+    const IOS_ANEW_PRE_LONGEST_MS = 8000;
+
+    function iosAnewPreHold() {
+
+        if (!iosStillAfterOn() || !iosGain || !iosCtx) {
+            return;
+        }
+
+        iosAnewPre = true;
+        iosAnewHolding = true;
+        iosGain.gain.cancelScheduledValues(iosCtx.currentTime);
+        iosGain.gain.value = 0;
+        clearTimeout(iosAnewPreTimer);
+        iosAnewPreTimer = setTimeout(function () {
+
+            if (iosAnewPre) {
+
+                iosAnewPre = false;
+                iosAnewHolding = false;
+                iosGainBackNow();
+                dbgLog("Audio", "the new song did not play within " + (IOS_ANEW_PRE_LONGEST_MS / 1000) + " s, its silence let go");
+            }
+        }, IOS_ANEW_PRE_LONGEST_MS);
+    }
+
+    // The silence held for a song asked for let go, with the sound back
+    // unless the stop after the start holds it on
+    function iosAnewPreDone(back) {
+
+        if (!iosAnewPre) {
+            return;
+        }
+
+        iosAnewPre = false;
+        clearTimeout(iosAnewPreTimer);
+
+        if (back) {
+
+            iosAnewHolding = false;
+            iosGainBackNow();
+        }
+    }
+
     // Only with the page in view: out of view, with the screen locked say,
     // the engine stopped let Safari play the song past it, heard from its
     // start two or three times, and a timer may not play a stopped song
@@ -23726,14 +23775,19 @@
     function iosPlayAnewSoon() {
 
         if (!iosStillAfterOn() || !iosGain || !iosCtx || !audio || !currentSong) {
+
+            iosAnewPreDone(true);
             return;
         }
 
         // Once for each song loaded
         if (iosAnewEl === audio && iosAnewSrc === audio.src) {
+
+            iosAnewPreDone(true);
             return;
         }
 
+        iosAnewPreDone(false);
         iosAnewEl = audio;
         iosAnewSrc = audio.src;
 
@@ -25247,6 +25301,9 @@
         trackStartAt = performance.now();
         trackHeardMs = 0;
         trackHeardFrom = "";
+
+        // Silent from before it starts when it is to be stopped once started
+        iosAnewPreHold();
 
         // Songs being stored in the background are let go, so their
         // downloads and the writing of them to the device do not hold up
