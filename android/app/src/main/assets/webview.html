@@ -2421,7 +2421,8 @@
         line-height: 1.4;
     }
 
-    #crPickTag {
+    #crPickTag,
+    #crPickFind {
         flex: 1 1 8em;
         min-width: 0;
         font: inherit;
@@ -7945,6 +7946,7 @@
             <div id="crPickTop">
                 <span id="crPickTitle"></span>
                 <select id="crPickTag" aria-label="Kind of music"></select>
+                <input id="crPickFind" type="search" placeholder="Find by title" aria-label="Find by title" autocomplete="off">
                 <button class="chip" id="crPickUpload" type="button">Upload a song</button>
                 <button class="chip" id="crPickMore" type="button">More</button>
                 <button class="chip" id="crPickBack" type="button">Back</button>
@@ -31850,6 +31852,9 @@
             crChip("Choose a song", function () {
                 openCrPick("resources");
             }, "crFill"),
+            crChip("Library song", function () {
+                openCrPick("library");
+            }, "crFill"),
             crChip("Upload a song", crUpload, "crFill"),
             ui.remixPart,
             ui.remixStyle,
@@ -32306,9 +32311,10 @@
     // An old phone without the song's file makes the whole song ready
     function crRemixPart(x, from) {
 
+        const song = x.kind === "song";
         const use = function (range) {
 
-            const ask = { op: "use", id: x.id, title: x.title, ms: x.ms, url: x.url || "" };
+            const ask = { op: "use", id: x.id, title: x.title, ms: x.ms, url: x.url || "", kind: song ? "song" : "" };
 
             if (range) {
 
@@ -32325,11 +32331,13 @@
             return;
         }
 
+        // A library song is read as itself, an uploaded one from Mureka's
+        // file host
         openTrimmer({
-            id: "upload " + x.id,
-            title: x.title || "Uploaded song",
+            id: song ? String(x.id) : "upload " + x.id,
+            title: x.title || (song ? "Song" : "Uploaded song"),
             durationMs: x.ms,
-            src: "https://static-cos.mureka.ai/" + String(x.url).replace(/^\/+/, "")
+            src: song && /^https?:/.test(String(x.url)) ? String(x.url) : "https://static-cos.mureka.ai/" + String(x.url).replace(/^\/+/, "")
         }, {
             min: 10,
             max: 480,
@@ -32777,7 +32785,7 @@
     function openCrPick(kind) {
 
         const titles = { prompts: "My styles", characters: "Characters", resources: "Songs uploaded to Mureka", sets: "Put them in",
-            templates: "Mureka's templates" };
+            templates: "Mureka's templates", library: "Songs in the library" };
         let last = "0";
         let more = false;
         let tag = "";
@@ -32788,6 +32796,7 @@
         $("crPickTitle").textContent = titles[kind] || "";
         $("crPickUpload").style.display = kind === "resources" ? "" : "none";
         $("crPickTag").style.display = kind === "templates" ? "" : "none";
+        $("crPickFind").style.display = kind === "library" ? "" : "none";
         $("crPickMore").style.display = "none";
         crPickNote("Asking Mureka");
         showCrPick(true);
@@ -32827,7 +32836,8 @@
             busy = true;
 
             const ask = kind === "resources" ? { op: "resources", last: last }
-                : kind === "templates" ? { op: "templates", tag: tag, last: last } : { op: kind };
+                : kind === "templates" ? { op: "templates", tag: tag, last: last }
+                    : kind === "library" ? { op: "librarySongs", find: $("crPickFind").value } : { op: kind };
 
             crAsk(ask).then(function (r) {
 
@@ -32855,7 +32865,8 @@
                     crPickNote(kind === "prompts" ? "No styles are saved on Mureka yet. Save style saves the style written now."
                         : kind === "characters" ? "No characters on Mureka yet. They are made on Mureka's own page."
                             : kind === "templates" ? "No templates of this kind"
-                                : "No songs uploaded to Mureka yet. Upload a song to remix it.");
+                                : kind === "library" ? ($("crPickFind").value.trim() ? "No song has those words in its title" : "No songs in the library yet")
+                                    : "No songs uploaded to Mureka yet. Upload a song to remix it.");
                 }
 
                 for (const x of list) {
@@ -32879,8 +32890,9 @@
                     } else {
 
                         const when = x.at ? new Date(x.at * 1000).toLocaleDateString() : "";
+                        const now = kind === "library" && r.playing && r.playing === x.id ? "Playing now" : "";
 
-                        rows.appendChild(crPickRow(x.title, [crTime(x.ms), when].filter(Boolean).join(", "), function () {
+                        rows.appendChild(crPickRow(x.title, [now, crTime(x.ms), when].filter(Boolean).join(", "), function () {
 
                             showCrPick(false);
                             crRemixPart(x, null);
@@ -32925,6 +32937,24 @@
                 read();
             }
         };
+
+        // Library songs found by their title as it is typed
+        if (kind === "library") {
+
+            let findTimer = 0;
+            const find = $("crPickFind");
+
+            find.value = "";
+            find.oninput = function () {
+
+                clearTimeout(findTimer);
+                findTimer = setTimeout(function () {
+
+                    last = "0";
+                    read();
+                }, 250);
+            };
+        }
 
         // The kinds of music to pick templates by, asked once a time
         if (kind === "templates") {
@@ -40983,7 +41013,8 @@
         trimUi.startInput.value = document.activeElement === trimUi.startInput ? trimUi.startInput.value : trimTimeText(tr.start);
         trimUi.endInput.value = document.activeElement === trimUi.endInput ? trimUi.endInput.value : trimTimeText(tr.end);
         trimUi.info.textContent = tr.pick
-            ? "Uploaded song " + trimTimeText(tr.duration) + " · Part " + trimTimeText(tr.end - tr.start)
+            ? (/^upload /.test(String(tr.song.id)) ? "Uploaded song " : "Song ") + trimTimeText(tr.duration)
+                + " · Part " + trimTimeText(tr.end - tr.start)
                 + " · A remix takes " + trimTimeText(tr.pick.min) + " to " + trimTimeText(tr.pick.max)
             : "ID " + tr.song.id + " · Original " + trimTimeText(tr.duration)
                 + " · New " + trimTimeText(tr.end - tr.start);

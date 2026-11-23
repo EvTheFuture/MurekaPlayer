@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.305";
+    const VERSION = "2.0.1.306";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -67686,7 +67686,8 @@
         trimUi.startInput.value = document.activeElement === trimUi.startInput ? trimUi.startInput.value : trimTimeText(tr.start);
         trimUi.endInput.value = document.activeElement === trimUi.endInput ? trimUi.endInput.value : trimTimeText(tr.end);
         trimUi.info.textContent = tr.pick
-            ? "Uploaded song " + trimTimeText(tr.duration) + " \u00b7 Part " + trimTimeText(tr.end - tr.start)
+            ? (/^upload /.test(String(tr.song.song_id)) ? "Uploaded song " : "Song ") + trimTimeText(tr.duration)
+                + " \u00b7 Part " + trimTimeText(tr.end - tr.start)
                 + " \u00b7 A remix takes " + trimTimeText(tr.pick.min) + " to " + trimTimeText(tr.pick.max)
             : "ID " + tr.song.song_id + " \u00b7 Original " + trimTimeText(tr.duration)
                 + " \u00b7 New " + trimTimeText(tr.end - tr.start);
@@ -70002,12 +70003,19 @@
             return null;
         }
 
-        return {
+        const out = {
             id: typeof r.id === "number" ? r.id : String(r.id).replace(/[^0-9]/g, "").slice(0, 24),
             title: createText(r.title, 120),
             ms: Math.max(0, Number(r.ms) || 0),
             url: String(r.url).slice(0, 400)
         };
+
+        // A song of the library rather than one uploaded
+        if (r.kind === "song") {
+            out.kind = "song";
+        }
+
+        return out;
     }
 
     function createCleanRemix(r) {
@@ -71299,21 +71307,47 @@
             throw new Error("the part is shorter than the " + Math.round(limits.min / 1000) + " seconds a remix needs");
         }
 
-        dbgLog("Create", "uploaded song " + res.id + " made ready to remix from " + trimTimeText(startMs / 1000)
-            + " to " + trimTimeText(endMs / 1000));
+        const fromLibrary = res.kind === "song";
 
-        const data = await createPost("/api/pgc/resource/use", {
-            control_type: 11,
-            resource_id: res.id,
-            trim_start_ms: startMs,
-            trim_end_ms: endMs
-        }, 90000);
+        dbgLog("Create", (fromLibrary ? "library song " : "uploaded song ") + res.id + " made ready to remix from "
+            + trimTimeText(startMs / 1000) + " to " + trimTimeText(endMs / 1000));
+
+        // A song of the library goes by its song id, as Mureka's page sends
+        // it, an uploaded one by its resource id
+        const asked = { control_type: 11, trim_start_ms: startMs, trim_end_ms: endMs };
+        const num = Number(res.id);
+
+        if (fromLibrary) {
+            asked.song_id = Number.isSafeInteger(num) ? num : res.id;
+        } else {
+            asked.resource_id = res.id;
+        }
+
+        const data = await createPost("/api/pgc/resource/use", asked, 90000);
         const r = data.remix || {};
-        const o = data.origin_resource || {};
 
         if (!r.id) {
             throw new Error("Mureka gave nothing to remix");
         }
+
+        // A library song's remix kept as Mureka gave it, its lyrics, cover
+        // and maker with it, as its page keeps a song of Mureka's
+        if (fromLibrary) {
+
+            const song = data.origin_song || {};
+
+            return {
+                remix: createCleanRemix(Object.assign({}, r, {
+                    trim_start_ms: startMs,
+                    trim_end_ms: Number(data.use_end_ms) || endMs
+                })),
+                style: String(data.prompt && data.prompt.content || "").slice(0, CREATE_STYLE_MAX),
+                name: String(song.title || res.title || r.title || "").slice(0, 120),
+                cut: !range && ms > limits.max
+            };
+        }
+
+        const o = data.origin_resource || {};
 
         return {
             remix: createCleanRemix({
@@ -73936,6 +73970,7 @@
         }), CTRL_ACCENT);
         createEl.appendChild(createButtonRow([
             act("Choose a song", createRemixFromPage),
+            act("Library song", createRemixLibraryFromPage),
             act("Upload a song", createUploadFromPage)
         ]));
         createEl.appendChild(createButtonRow([ui.remixPartBtn, ui.remixStyleBtn, ui.remixClearBtn]));
@@ -75020,9 +75055,14 @@
 
         createRemixConfig();
 
+        // A library song opens as itself, its stored copy and waveform used
+        const own = res.kind === "song" ? (hostFindSong(res.id) || (ownLibrary().songs || []).find(function (x) {
+            return String(x.song_id) === String(res.id);
+        }) || null) : null;
+
         return new Promise(function (resolve) {
 
-            openTrimmer({
+            openTrimmer(own || {
                 song_id: "upload " + res.id,
                 title: res.title || "Uploaded song",
                 duration_milliseconds: res.ms,
@@ -75069,7 +75109,7 @@
             remix: used.remix,
             remixName: used.name,
             remixStyle: used.style,
-            remixSource: res.url ? { id: res.id, title: res.title, ms: res.ms, url: res.url } : null
+            remixSource: res.url ? createCleanSource({ id: res.id, title: res.title, ms: res.ms, url: res.url, kind: res.kind }) : null
         };
 
         if (!d.style.trim() && used.style) {
@@ -75097,6 +75137,107 @@
             sub: [r.ms ? trimTimeText(r.ms / 1000) : "", when].filter(Boolean).join(", "),
             value: r
         };
+    }
+
+    // A library song as a song to remix: its id, title, length, file and
+    // when it was made
+    function createLibrarySongOf(s) {
+
+        return {
+            kind: "song",
+            id: String(s.song_id),
+            title: String(s.title || "Untitled").slice(0, 120),
+            ms: Number(s.duration_milliseconds) || 0,
+            at: Number(s.generate_at) || 0,
+            url: String(songUrl(s) || "").slice(0, 400)
+        };
+    }
+
+    // Own songs to remix, the one playing first, then the newest, those
+    // whose title has the words typed in when some are
+    function createLibrarySongs(typed, count) {
+
+        const words = String(typed || "").toLowerCase().split(/\s+/).filter(Boolean);
+        const own = (ownLibrary().songs || []).filter(function (s) {
+
+            if (!isUsableSong(s) || !songUrl(s)) {
+                return false;
+            }
+
+            const title = String(s.title || "").toLowerCase();
+
+            return words.every(function (w) {
+                return title.indexOf(w) !== -1;
+            });
+        });
+
+        own.sort(function (x, y) {
+            return (Number(y.generate_at) || 0) - (Number(x.generate_at) || 0);
+        });
+
+        if (currentSong && !creatorSource) {
+
+            const at = own.findIndex(function (s) {
+                return String(s.song_id) === String(currentSong.song_id);
+            });
+
+            if (at > 0) {
+                own.unshift(own.splice(at, 1)[0]);
+            }
+        }
+
+        return own.slice(0, count || 80).map(createLibrarySongOf);
+    }
+
+    function createLibraryRow(r) {
+
+        const playing = currentSong && String(currentSong.song_id) === r.id;
+        const when = r.at ? new Date(r.at * 1000).toLocaleDateString() : "";
+
+        return {
+            label: r.title,
+            sub: [playing ? "Playing now" : "", r.ms ? trimTimeText(r.ms / 1000) : "", when].filter(Boolean).join(", "),
+            value: r
+        };
+    }
+
+    // A song of the library chosen to remix, found by its title
+    function createRemixLibraryFromPage() {
+
+        const pick = createPicker("Songs in the library", null, function (r) {
+            createUseResource(r, null, true);
+        });
+        const find = document.createElement("input");
+
+        find.type = "search";
+        find.placeholder = "Find by title";
+        find.style.cssText = "font:inherit;font-size:15px;padding:9px 10px;border-radius:8px;background:#1d1d22;color:#fff;"
+            + "border:1px solid #3a3a42;flex-shrink:0;outline:none";
+        pick.card.insertBefore(find, pick.list);
+
+        const show = function () {
+
+            const list = createLibrarySongs(find.value, 80);
+
+            pick.list.textContent = "";
+
+            if (list.length === 0) {
+
+                pick.empty(find.value.trim() ? "No song has those words in its title" : "No songs in the library yet");
+                return;
+            }
+
+            pick.add(list.map(createLibraryRow));
+        };
+
+        let timer = 0;
+
+        find.addEventListener("input", function () {
+
+            clearTimeout(timer);
+            timer = setTimeout(show, 200);
+        });
+        show();
     }
 
     async function createRemixFromPage() {
@@ -77021,14 +77162,21 @@
             createResources(String(a.last || "0").replace(/[^0-9]/g, "") || "0").then(function (page) {
                 reply({ ok: true, list: page.list, last: page.last, more: page.more });
             }, failed);
+        } else if (op === "librarySongs") {
+
+            reply({ ok: true, list: createLibrarySongs(String(a.find || "").slice(0, 100), 80), playing: currentSong ? String(currentSong.song_id) : "" });
         } else if (op === "use") {
 
             const res = {
-                id: Number(a.id) || String(a.id || ""),
+                id: a.kind === "song" ? String(a.id || "").replace(/[^0-9]/g, "") : (Number(a.id) || String(a.id || "")),
                 title: createText(a.title, 120),
                 ms: Number(a.ms) || 0,
                 url: String(a.url || "").slice(0, 400)
             };
+
+            if (a.kind === "song") {
+                res.kind = "song";
+            }
 
             // The part chosen in the web view's trimmer
             const range = Number(a.end) > Number(a.start || 0) ? { start: Math.max(0, Number(a.start) || 0), end: Number(a.end) } : null;
@@ -83225,7 +83373,8 @@
         line-height: 1.4;
     }
 
-    #crPickTag {
+    #crPickTag,
+    #crPickFind {
         flex: 1 1 8em;
         min-width: 0;
         font: inherit;
@@ -88749,6 +88898,7 @@
             <div id="crPickTop">
                 <span id="crPickTitle"></span>
                 <select id="crPickTag" aria-label="Kind of music"></select>
+                <input id="crPickFind" type="search" placeholder="Find by title" aria-label="Find by title" autocomplete="off">
                 <button class="chip" id="crPickUpload" type="button">Upload a song</button>
                 <button class="chip" id="crPickMore" type="button">More</button>
                 <button class="chip" id="crPickBack" type="button">Back</button>
@@ -112654,6 +112804,9 @@
             crChip("Choose a song", function () {
                 openCrPick("resources");
             }, "crFill"),
+            crChip("Library song", function () {
+                openCrPick("library");
+            }, "crFill"),
             crChip("Upload a song", crUpload, "crFill"),
             ui.remixPart,
             ui.remixStyle,
@@ -113110,9 +113263,10 @@
     // An old phone without the song's file makes the whole song ready
     function crRemixPart(x, from) {
 
+        const song = x.kind === "song";
         const use = function (range) {
 
-            const ask = { op: "use", id: x.id, title: x.title, ms: x.ms, url: x.url || "" };
+            const ask = { op: "use", id: x.id, title: x.title, ms: x.ms, url: x.url || "", kind: song ? "song" : "" };
 
             if (range) {
 
@@ -113129,11 +113283,13 @@
             return;
         }
 
+        // A library song is read as itself, an uploaded one from Mureka's
+        // file host
         openTrimmer({
-            id: "upload " + x.id,
-            title: x.title || "Uploaded song",
+            id: song ? String(x.id) : "upload " + x.id,
+            title: x.title || (song ? "Song" : "Uploaded song"),
             durationMs: x.ms,
-            src: "https://static-cos.mureka.ai/" + String(x.url).replace(/^\/+/, "")
+            src: song && /^https?:/.test(String(x.url)) ? String(x.url) : "https://static-cos.mureka.ai/" + String(x.url).replace(/^\/+/, "")
         }, {
             min: 10,
             max: 480,
@@ -113581,7 +113737,7 @@
     function openCrPick(kind) {
 
         const titles = { prompts: "My styles", characters: "Characters", resources: "Songs uploaded to Mureka", sets: "Put them in",
-            templates: "Mureka's templates" };
+            templates: "Mureka's templates", library: "Songs in the library" };
         let last = "0";
         let more = false;
         let tag = "";
@@ -113592,6 +113748,7 @@
         $("crPickTitle").textContent = titles[kind] || "";
         $("crPickUpload").style.display = kind === "resources" ? "" : "none";
         $("crPickTag").style.display = kind === "templates" ? "" : "none";
+        $("crPickFind").style.display = kind === "library" ? "" : "none";
         $("crPickMore").style.display = "none";
         crPickNote("Asking Mureka");
         showCrPick(true);
@@ -113631,7 +113788,8 @@
             busy = true;
 
             const ask = kind === "resources" ? { op: "resources", last: last }
-                : kind === "templates" ? { op: "templates", tag: tag, last: last } : { op: kind };
+                : kind === "templates" ? { op: "templates", tag: tag, last: last }
+                    : kind === "library" ? { op: "librarySongs", find: $("crPickFind").value } : { op: kind };
 
             crAsk(ask).then(function (r) {
 
@@ -113659,7 +113817,8 @@
                     crPickNote(kind === "prompts" ? "No styles are saved on Mureka yet. Save style saves the style written now."
                         : kind === "characters" ? "No characters on Mureka yet. They are made on Mureka's own page."
                             : kind === "templates" ? "No templates of this kind"
-                                : "No songs uploaded to Mureka yet. Upload a song to remix it.");
+                                : kind === "library" ? ($("crPickFind").value.trim() ? "No song has those words in its title" : "No songs in the library yet")
+                                    : "No songs uploaded to Mureka yet. Upload a song to remix it.");
                 }
 
                 for (const x of list) {
@@ -113683,8 +113842,9 @@
                     } else {
 
                         const when = x.at ? new Date(x.at * 1000).toLocaleDateString() : "";
+                        const now = kind === "library" && r.playing && r.playing === x.id ? "Playing now" : "";
 
-                        rows.appendChild(crPickRow(x.title, [crTime(x.ms), when].filter(Boolean).join(", "), function () {
+                        rows.appendChild(crPickRow(x.title, [now, crTime(x.ms), when].filter(Boolean).join(", "), function () {
 
                             showCrPick(false);
                             crRemixPart(x, null);
@@ -113729,6 +113889,24 @@
                 read();
             }
         };
+
+        // Library songs found by their title as it is typed
+        if (kind === "library") {
+
+            let findTimer = 0;
+            const find = $("crPickFind");
+
+            find.value = "";
+            find.oninput = function () {
+
+                clearTimeout(findTimer);
+                findTimer = setTimeout(function () {
+
+                    last = "0";
+                    read();
+                }, 250);
+            };
+        }
 
         // The kinds of music to pick templates by, asked once a time
         if (kind === "templates") {
@@ -121787,7 +121965,8 @@
         trimUi.startInput.value = document.activeElement === trimUi.startInput ? trimUi.startInput.value : trimTimeText(tr.start);
         trimUi.endInput.value = document.activeElement === trimUi.endInput ? trimUi.endInput.value : trimTimeText(tr.end);
         trimUi.info.textContent = tr.pick
-            ? "Uploaded song " + trimTimeText(tr.duration) + " · Part " + trimTimeText(tr.end - tr.start)
+            ? (/^upload /.test(String(tr.song.id)) ? "Uploaded song " : "Song ") + trimTimeText(tr.duration)
+                + " · Part " + trimTimeText(tr.end - tr.start)
                 + " · A remix takes " + trimTimeText(tr.pick.min) + " to " + trimTimeText(tr.pick.max)
             : "ID " + tr.song.id + " · Original " + trimTimeText(tr.duration)
                 + " · New " + trimTimeText(tr.end - tr.start);
