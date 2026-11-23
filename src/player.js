@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.306";
+    const VERSION = "2.0.1.307";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -70286,7 +70286,10 @@
             lengthMs: lengths.indexOf(Number(x.lengthMs)) >= 0 ? Number(x.lengthMs) : 0,
             wildness: isFinite(wild) ? Math.max(0, Math.min(100, wild)) : 50,
             theme: createText(x.theme, CREATE_THEME_MAX),
-            playMode: x.playMode === "now" || x.playMode === "after" ? x.playMode : (x.playReady === true ? "now" : ""),
+            // Play when ready unless Do not play was chosen, a new form and
+            // one started over playing them as they come
+            playMode: x.playMode === "now" || x.playMode === "after" ? x.playMode
+                : (x.playMode === "" || x.playReady === false ? "" : "now"),
             setOn: x.setOn === true || (x.setOn === undefined && !!x.setId),
             setId: createText(x.setId, 40),
             setName: createText(x.setName, 80),
