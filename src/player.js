@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.303";
+    const VERSION = "2.0.1.304";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -70346,6 +70346,38 @@
         publishHostSoon();
     }
 
+    // A note telling of songs being made, looked at every few seconds: once
+    // the songs of its generation are listed and all ready, or after half an
+    // hour, it goes. Another note in its place ends the looking
+    const CREATE_NOTE_LOOK_MS = 3000;
+    const CREATE_NOTE_LONGEST_MS = 30 * 60000;
+
+    function createNoteFollow(note) {
+
+        setTimeout(function () {
+
+            if (createNote !== note) {
+                return;
+            }
+
+            const songs = cache.songs.filter(function (s) {
+                return String(s.feed_id) === note.feedId;
+            });
+            const ready = songs.length > 0 && songs.every(function (s) {
+                return isUsableSong(s) && !pendingSongs.has(String(s.song_id));
+            });
+
+            if (ready || Date.now() - note.at > CREATE_NOTE_LONGEST_MS) {
+
+                dbgLog("Create", "the note of the songs being made gone, " + (ready ? songs.length + " ready" : "half an hour on"));
+                setCreateNote("");
+                return;
+            }
+
+            createNoteFollow(note);
+        }, CREATE_NOTE_LOOK_MS);
+    }
+
     // Why Mureka said no, in words
     function createWhy(status, json) {
 
@@ -75184,7 +75216,15 @@
         setCreateNote(r.text, !r.ok);
 
         if (r.ok) {
+
             showToast(r.text, true);
+
+            // The note of songs being made goes once they are ready
+            if (r.feedId) {
+
+                createNote.feedId = String(r.feedId);
+                createNoteFollow(createNote);
+            }
         }
 
         return r;
