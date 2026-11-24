@@ -704,6 +704,55 @@
         opacity: 0.35;
     }
 
+    /* Media keys on this computer: a dot on the Bluetooth choice */
+    #sound button {
+        position: relative;
+    }
+
+    #soundPhone.keys::after {
+        content: "";
+        position: absolute;
+        top: 7px;
+        right: 9px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 2px var(--card);
+    }
+
+    #soundPhone.keys.on::after {
+        background: #111;
+        box-shadow: 0 0 0 2px var(--accent);
+    }
+
+    #btKeys {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-top: 12px;
+        padding: 14px 6px 4px;
+        border-top: 1px solid var(--line);
+        cursor: pointer;
+    }
+
+    #btKeys input {
+        flex: 0 0 auto;
+        width: 22px;
+        height: 22px;
+        margin: 0;
+        accent-color: var(--accent);
+        cursor: pointer;
+    }
+
+    #btKeys small {
+        display: block;
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 0.85em;
+        line-height: 1.35;
+    }
+
     #sound button.on {
         background: var(--accent);
         color: #000;
@@ -7955,6 +8004,7 @@
         </div>
         <div id="btNote"><span id="btNoteText"></span><button class="chip ring" id="btOn" type="button">Switch on</button><button class="chip" id="btHelper" type="button">Start the helper</button></div>
         <div id="btRows"></div>
+        <label id="btKeys"><input type="checkbox" id="btKeysBox"><span>Media keys on this computer<small>While this page is open, the computer's play, pause, skip and seek keys work the music on the phone, and the computer shows the playing song</small></span></label>
     </div>
 </div>
 <div id="crPop">
@@ -17322,8 +17372,24 @@
         }
 
         syncSession();
-        toast(on ? "The computer's media keys work the music on the Android device while this page is open" : "Media keys here off", "ok");
+        paintKeysHere();
+        paintPhoneSound(state);
+        toast(on ? "The computer's media keys work the music on the phone while this page is open" : "Media keys on this computer off", "ok");
     }
+
+    // The choice in the Bluetooth popup, and its dot on the Bluetooth
+    // choice of where the music plays
+    function paintKeysHere() {
+
+        $("btKeys").style.display = hasSession ? "" : "none";
+        $("btKeysBox").checked = keysHere;
+        $("soundPhone").classList.toggle("keys", hasSession && keysHere);
+    }
+
+    $("btKeysBox").addEventListener("change", function () {
+        setKeysHere($("btKeysBox").checked);
+    });
+    paintKeysHere();
 
     // The seeking actions, kept by name so they can be withdrawn and offered
     // again
@@ -28761,7 +28827,7 @@
 
         const bt = !!(s && s.btOut);
         const name = bt && s.btName ? String(s.btName) : "";
-        const key = bt + "|" + name;
+        const key = bt + "|" + name + "|" + (hasSession && keysHere);
         const btn = $("soundPhone");
 
         if (key === phoneSoundKey) {
@@ -28772,7 +28838,8 @@
         setIcon(btn, bt ? "bluetooth" : "phone");
         btn.dataset.name = bt ? (name ? "Bluetooth, " + name : "Bluetooth") : "Android device";
         btn.title = (bt ? "Music on Bluetooth" + (name ? ", " + name : "") : "Music on the Android device")
-            + ", tap again, hold or right click for its Bluetooth devices";
+            + ", tap again, hold or right click for its Bluetooth devices"
+            + (hasSession && keysHere ? ". Media keys on this computer are on" : "");
         btn.setAttribute("aria-label", btn.title);
     }
 
@@ -39009,18 +39076,6 @@
             close();
             openCreatePop();
         }, "accent"));
-
-        // The computer's media keys for the music on the Android device
-        if (hasSession) {
-
-            group("This browser");
-
-            box.appendChild(menuItem("play", keysHere ? "Media keys here: on" : "Media keys here", function () {
-
-                close();
-                setKeysHere(!keysHere);
-            }, keysHere ? "accent" : ""));
-        }
 
         group("Screen");
 
