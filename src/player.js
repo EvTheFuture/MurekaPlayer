@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.316";
+    const VERSION = "2.0.1.317";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -29605,8 +29605,59 @@
         paint();
         settingsRefreshers.push(paint);
 
+        const els = [label, status, row];
+
+        // The key for scripts on a computer, a media key bound to a command
+        // say. Shown and copied on a tap, never sent to a web view
+        if (typeof window.MurekaHost.webScriptKey === "function") {
+
+            const keyLabel = document.createElement("div");
+            const keyHint = document.createElement("div");
+            const keyRow = document.createElement("div");
+            const keyText = document.createElement("div");
+            const paintHint = function () {
+
+                const name = (String(settings.mdnsName || "murekaplayer").trim() || "murekaplayer") + ".local";
+
+                keyHint.textContent = "For a script on a computer, a key on the keyboard bound to a command say: sent as the header "
+                    + "X-Mureka-Key with a command to http://" + name + ":8080/cmd, it works with or without a password. "
+                    + "The mureka-cmd script in the player's files finds the Android device by that name, or by its last address.";
+            };
+
+            keyLabel.textContent = "Key for scripts";
+            keyLabel.style.cssText = "color:#bbb;margin-top:12px";
+            keyHint.style.cssText = "font-size:12px;line-height:1.4;color:#9a9aa2";
+            paintHint();
+            settingsRefreshers.push(paintHint);
+            keyRow.style.cssText = "display:flex;flex-wrap:wrap;gap:6px";
+            keyText.style.cssText = "font:12px monospace;color:#ddd;word-break:break-all;user-select:all;display:none";
+
+            const show = function (renew) {
+
+                const k = String(window.MurekaHost.webScriptKey(renew) || "");
+
+                keyText.textContent = k;
+                keyText.style.display = k ? "" : "none";
+
+                copyText(k).then(function (ok) {
+                    showToast(ok ? "The key for scripts copied" : "The key for scripts is shown under the buttons", true);
+                });
+            };
+
+            keyRow.appendChild(makeButton("Show and copy", "#333", "#fff", function () {
+                show(false);
+            }));
+            keyRow.appendChild(makeDangerButton("New key", function () {
+
+                askYesNo("Make a new key?", "Scripts with the old key stop working until they have the new one.", "New key", function () {
+                    show(true);
+                }, null, true);
+            }));
+            els.push(keyLabel, keyHint, keyRow, keyText);
+        }
+
         // The phone's own settings, never shown in the web view's copy
-        [label, status, row].forEach(function (el) {
+        els.forEach(function (el) {
             el.dataset.hostSkip = "1";
             page.appendChild(el);
         });

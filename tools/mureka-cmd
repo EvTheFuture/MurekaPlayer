@@ -1,0 +1,222 @@
+#!/bin/sh
+#
+# Send a command to Mureka Player on an Android device, from a key bound
+# in the window manager say. Finds the device on its own and remembers
+# where it was, so the next press is quick.
+#
+#   mureka-cmd toggle
+#   mureka-cmd sysVolumeNudge 1
+#   mureka-cmd sysVolumeStep -1
+#   mureka-cmd --find
+#
+# The key for scripts is set in the app (Settings, the web view, Key for
+# scripts), in MUREKA_KEY or in ~/.config/mureka-key.
+#
+# Where the device is looked for, the first that answers wins:
+#   MUREKA_HOST            an address or a name, port 8080 unless given
+#   the last address that answered (~/.cache/mureka-phone)
+#   MUREKA_NAME.local      murekaplayer.local unless set, by avahi-resolve
+#                          or the system's own lookup
+#   the default gateway    the device itself when on its hotspot
+#   MUREKA_HOSTS           more addresses, separated by spaces
+#   the local network      every address of each /24 the computer is on
+
+PORT_DEFAULT=8080
+NAME="${MUREKA_NAME:-murekaplayer}.local"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/mureka-phone"
+KEY_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/mureka-key"
+
+usage() {
+    echo "Usage: mureka-cmd COMMAND [ARG] | --find | --forget" >&2
+    exit 2
+}
+
+# The key, from the environment or the file, without spaces or line ends
+key() {
+
+    if [ -n "$MUREKA_KEY" ]; then
+        printf '%s' "$MUREKA_KEY"
+    elif [ -r "$KEY_FILE" ]; then
+        tr -d ' \t\r\n' < "$KEY_FILE"
+    fi
+}
+
+# host:port, with the default port added when none is given
+with_port() {
+
+    case "$1" in
+        *:*) printf '%s' "$1" ;;
+        *) printf '%s:%s' "$1" "$PORT_DEFAULT" ;;
+    esac
+}
+
+# True when Mureka Player answers at host:port
+is_player() {
+    curl -s --max-time "${2:-1}" -H "X-Mureka-Key: $(key)" "http://$1/ping" 2>/dev/null \
+        | grep -q '"player":"Mureka Player"'
+}
+
+# The address the .local name has, by Avahi or the system's lookup
+resolve_name() {
+
+    if command -v avahi-resolve >/dev/null 2>&1; then
+        avahi-resolve -4 -n "$NAME" 2>/dev/null | awk 'NR == 1 { print $2 }'
+        return
+    fi
+
+    getent hosts "$NAME" 2>/dev/null | awk 'NR == 1 { print $1 }'
+}
+
+# The default gateway, the device itself when the computer is on its
+# hotspot
+gateway() {
+    ip -4 route show default 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "via") { print $(i + 1); exit } }'
+}
+
+# Every address of each /24 the computer is on, asked at once
+sweep() {
+
+    tmp=$(mktemp -d) || return 1
+
+    for net in $(ip -4 -o addr show scope global 2>/dev/null | awk '{ split($4, a, "/"); print a[1] }' | cut -d. -f1-3 | sort -u); do
+
+        i=1
+
+        while [ "$i" -le 254 ]; do
+            (is_player "$net.$i:$PORT_DEFAULT" 2 && echo "$net.$i:$PORT_DEFAULT" > "$tmp/$net.$i") &
+            i=$((i + 1))
+        done
+    done
+
+    wait
+    found=$(cat "$tmp"/* 2>/dev/null | head -n 1)
+    rm -rf "$tmp"
+    printf '%s' "$found"
+}
+
+# Find the device, remember it and print host:port
+find_player() {
+
+    tries=""
+
+    if [ -n "$MUREKA_HOST" ]; then
+        tries="$(with_port "$MUREKA_HOST")"
+    fi
+
+    if [ -r "$CACHE" ]; then
+        tries="$tries $(cat "$CACHE")"
+    fi
+
+    for h in $tries; do
+
+        if is_player "$h"; then
+            remember "$h"
+            echo "$h"
+            return 0
+        fi
+    done
+
+    tries=""
+    ip=$(resolve_name)
+
+    if [ -n "$ip" ]; then
+        tries="$ip:$PORT_DEFAULT"
+    fi
+
+    gw=$(gateway)
+
+    if [ -n "$gw" ]; then
+        tries="$tries $gw:$PORT_DEFAULT"
+    fi
+
+    for h in $MUREKA_HOSTS; do
+        tries="$tries $(with_port "$h")"
+    done
+
+    for h in $tries; do
+
+        if is_player "$h"; then
+            remember "$h"
+            echo "$h"
+            return 0
+        fi
+    done
+
+    h=$(sweep)
+
+    if [ -n "$h" ]; then
+        remember "$h"
+        echo "$h"
+        return 0
+    fi
+
+    return 1
+}
+
+remember() {
+    mkdir -p "$(dirname "$CACHE")" && printf '%s\n' "$1" > "$CACHE"
+}
+
+# The argument as JSON: numbers, true, false, null and JSON itself as
+# they are, anything else as a string
+json_arg() {
+
+    case "$1" in
+        true | false | null | '{'* | '['* | '"'*) printf '%s' "$1" ;;
+        *)
+            if printf '%s' "$1" | grep -Eq '^-?[0-9]+(\.[0-9]+)?$'; then
+                printf '%s' "$1"
+            else
+                printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+            fi
+            ;;
+    esac
+}
+
+[ $# -ge 1 ] || usage
+
+case "$1" in
+    -h | --help) usage ;;
+    --forget)
+        rm -f "$CACHE"
+        exit 0
+        ;;
+    --find)
+        find_player || { echo "Mureka Player not found" >&2; exit 1; }
+        exit 0
+        ;;
+esac
+
+command -v curl >/dev/null 2>&1 || { echo "curl is needed" >&2; exit 1; }
+
+k=$(key)
+
+if [ -z "$k" ]; then
+    echo "No key: set MUREKA_KEY or put the key in $KEY_FILE" >&2
+    exit 1
+fi
+
+host=$(find_player) || { echo "Mureka Player not found" >&2; exit 1; }
+
+if [ $# -ge 2 ]; then
+    body="{\"cmd\":\"$1\",\"arg\":$(json_arg "$2")}"
+else
+    body="{\"cmd\":\"$1\"}"
+fi
+
+answer=$(curl -s --max-time 3 -w '\n%{http_code}' -H "X-Mureka-Key: $k" \
+    -H "Content-Type: application/json" --data "$body" "http://$host/cmd")
+code=$(printf '%s' "$answer" | tail -n 1)
+
+if [ "$code" = "401" ]; then
+    echo "The key was not accepted, copy it again from the app" >&2
+    exit 1
+fi
+
+if [ "$code" != "200" ]; then
+
+    # The address may have changed since, so look again next time
+    rm -f "$CACHE"
+    echo "Mureka Player answered $code" >&2
+    exit 1
+fi

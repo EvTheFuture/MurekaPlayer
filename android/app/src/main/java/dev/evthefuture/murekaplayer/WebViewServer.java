@@ -725,6 +725,7 @@ final class WebViewServer {
             String origin = null;
             String contentType = null;
             String cookie = null;
+            String scriptKey = null;
             String fetchSite = null;
             String fetchMode = null;
             String line;
@@ -775,6 +776,11 @@ final class WebViewServer {
 
                     case "cookie":
                         cookie = value.trim();
+                        break;
+
+                    // A script's key, for /cmd and /ping
+                    case "x-mureka-key":
+                        scriptKey = value.trim().toLowerCase(Locale.ROOT);
                         break;
 
                     // Whether the browser says another site made the request
@@ -850,7 +856,12 @@ final class WebViewServer {
             boolean pageItself = "GET".equals(method) && ("/".equals(path) || "/index.html".equals(path));
             boolean signing = "POST".equals(method) && ("/login".equals(path) || "/logout".equals(path));
 
-            if (!appScreen && !pageItself && !signing && WebLogin.on(context) && !WebLogin.valid(context, key)) {
+            // A script with the key may send commands and ask whether this
+            // is the player, nothing else
+            boolean script = (("POST".equals(method) && "/cmd".equals(path)) || ("GET".equals(method) && "/ping".equals(path)))
+                && WebLogin.scriptValid(context, scriptKey);
+
+            if (!appScreen && !pageItself && !signing && !script && WebLogin.on(context) && !WebLogin.valid(context, key)) {
 
                 send(out, 401, "application/json", bytes("{\"login\":true}"));
                 return;
@@ -934,6 +945,11 @@ final class WebViewServer {
 
             if ("GET".equals(method) && ("/".equals(path) || "/index.html".equals(path))) {
                 send(out, 200, "text/html; charset=utf-8", page != null ? page : bytes("webview.html missing"));
+            } else if ("GET".equals(method) && "/ping".equals(path)) {
+
+                // This is the player, for a script finding the phone's
+                // address; with the key it says the key is right
+                send(out, 200, "application/json", bytes("{\"player\":\"Mureka Player\",\"key\":" + script + "}"));
             } else if ("GET".equals(method) && "/state".equals(path)) {
 
                 // With since, the answer waits for the next state, so a tap
@@ -2004,10 +2020,22 @@ final class WebViewServer {
 
                 int dir = Integer.signum(arg instanceof Number ? ((Number) arg).intValue() : number(String.valueOf(arg), 0));
 
-                if (dir != 0) {
+                // With more steps off, a whole step, so a script's key does
+                // something either way
+                if (dir != 0 && SysVolume.finePct() >= 0) {
                     SysVolume.nudge(dir, false);
+                } else if (dir != 0) {
+                    SysVolume.step(dir);
                 }
 
+                send(out, 200, "application/json", bytes("{\"ok\":true}"));
+                return;
+            }
+
+            // One of Android's own steps up or down, more steps or not
+            if ("sysVolumeStep".equals(cmd)) {
+
+                SysVolume.step(Integer.signum(arg instanceof Number ? ((Number) arg).intValue() : number(String.valueOf(arg), 0)));
                 send(out, 200, "application/json", bytes("{\"ok\":true}"));
                 return;
             }

@@ -1239,6 +1239,59 @@ final class SysVolume {
         }
     }
 
+    // One of Android's own steps up or down, for a script: with more steps
+    // on, to the next whole step's percent, else the phone's step itself
+    static void step(int dir) {
+
+        if (audio == null || dir == 0) {
+            return;
+        }
+
+        try {
+
+            int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+
+            if (fineOn && max > 0) {
+
+                float to = -1;
+
+                for (int k = 0; k <= max; k++) {
+
+                    float pct = stepPct(k, max);
+
+                    if (dir > 0 && pct > finePct + 0.001f) {
+
+                        to = pct;
+                        break;
+                    }
+
+                    if (dir < 0 && pct < finePct - 0.001f) {
+                        to = pct;
+                    }
+                }
+
+                if (to >= 0) {
+
+                    finePct = to;
+                    applyFine();
+                }
+
+                return;
+            }
+
+            int now = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+            int want = Math.max(0, Math.min(max, now + Integer.signum(dir)));
+
+            if (want != now) {
+
+                audio.setStreamVolume(AudioManager.STREAM_MUSIC, want, 0);
+                Hub.setVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC), max);
+            }
+        } catch (RuntimeException e) {
+            // Do not disturb can refuse the change, so leave it as it was
+        }
+    }
+
     // More steps as they are, for the stats: on, the level, the step and
     // its dB, the player's share in dB and the step size set by hand
     static String fineInfo() {

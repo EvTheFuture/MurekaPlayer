@@ -1310,6 +1310,13 @@ final class PlayerWeb {
             }
         }
 
+        // The key for scripts, made when first asked for, a new one when
+        // renew
+        @JavascriptInterface
+        public String webScriptKey(boolean renew) {
+            return onMureka && appContext != null ? WebLogin.scriptKey(appContext, renew) : "";
+        }
+
         @JavascriptInterface
         public void signOutWebBrowsers() {
 

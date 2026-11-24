@@ -271,6 +271,45 @@ final class WebLogin {
         }
     }
 
+    // A key for scripts on the computer, a media key bound to a command
+    // say: sent in an X-Mureka-Key header it lets in /cmd and /ping, with
+    // or without a password. Kept apart from the password and its browser
+    // keys, so changing or removing the password leaves it as it is. Made
+    // when first shown, and anew when asked
+    private static final String SCRIPT_PREFS = "web_script";
+    private static final String SCRIPT_KEY = "key";
+
+    static synchronized String scriptKey(Context c, boolean renew) {
+
+        SharedPreferences p = c.getApplicationContext().getSharedPreferences(SCRIPT_PREFS, Context.MODE_PRIVATE);
+        String key = p.getString(SCRIPT_KEY, "");
+
+        if (renew || !key.matches("[0-9a-f]{32}")) {
+
+            byte[] raw = new byte[16];
+
+            RANDOM.nextBytes(raw);
+            key = hex(raw);
+            p.edit().putString(SCRIPT_KEY, key).commit();
+            Hub.note("Web view", renew ? "a new key for scripts was made, the old one no longer works" : "a key for scripts was made");
+        }
+
+        return key;
+    }
+
+    // Whether a script's key is the one made, never true before one is
+    static boolean scriptValid(Context c, String key) {
+
+        if (key == null || !key.matches("[0-9a-f]{32}")) {
+            return false;
+        }
+
+        String made = c.getApplicationContext().getSharedPreferences(SCRIPT_PREFS, Context.MODE_PRIVATE).getString(SCRIPT_KEY, "");
+
+        return made.length() == 32 && MessageDigest.isEqual(made.getBytes(StandardCharsets.US_ASCII),
+            key.getBytes(StandardCharsets.US_ASCII));
+    }
+
     // The key in a Cookie header, null without one
     static String fromCookie(String header) {
         return cookieValue(header, COOKIE);
