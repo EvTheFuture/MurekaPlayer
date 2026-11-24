@@ -17214,6 +17214,117 @@
     const hasSession = !inPage && "mediaSession" in navigator;
     let sessionKey = "";
 
+    // Media keys here while the music plays on the Android device: a
+    // browser shows its media session only while it plays something itself,
+    // so a near silent sound plays here meanwhile, a very low hum at a
+    // thousandth of the loudest, far under hearing yet not counted as
+    // silence, ten seconds long as a browser leaves shorter sounds out. The
+    // choice is kept in this browser
+    let keysHere = false;
+    let keysEl = null;
+
+    try {
+        keysHere = localStorage.getItem("murekaMediaKeys") === "1";
+    } catch (e) {
+        // Off then
+    }
+
+    function keysActive() {
+        return hasSession && keysHere && !!state && !!state.id && !sessionHere();
+    }
+
+    // The near silent sound, made once: 10 s at 8 kHz, 16 bits, one channel
+    function keysSound() {
+
+        const rate = 8000;
+        const count = rate * 10;
+        const buf = new ArrayBuffer(44 + count * 2);
+        const v = new DataView(buf);
+        const text = function (at, s) {
+
+            for (let i = 0; i < s.length; i++) {
+                v.setUint8(at + i, s.charCodeAt(i));
+            }
+        };
+
+        text(0, "RIFF");
+        v.setUint32(4, 36 + count * 2, true);
+        text(8, "WAVE");
+        text(12, "fmt ");
+        v.setUint32(16, 16, true);
+        v.setUint16(20, 1, true);
+        v.setUint16(22, 1, true);
+        v.setUint32(24, rate, true);
+        v.setUint32(28, rate * 2, true);
+        v.setUint16(32, 2, true);
+        v.setUint16(34, 16, true);
+        text(36, "data");
+        v.setUint32(40, count * 2, true);
+
+        for (let i = 0; i < count; i++) {
+            v.setInt16(44 + i * 2, Math.round(32 * Math.sin(2 * Math.PI * 30 * i / rate)), true);
+        }
+
+        return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+    }
+
+    // Played while wanted, else stopped. A browser lets it start only after
+    // a tap or a key on the page, so it is tried again on the next one
+    function syncKeys() {
+
+        if (!keysActive()) {
+
+            if (keysEl && !keysEl.paused) {
+                keysEl.pause();
+            }
+
+            return;
+        }
+
+        if (!keysEl) {
+
+            keysEl = new Audio();
+            keysEl.loop = true;
+            keysEl.src = keysSound();
+        }
+
+        if (keysEl.paused) {
+
+            keysEl.play().then(function () {
+                dbgLog("Media", "media keys here: the near silent sound plays, the browser shows the music on the Android device");
+            }, function () {
+                // Waits for a tap or a key
+            });
+        }
+    }
+
+    document.addEventListener("pointerdown", function () {
+
+        if (keysActive() && (!keysEl || keysEl.paused)) {
+            syncKeys();
+        }
+    }, true);
+    document.addEventListener("keydown", function () {
+
+        if (keysActive() && (!keysEl || keysEl.paused)) {
+            syncKeys();
+        }
+    }, true);
+
+    function setKeysHere(on) {
+
+        keysHere = on;
+
+        try {
+            localStorage.setItem("murekaMediaKeys", on ? "1" : "0");
+        } catch (e) {
+            // Only for this visit
+        }
+
+        syncSession();
+        toast(on ? "The computer's media keys work the music on the Android device while this page is open" : "Media keys here off", "ok");
+    }
+
     // The seeking actions, kept by name so they can be withdrawn and offered
     // again
     const SEEK_ACTIONS = {
@@ -17260,7 +17371,7 @@
         // music elsewhere
         sessionAction("pause", function () {
 
-            if (!sessionHere()) {
+            if (!sessionHere() && !keysActive()) {
 
                 dbgLog("Media", "a pause from the system left alone, the music is not here");
                 return;
@@ -17296,9 +17407,12 @@
 
         const s = state;
 
+        syncKeys();
+
         // Nothing is shown to the system while the music is elsewhere, so it
-        // never takes this browser for the player
-        if (!s || !s.id || !sessionHere()) {
+        // never takes this browser for the player, unless media keys here
+        // are asked for
+        if (!s || !s.id || (!sessionHere() && !keysActive())) {
 
             if (navigator.mediaSession.playbackState !== "none" || sessionKey) {
 
@@ -38895,6 +39009,18 @@
             close();
             openCreatePop();
         }, "accent"));
+
+        // The computer's media keys for the music on the Android device
+        if (hasSession) {
+
+            group("This browser");
+
+            box.appendChild(menuItem("play", keysHere ? "Media keys here: on" : "Media keys here", function () {
+
+                close();
+                setKeysHere(!keysHere);
+            }, keysHere ? "accent" : ""));
+        }
 
         group("Screen");
 
