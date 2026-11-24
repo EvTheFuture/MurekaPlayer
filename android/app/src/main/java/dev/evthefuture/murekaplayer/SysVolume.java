@@ -30,6 +30,7 @@ import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 
 import java.util.HashMap;
 import java.util.Iterator;
@@ -72,6 +73,14 @@ final class SysVolume {
     private static float finePct = -1;
     private static int fineStep = -1;
     private static float fineGain = 1;
+
+    // A while after the app starts or the sound goes to another output, a
+    // step that changed is not the volume buttons: Android or the speaker
+    // putting back a step of its own, often a higher one, which taken as the
+    // new level made the sound louder after each restart. The level kept is
+    // put back instead
+    private static final long FINE_KEEP_MS = 15000;
+    private static long fineKeepUntil;
 
     // The phone's volume buttons moving more steps by 1%, and the level
     // in dB of the step in use, for the stats and the volume popup
@@ -242,6 +251,8 @@ final class SysVolume {
         readStepSizes(prefs.getString("step_sizes", "{}"));
 
         if (fineOn && finePct >= 0) {
+
+            fineKeepUntil = SystemClock.uptimeMillis() + FINE_KEEP_MS;
             applyFine();
         } else {
             fineOn = false;
@@ -286,6 +297,24 @@ final class SysVolume {
             int level = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
             int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
             boolean moved = refreshOutput();
+
+            // Another output: the level kept goes on there, and a step it
+            // brings with it a moment later is put back too
+            if (moved && fineOn && !training && max > 0) {
+                fineKeepUntil = SystemClock.uptimeMillis() + FINE_KEEP_MS;
+            }
+
+            // Soon after a start or a change of output, a step that changed
+            // is Android's or the speaker's: the level kept is put back
+            if (fineOn && !training && fineStep >= 0 && level != fineStep && max > 0 && stepWaiting < 0
+                && SystemClock.uptimeMillis() < fineKeepUntil) {
+
+                Hub.note("Volume", "step " + level + " put in by Android or the speaker, back to step " + fineStep
+                    + " for the " + Math.round(finePct * 10) / 10f + "% kept");
+                applyFine();
+                Hub.setVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC), max);
+                return;
+            }
 
             // Moved by the phone's buttons, or night mode: more steps go on
             // from that step, the player at its whole sound. Not while a
