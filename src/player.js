@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.313";
+    const VERSION = "2.0.1.314";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -75833,6 +75833,20 @@
             .replace(/\{[a-z_]+\}/g, "").trim();
     }
 
+    // A page of Mureka's a notification leads to, a win's reward say: only
+    // one of Mureka's own over https
+    function msgLink(v) {
+
+        try {
+
+            const u = new URL(String(v || ""));
+
+            return u.protocol === "https:" && /(^|\.)mureka\.ai$/i.test(u.hostname) ? u.href : "";
+        } catch (e) {
+            return "";
+        }
+    }
+
     // One notification as the lists show it
     function msgOf(item, readIds) {
 
@@ -75888,6 +75902,7 @@
             song: song ? songId : "",
             title: title,
             cover: cover,
+            link: msgLink(item.redirect_url),
             unreadThere: item.is_read === false,
             read: readIds.has(id) || (item.is_read !== false && at <= (msgKnownAt() === null ? Infinity : msgKnownAt()))
         };
@@ -76050,6 +76065,16 @@
         // where it is kept. On someone else's song, its comments open all
         // the same, read by the song's id
         if (!song) {
+
+            // A page of Mureka's it leads to opens in a tab of its own
+            if (m.link && !m.video && !m.on) {
+
+                if (showComments) {
+                    window.open(m.link, "_blank", "noopener");
+                }
+
+                return { url: m.link };
+            }
 
             if (m.video && showComments) {
                 window.open(m.video, "_blank", "noopener");
@@ -77081,7 +77106,7 @@
             }
 
             box.title = m.song ? (/^(1002|2003|2004)$/.test(m.code) ? "Open the comments" : "Play the song")
-                : m.video ? "Watch the video" : m.on ? "Open the comments" : "Mark read";
+                : m.video ? "Watch the video" : m.on ? "Open the comments" : m.link ? "Open it on Mureka" : "Mark read";
             box.addEventListener("click", function () {
                 msgOpen(m.id, true);
             });
@@ -115928,7 +115953,7 @@
             box.setAttribute("role", "button");
             box.tabIndex = 0;
             box.title = m.song ? (/^(1002|2003|2004)$/.test(m.code) ? "Open the comments" : "Play the song")
-                : m.video ? "Watch the video" : m.on ? "Open the comments" : "Mark read";
+                : m.video ? "Watch the video" : m.on ? "Open the comments" : m.link ? "Open it on Mureka" : "Mark read";
             disc.className = "nfDisc";
             disc.title = kind.name;
             disc.style.color = kind.color;
@@ -116020,9 +116045,21 @@
 
             const open = function () {
 
+                // A page of Mureka's it leads to, opened while the tap still
+                // counts, as a browser opens no tab once an answer came
+                const leads = !m.song && !m.video && !m.on && !!m.link;
+
+                if (leads) {
+                    window.open(m.link, "_blank", "noopener");
+                }
+
                 m.read = true;
                 paint();
                 crAsk({ op: "msgOpen", id: m.id }).then(function (r) {
+
+                    if (leads) {
+                        return;
+                    }
 
                     // A video plays here, in this browser
                     if (r && r.ok && r.comments && r.comments.url) {
