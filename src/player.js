@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.308";
+    const VERSION = "2.0.1.309";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -23892,6 +23892,43 @@
             };
 
             el.addEventListener("playing", up);
+
+            // Loaded again at its start rather than played on where it
+            // stood, as Play after a pause does: played on after its pause
+            // and move, Safari went on unheard for half a second while the
+            // play head ran on with the engine, the waveform that far ahead
+            // of the sound for the whole song
+            const src = audio.src;
+
+            if (src) {
+
+                const waitMs = /^https?:/i.test(src) ? 8000 : 3000;
+
+                playOnReloading = true;
+                clearTimeout(playOnReloadTimer);
+                playOnReloadTimer = setTimeout(function () {
+                    playOnReloading = false;
+                }, waitMs);
+                movingLag = 0;
+                movingTo = startAt;
+                clearTimeout(movingTimer);
+                movingTimer = setTimeout(function () {
+                    movingTo = null;
+                }, waitMs);
+
+                try {
+
+                    audio.removeAttribute("src");
+                    audio.load();
+                    pendingSeek = startAt;
+                    audio.src = src;
+                } catch (e) {
+
+                    movingTo = null;
+                    playOnReloading = false;
+                    dbgLog("Audio", "the new song could not be loaded again to play on, played on where it stood: " + errText(e));
+                }
+            }
 
             const go = audio.play();
 
