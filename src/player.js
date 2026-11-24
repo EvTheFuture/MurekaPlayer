@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.312";
+    const VERSION = "2.0.1.313";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -103485,8 +103485,51 @@
         volNudge(by);
     }
 
+    // A whole step of the phone up or down with more steps on, past the
+    // finer levels between: the next level a step of Android's sits at, as
+    // the app puts each on a whole percent. Without more steps a step is a
+    // step already
+    function volWholeStep(by) {
+
+        const t = volTarget();
+        const now = volLevel();
+
+        if (t.kind !== "phone" || !volFineOn() || now < 0) {
+
+            volNudge(by);
+            return;
+        }
+
+        const max = state.volMax;
+        let to = -1;
+
+        for (let k = 0; k <= max; k++) {
+
+            const pct = Math.round(100 * k / max);
+
+            if (by > 0 && pct > now + 0.001) {
+
+                to = pct;
+                break;
+            }
+
+            if (by < 0 && pct < now - 0.001) {
+                to = pct;
+            }
+        }
+
+        if (to < 0) {
+
+            volSay();
+            return;
+        }
+
+        volSetFor(t, to, true);
+        volSay();
+    }
+
     // Volume from the keyboard, also the keys a media keyboard sends
-    function volumeKey(key, onSlider) {
+    function volumeKey(key, onSlider, shift) {
 
         if (key === "m" || key === "AudioVolumeMute") {
 
@@ -103506,6 +103549,13 @@
                 openVol();
             }
 
+            return true;
+        }
+
+        // With Shift the arrows go a whole step of the phone
+        if (shift && (key === "ArrowUp" || key === "ArrowDown")) {
+
+            volWholeStep(key === "ArrowUp" ? 1 : -1);
             return true;
         }
 
@@ -117928,6 +117978,7 @@
         ["Shift \u2192", "One second before the end of the song"],
         ["\u2190 / \u2192", "Back or ahead 10 seconds"],
         ["\u2191 / \u2193", "Volume up or down, + and - too"],
+        ["Shift \u2191 / \u2193", "Volume a whole step of the phone up or down, past the finer levels between"],
         ["m", "Sound off, and back to where it was"],
         ["v", "The volume slider, open or close"],
         ["s", "Shuffle on or off"],
@@ -118884,7 +118935,7 @@
         // key is the field's own
         const onSlider = typing && !!target.classList && target.classList.contains("volSlider");
 
-        if ((!typing || onSlider) && volumeKey(ev.key, onSlider)) {
+        if ((!typing || onSlider) && volumeKey(ev.key, onSlider, ev.shiftKey)) {
 
             ev.preventDefault();
             return;
