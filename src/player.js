@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.310";
+    const VERSION = "2.0.1.311";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -88091,12 +88091,37 @@
         font-size: 12px;
     }
 
+    /* The name and version beside the buttons, the badges on a line of
+       their own under them the whole width across, wrapping onto a second
+       line should they still not fit */
     html.phone #phoneHead {
-        display: block;
+        display: contents;
+    }
+
+    html.phone #phoneTitle {
         grid-column: 1;
+        grid-row: 1;
         min-width: 0;
-        overflow: hidden;
         font-weight: 600;
+    }
+
+    html.phone #phoneSub {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        margin: 2px 0 4px;
+    }
+
+    html.phone #phoneSub #badges {
+        flex-wrap: wrap;
+        row-gap: 4px;
+    }
+
+    html.phone #volBtn,
+    html.phone #sound,
+    html.phone #pageBack,
+    html.phone #actionsBtn,
+    html.phone #settingsBtn {
+        grid-row: 1;
     }
 
     /* The name and version on one line, the account signed in on the phone
