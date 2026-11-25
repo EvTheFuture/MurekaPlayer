@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.321";
+    const VERSION = "2.0.1.322";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -88414,7 +88414,6 @@
 
     html.phone #closeBrowse,
     html.phone #clearSearch,
-    html.phone #filterRow,
     html.phone #filterText,
     html.phone .chipGroup,
     html.phone .chipSep {
@@ -88477,36 +88476,120 @@
         flex: 0 1 auto;
     }
 
-    /* The count inside the search field at its right end, dimmed, where
-       it stays in sight while typing. The field leaves room for it */
-    html.phone #browseTop {
+    /* The bar over the list as the mobile player's: the view and the
+       filter, the counts at its right, a tap opens the views and the
+       filters over the list */
+    #viewBar,
+    #viewMenu {
+        display: none;
+    }
+
+    html.phone #browse {
         position: relative;
     }
 
-    html.phone #counts {
-        position: absolute;
-        right: 10px;
-        top: 50%;
-        transform: translateY(-50%);
-        max-width: 55%;
+    html.phone #viewBar {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        min-height: 30px;
+        box-sizing: border-box;
+        padding: 7px 10px;
+        border: none;
+        border-radius: 6px;
+        background: #333;
+        color: #fff;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    html.phone #viewBarText {
+        flex: 0 1 auto;
+        min-width: 0;
         overflow: hidden;
-        color: var(--muted);
-        font-size: 12px;
-        white-space: nowrap;
         text-overflow: ellipsis;
-        pointer-events: none;
+        white-space: nowrap;
+        text-align: left;
     }
 
-    /* The views and the filter in one row, the line under it where the
-       count used to be */
-    html.phone #viewRow {
-        padding-bottom: 6px;
-        border-bottom: 1px solid var(--line);
+    html.phone #counts {
+        flex: 0 0 auto;
+        margin-left: auto;
+        padding-left: 8px;
+        color: #888;
+        font-size: 12px;
+        font-weight: 400;
+        white-space: nowrap;
     }
 
-    /* The list right under that line, no gap between them */
-    html.phone #browse > #viewRow {
-        margin-bottom: -6px;
+    html.phone #browse.viewOpen #viewMenu {
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        z-index: 20;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 8px;
+        border: 1px solid #3a3a42;
+        border-radius: 10px;
+        background: #26262c;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+    }
+
+    /* Three across, the icon over the name, as the mobile player's */
+    html.phone #viewMenu .chipRow {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+        overflow: visible;
+        padding: 0;
+        border: none;
+    }
+
+    html.phone #viewMenu .chip,
+    html.phone #viewMenu #fromDock #fromLine {
+        flex-direction: column;
+        justify-content: center;
+        gap: 4px;
+        width: 100%;
+        height: auto;
+        min-height: 52px;
+        padding: 8px 4px;
+        border: none;
+        border-radius: 6px;
+        background: #333;
+        color: #fff;
+        font-size: 11px;
+        font-weight: 600;
+        text-align: center;
+    }
+
+    /* Loading and making songs are in the actions and the controls, and
+       the library and its filters have their own chips here */
+    html.phone #viewMenu #fromDock,
+    html.phone #viewMenu #libBtn,
+    html.phone #viewMenu #browseCreate {
+        display: none !important;
+    }
+
+    html.phone #viewMenu .chip .ico {
+        width: 18px;
+        height: 18px;
+    }
+
+    html.phone #viewMenu .chip.on {
+        background: var(--accent);
+        color: #000;
+    }
+
+    /* The list under the bar, its line at the top */
+    html.phone #rowsWrap {
+        border-top: 1px solid var(--line);
+        padding-top: 6px;
     }
 
     /* Playing from as the first chip of the row, scrolling with the views
@@ -88976,6 +89059,8 @@
         <button class="chip iconOnly" id="clearSearch" type="button" data-icon="clearSearch" aria-label="Clear the search" title="Clear the search"></button>
         <button class="chip iconOnly" id="closeBrowse" type="button" data-icon="close" aria-label="Close" title="Close"></button>
     </div>
+    <button id="viewBar" type="button" title="Choose the list view and filter"><span id="viewBarText"></span></button>
+    <div id="viewMenu"></div>
     <div class="chipRow" id="viewRow">
         <span id="fromDock"></span>
         <span class="chipGroup">List</span>
@@ -101658,6 +101743,8 @@
         // away in the queue
         const onMureka = listView === "mureka";
 
+        paintViewBar(null);
+
         for (const id of ["libSep", "libGroup", "libBtn"]) {
             $(id).style.display = onMureka ? "" : "none";
         }
@@ -103304,8 +103391,72 @@
         return parts.join(" \u00B7 ");
     }
 
+    // On a phone the bar over the list as the mobile player's: the view,
+    // the vocals and the smart filters, and the counts at its right. A tap
+    // opens the views and the filters under it
+    let viewBarFilters = null;
+
+    function paintViewBar(f) {
+
+        viewBarFilters = f || viewBarFilters;
+
+        const g = viewBarFilters || {};
+        let view = "Mureka";
+
+        if (listView === "queue") {
+            view = "Queue";
+        } else if (listView === "sets") {
+            view = "Sets";
+        } else if (listSort === "alpha" || listSort === "alphaDesc") {
+            view = listSort === "alphaDesc" ? "Z-A" : "A-Z";
+        } else if (listSort === "starsUp" || listSort === "starsDown") {
+            view = "Stars";
+        } else if (listSort === "playsUp" || listSort === "playsDown") {
+            view = "Plays";
+        }
+
+        const parts = [view, g.vocals === "vocal" ? "Vocals" : (g.vocals === "instrumental" ? "Instrumental" : "All")];
+
+        if (g.smart && g.smartAny && g.smartText) {
+            parts.push(g.smartText.split(", ").join("  \u00B7  "));
+        }
+
+        $("viewBarText").textContent = parts.join("  \u00B7  ") + "  \u25BE";
+    }
+
+    function setViewMenu(open) {
+
+        $("browse").classList.toggle("viewOpen", open);
+
+        if (open) {
+            $("viewMenu").style.top = ($("viewBar").offsetTop + $("viewBar").offsetHeight + 4) + "px";
+        }
+    }
+
+    $("viewBar").addEventListener("click", function (ev) {
+
+        ev.stopPropagation();
+        setViewMenu(!$("browse").classList.contains("viewOpen"));
+    });
+
+    // A choice in it, or a tap anywhere else, closes it
+    $("viewMenu").addEventListener("click", function (ev) {
+
+        if (ev.target.closest && ev.target.closest("button")) {
+            setViewMenu(false);
+        }
+    });
+
+    document.addEventListener("click", function (ev) {
+
+        if ($("browse").classList.contains("viewOpen") && !(ev.target.closest && ev.target.closest("#viewMenu"))) {
+            setViewMenu(false);
+        }
+    });
+
     function paintFrom(f) {
 
+        paintViewBar(f);
         fromLine.setText(fromSummary(f));
         $("fromLine").classList.toggle("narrowed", fromNarrowed(f));
 
@@ -119277,7 +119428,9 @@
         { id: "status", parent: "nowTop", first: true },
         { id: "rateRow", parent: "main", before: null },
         { id: "fromLine", parent: "fromDock", first: true },
-        { id: "counts", parent: "browseTop", before: null }
+        { id: "counts", parent: "viewBar", before: null },
+        { id: "viewRow", parent: "viewMenu", before: null },
+        { id: "filterRow", parent: "viewMenu", before: null }
     ];
     const phoneHomes = {};
     let phoneArranged = false;
