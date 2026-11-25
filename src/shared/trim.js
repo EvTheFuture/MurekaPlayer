@@ -473,3 +473,411 @@
             g.fillRect(c, top, 1, Math.max(1, bottom - top));
         }
     }
+
+    // How far off an end a finger may land on the whole song and still
+    // pick it up, and how far a drag in the close up goes before it is
+    // known to be sideways or up or down
+    const TRIM_TOUCH_REACH = 32;
+    const TRIM_DECIDE_PX = 8;
+
+    // Play a stretch of the song. Past the end of the kept part it never
+    // goes, and with the fade on the last two seconds fade out as Mureka's
+    // trimmed song will
+    // What started it, for the button that is ringed while it plays: start,
+    // end, all, or kept for Play and a tap on a waveform
+    function trimPlay(from, to, mode, retried) {
+
+        trimStop();
+
+        if (tr) {
+            tr.paused = null;
+        }
+
+        if (!tr || !tr.buffer || !trimCtx || to - from < 0.02) {
+            return;
+        }
+
+        // Heard somewhere else, the web view's preview on the phone say
+        if (trimPlayElsewhere(from, to, mode)) {
+            return;
+        }
+
+        // The engine stopped moving last time, or Safari interrupted it for
+        // other sound, a new one is made while the tap still allows sound
+        if (trimCtxStuck || trimCtx.state === "interrupted") {
+
+            trimNewCtx();
+
+            if (!trimCtx) {
+                return;
+            }
+        }
+
+        trimWake();
+
+        if (trimStuckShown) {
+
+            trimStuckShown = false;
+            trimStatus("");
+        }
+
+        const at = trimCtx.currentTime + 0.05;
+        const fade = trimFades() && to >= tr.end - 0.0005;
+        const fadeFrom = fade ? Math.max(from, tr.end - TRIM_FADE) : to;
+        const pieces = [];
+
+        // The part before the fade, straight from the song
+        if (fadeFrom - from > 0.001) {
+
+            const main = trimCtx.createBufferSource();
+
+            main.buffer = tr.buffer;
+            main.connect(trimCtx.destination);
+            main.start(at, from, fadeFrom - from);
+            main.stop(at + (fadeFrom - from));
+            pieces.push(main);
+        }
+
+        // The fading second, starting on the sample where the rest ends
+        if (fade) {
+
+            const tail = trimCtx.createBufferSource();
+
+            tail.buffer = trimFadeTail(fadeFrom, tr.end);
+            tail.connect(trimCtx.destination);
+            tail.start(at + (fadeFrom - from));
+            tail.stop(at + (tr.end - from));
+            pieces.push(tail);
+        }
+
+        const last = pieces[pieces.length - 1];
+
+        last.onended = function () {
+
+            if (!tr || tr.src !== last) {
+                return;
+            }
+
+            tr.src = null;
+            tr.pieces = [];
+
+            if (tr.loop) {
+                trimPlayEnd();
+            } else {
+                trimPaint();
+            }
+        };
+
+        tr.src = last;
+        tr.pieces = pieces;
+        tr.playFrom = from;
+        tr.playTo = to;
+        tr.playAt = at;
+        tr.playMode = mode || "kept";
+        trimAnimate();
+        trimPaint();
+
+        // Safari can leave the engine standing still, the button lit and
+        // nothing heard, until the page is left and opened again. Its clock
+        // not moving gives that away: it is made again and the piece played
+        // once more, and should that not help either, the next tap makes it
+        const ctx = trimCtx;
+        const clock = ctx.currentTime;
+
+        setTimeout(function () {
+
+            if (!tr || tr.src !== last || trimCtx !== ctx || ctx.currentTime - clock > 0.1) {
+                return;
+            }
+
+            dbgLog("Trim", "the sound did not start, the engine was " + ctx.state + ", made again");
+            trimStop();
+            trimCtxStuck = true;
+
+            if (!retried) {
+
+                trimPlay(from, to, mode, true);
+                return;
+            }
+
+            trimStuckShown = true;
+            trimStatus("The sound did not start, tap play again");
+        }, 700);
+    }
+
+    // Dragging and tapping on the two waveforms
+    function installTrimPointers() {
+
+        const overview = trimUi.overview;
+        const detail = trimUi.detail;
+
+        // The time under a pointer on the whole song
+        const overviewTime = function (ev) {
+
+            const r = overview.getBoundingClientRect();
+
+            return Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)) * tr.duration;
+        };
+
+        overview.addEventListener("pointerdown", function (ev) {
+
+            if (!tr || !tr.mono) {
+                return;
+            }
+
+            const r = overview.getBoundingClientRect();
+            const px = function (t) {
+                return r.left + t / tr.duration * r.width;
+            };
+            const nearStart = Math.abs(ev.clientX - px(tr.start));
+            const nearEnd = Math.abs(ev.clientX - px(tr.end));
+
+            // A finger is wider than a mouse, so it may land further off
+            const reach = ev.pointerType === "mouse" ? 18 : TRIM_TOUCH_REACH;
+            const grab = Math.min(nearStart, nearEnd) <= reach ? (nearStart < nearEnd ? "start" : "end") : null;
+
+            dbgLog("Trim", "press on the whole song, " + (grab ? "the " + grab + " picked up" : "away from the ends, "
+                + Math.round(Math.min(nearStart, nearEnd)) + " px off"));
+
+            tr.drag = { where: "overview", edge: grab, x: ev.clientX, moved: false };
+
+            if (grab) {
+
+                tr.edge = grab;
+                trimUi.edgeRow.paint();
+            }
+
+            overview.setPointerCapture(ev.pointerId);
+            ev.preventDefault();
+        });
+
+        overview.addEventListener("pointermove", function (ev) {
+
+            if (!tr || !tr.drag || tr.drag.where !== "overview") {
+                return;
+            }
+
+            if (Math.abs(ev.clientX - tr.drag.x) > 4) {
+                tr.drag.moved = true;
+            }
+
+            if (tr.drag.edge && tr.drag.moved) {
+
+                trimSetEdge(tr.drag.edge, overviewTime(ev));
+                tr.viewC = tr[tr.drag.edge];
+                trimPaint();
+            }
+        });
+
+        const overviewUp = function (ev) {
+
+            if (!tr || !tr.drag || tr.drag.where !== "overview") {
+                return;
+            }
+
+            const drag = tr.drag;
+
+            tr.drag = null;
+
+            // A tap away from the ends plays from there to the end
+            if (!drag.moved) {
+
+                const t = overviewTime(ev);
+
+                if (t < tr.end - 0.05) {
+                    trimPlay(Math.max(t, 0), tr.end, "kept");
+                }
+            }
+        };
+
+        overview.addEventListener("pointerup", overviewUp);
+        overview.addEventListener("pointercancel", function () {
+
+            if (tr) {
+                tr.drag = null;
+            }
+        });
+
+        // In the close up the chosen end follows the finger, as finely as
+        // the zoom allows, and the view centres on it again when let go
+        detail.addEventListener("pointerdown", function (ev) {
+
+            if (!tr || !tr.mono) {
+                return;
+            }
+
+            tr.drag = { where: "detail", x: ev.clientX, y: ev.clientY, from: tr[tr.edge], gain: tr.waveGain, moved: false, mode: "" };
+            detail.setPointerCapture(ev.pointerId);
+            ev.preventDefault();
+        });
+
+        detail.addEventListener("pointermove", function (ev) {
+
+            if (!tr || !tr.drag || tr.drag.where !== "detail") {
+                return;
+            }
+
+            const r = detail.getBoundingClientRect();
+            const perPx = TRIM_ZOOMS[tr.zoom] / r.width;
+            const moveX = ev.clientX - tr.drag.x;
+            const moveY = ev.clientY - tr.drag.y;
+
+            // The first clear move decides: sideways moves the end, clearly
+            // up or down magnifies the height. A finger wobbles, so only a
+            // move mostly up or down counts as one
+            if (!tr.drag.moved && Math.max(Math.abs(moveX), Math.abs(moveY)) > TRIM_DECIDE_PX) {
+
+                tr.drag.moved = true;
+                tr.drag.mode = Math.abs(moveY) > 2 * Math.abs(moveX) ? "gain" : "edge";
+                dbgLog("Trim", tr.drag.mode === "gain" ? "dragged up or down in the close up, the height" : "dragged sideways in the close up, the " + tr.edge);
+            }
+
+            if (tr.drag.mode === "gain") {
+                trimSetGain(tr.drag.gain * Math.pow(2, -moveY / TRIM_GAIN_PX));
+            } else if (tr.drag.mode === "edge") {
+
+                trimSetEdge(tr.edge, tr.drag.from + moveX * perPx);
+                trimPaint();
+            }
+        });
+
+        detail.addEventListener("pointerup", function (ev) {
+
+            if (!tr || !tr.drag || tr.drag.where !== "detail") {
+                return;
+            }
+
+            const drag = tr.drag;
+
+            tr.drag = null;
+
+            if (drag.moved) {
+
+                if (drag.mode === "edge") {
+
+                    tr.viewC = tr[tr.edge];
+                    trimPaint();
+                }
+
+                return;
+            }
+
+            // A tap plays from the time tapped to the end
+            const r = detail.getBoundingClientRect();
+            const t = tr.viewC - TRIM_ZOOMS[tr.zoom] / 2 + (ev.clientX - r.left) / r.width * TRIM_ZOOMS[tr.zoom];
+
+            if (t < tr.end - 0.02) {
+                trimPlay(Math.max(tr.start, Math.max(0, t)), tr.end, "kept");
+            }
+        });
+
+        detail.addEventListener("pointercancel", function () {
+
+            if (tr) {
+                tr.drag = null;
+            }
+        });
+
+        // A wheel or a touch pad zooms the close up
+        detail.addEventListener("wheel", function (ev) {
+
+            if (!tr) {
+                return;
+            }
+
+            ev.preventDefault();
+
+            // With Shift held the wheel magnifies the height, some browsers
+            // then turn the wheel sideways
+            if (ev.shiftKey) {
+
+                const d = ev.deltaY || ev.deltaX;
+
+                if (d) {
+                    trimSetGain(tr.waveGain * (d < 0 ? 2 : 0.5));
+                }
+
+                return;
+            }
+
+            trimUi.zoomBy(ev.deltaY < 0 ? 1 : -1);
+        }, { passive: false });
+
+        // Two fingers on the close up pinch it: apart zooms in, together
+        // zooms out, a step each time their distance grows or shrinks by a
+        // third. An end the first finger was already dragging goes back to
+        // where it was, since a pinch was meant
+        const fingers = new Map();
+        let pinchBase = 0;
+
+        const fingerGap = function () {
+
+            const pts = Array.from(fingers.values());
+
+            return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        };
+
+        detail.addEventListener("pointerdown", function (ev) {
+
+            if (!tr || ev.pointerType !== "touch") {
+                return;
+            }
+
+            fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+
+            if (fingers.size !== 2) {
+                return;
+            }
+
+            if (tr.drag && tr.drag.where === "detail" && tr.drag.moved) {
+
+                if (tr.drag.mode === "gain") {
+                    trimSetGain(tr.drag.gain);
+                } else {
+
+                    trimSetEdge(tr.edge, tr.drag.from);
+                    trimPaint();
+                }
+            }
+
+            tr.drag = null;
+            pinchBase = fingerGap();
+        });
+
+        detail.addEventListener("pointermove", function (ev) {
+
+            if (!fingers.has(ev.pointerId)) {
+                return;
+            }
+
+            fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+
+            if (!tr || fingers.size !== 2 || pinchBase <= 0) {
+                return;
+            }
+
+            const gap = fingerGap();
+
+            if (gap > pinchBase * TRIM_PINCH_STEP) {
+
+                trimUi.zoomBy(1);
+                pinchBase = gap;
+            } else if (gap < pinchBase / TRIM_PINCH_STEP) {
+
+                trimUi.zoomBy(-1);
+                pinchBase = gap;
+            }
+        });
+
+        const fingerUp = function (ev) {
+
+            fingers.delete(ev.pointerId);
+
+            if (fingers.size < 2) {
+                pinchBase = 0;
+            }
+        };
+
+        detail.addEventListener("pointerup", fingerUp);
+        detail.addEventListener("pointercancel", fingerUp);
+    }

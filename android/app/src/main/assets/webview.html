@@ -13201,6 +13201,302 @@
     }
     // END SHARED marquee
 
+    // BEGIN SHARED cover
+    // Written by embed-webview.sh from src/shared/cover.js. Change that
+    // file and run make embed, never the lines up to END SHARED cover
+    // The cover editor both the player and the web view open for a new
+    // cover: the picture in a square to move and zoom, by finger, mouse or
+    // slider, then Set cover or Cancel. Shared by the player and the web
+    // view's page, src/shared/cover.js, inlined into both by
+    // embed-webview.sh
+
+    function buildCoverEditor(img, url, title, host, big, done) {
+
+        const W = img.naturalWidth;
+        const H = img.naturalHeight;
+
+        if (W < 1 || H < 1) {
+
+            URL.revokeObjectURL(url);
+            done(null, "the picture is empty");
+            return;
+        }
+
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const head = document.createElement("div");
+        const view = document.createElement("div");
+        const slider = document.createElement("input");
+        const hint = document.createElement("div");
+        const row = document.createElement("div");
+        const pts = new Map();
+
+        back.style.cssText = "position:" + (host === document.body ? "fixed" : "absolute") + ";inset:0;"
+            + "background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;"
+            + "z-index:300;font-size:" + (big ? "clamp(16px,1.8vw,24px)" : "14px");
+        card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:12px;padding:14px;"
+            + "display:flex;flex-direction:column;gap:10px;align-items:stretch;color:#fff";
+        head.textContent = "New cover for \"" + (title || "Untitled") + "\"";
+        head.style.cssText = "font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+        view.style.cssText = "position:relative;overflow:hidden;touch-action:none;background:#000;"
+            + "border-radius:8px;cursor:grab;align-self:center;box-shadow:inset 0 0 0 1px " + ACCENT;
+        img.draggable = false;
+        img.alt = "";
+        img.style.cssText = "position:absolute;left:0;top:0;max-width:none;max-height:none;"
+            + "transform-origin:0 0;pointer-events:none;user-select:none;width:" + W + "px;height:" + H + "px";
+        slider.type = "range";
+        slider.min = "0";
+        slider.max = "1000";
+        slider.value = "0";
+        slider.style.cssText = "width:100%;accent-color:" + ACCENT;
+        hint.textContent = "Drag to move it. Pinch, scroll or slide to zoom.";
+        hint.style.cssText = "color:#aaa;font-size:0.85em";
+        row.style.cssText = "display:flex;gap:8px";
+
+        const button = function (text, bg, fg, fn) {
+
+            const b = document.createElement("button");
+
+            b.type = "button";
+            b.textContent = text;
+            b.style.cssText = "flex:1;padding:0.6em 1em;border:none;border-radius:10px;font:inherit;"
+                + "font-weight:600;cursor:pointer;background:" + bg + ";color:" + fg;
+            b.addEventListener("click", fn);
+
+            return b;
+        };
+
+        // The square's side on screen, and the picture's scale and place in it
+        let side = 0;
+        let minScale = 1;
+        let maxScale = 8;
+        let scale = 1;
+        let tx = 0;
+        let ty = 0;
+        let pinch = null;
+        let placed = false;
+
+        const clamp = function () {
+
+            scale = Math.max(minScale, Math.min(maxScale, scale));
+            tx = Math.min(0, Math.max(side - W * scale, tx));
+            ty = Math.min(0, Math.max(side - H * scale, ty));
+        };
+
+        const paint = function () {
+
+            img.style.transform = "translate(" + tx + "px," + ty + "px) scale(" + scale + ")";
+            slider.value = String(Math.round(Math.log(scale / minScale) / Math.log(maxScale / minScale) * 1000));
+        };
+
+        // Zoomed around a point in the square, which stays where it is
+        const zoomAt = function (wanted, cx, cy) {
+
+            const next = Math.max(minScale, Math.min(maxScale, wanted));
+
+            tx = cx - (cx - tx) * next / scale;
+            ty = cy - (cy - ty) * next / scale;
+            scale = next;
+            clamp();
+            paint();
+        };
+
+        // The square as large as the room allows. A change of the room keeps
+        // the same part of the picture in it
+        const layout = function () {
+
+            const room = Math.min(back.clientWidth - 64, back.clientHeight - (big ? 260 : 210));
+            const next = Math.max(140, Math.min(big ? 560 : 420, room));
+
+            if (side > 0) {
+
+                const k = next / side;
+
+                tx *= k;
+                ty *= k;
+                scale *= k;
+            }
+
+            side = next;
+            view.style.width = side + "px";
+            view.style.height = side + "px";
+            minScale = side / Math.min(W, H);
+
+            // Down to a sixteenth of the shorter side, never below 64 pixels
+            maxScale = Math.max(minScale * 1.01, side / Math.max(64, Math.min(W, H) / 16));
+
+            // At first the whole shorter side fills the square, centred
+            if (!placed) {
+
+                placed = true;
+                scale = minScale;
+                tx = (side - W * scale) / 2;
+                ty = (side - H * scale) / 2;
+            }
+
+            clamp();
+            paint();
+        };
+
+        const at = function (ev) {
+
+            const r = view.getBoundingClientRect();
+
+            return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+        };
+
+        const twoFingers = function () {
+
+            const a = Array.from(pts.values());
+            const dx = a[1].x - a[0].x;
+            const dy = a[1].y - a[0].y;
+
+            return { d: Math.max(1, Math.sqrt(dx * dx + dy * dy)), x: (a[0].x + a[1].x) / 2, y: (a[0].y + a[1].y) / 2 };
+        };
+
+        view.addEventListener("pointerdown", function (ev) {
+
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            try {
+                view.setPointerCapture(ev.pointerId);
+            } catch (e) {
+                // Moves are still heard while over the square
+            }
+
+            pts.set(ev.pointerId, at(ev));
+            pinch = pts.size === 2 ? twoFingers() : null;
+            view.style.cursor = "grabbing";
+        });
+
+        view.addEventListener("pointermove", function (ev) {
+
+            if (!pts.has(ev.pointerId)) {
+                return;
+            }
+
+            const was = pts.get(ev.pointerId);
+            const now = at(ev);
+
+            pts.set(ev.pointerId, now);
+
+            if (pts.size === 1) {
+
+                tx += now.x - was.x;
+                ty += now.y - was.y;
+                clamp();
+                paint();
+            } else if (pts.size === 2 && pinch) {
+
+                const p = twoFingers();
+
+                tx += p.x - pinch.x;
+                ty += p.y - pinch.y;
+                zoomAt(scale * p.d / pinch.d, p.x, p.y);
+                pinch = p;
+            }
+        });
+
+        const lift = function (ev) {
+
+            pts.delete(ev.pointerId);
+            pinch = pts.size === 2 ? twoFingers() : null;
+
+            if (pts.size === 0) {
+                view.style.cursor = "grab";
+            }
+        };
+
+        view.addEventListener("pointerup", lift);
+        view.addEventListener("pointercancel", lift);
+
+        view.addEventListener("wheel", function (ev) {
+
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            const p = at(ev);
+
+            zoomAt(scale * Math.exp(-ev.deltaY * 0.0015), p.x, p.y);
+        }, { passive: false });
+
+        slider.addEventListener("input", function () {
+            zoomAt(minScale * Math.pow(maxScale / minScale, Number(slider.value) / 1000), side / 2, side / 2);
+        });
+
+        let offBack = null;
+
+        const close = function (result) {
+
+            window.removeEventListener("resize", layout);
+            back.remove();
+            URL.revokeObjectURL(url);
+
+            if (offBack) {
+                offBack();
+            }
+
+            done(result);
+        };
+
+        // The web view's Back and Escape close it as Cancel does
+        if (typeof onBack === "function") {
+
+            offBack = onBack(function () {
+                close(null);
+            });
+        }
+
+        const finish = function () {
+
+            const s = Math.max(1, Math.min(Math.min(W, H), Math.round(side / scale)));
+            const x = Math.max(0, Math.min(W - s, Math.round(-tx / scale)));
+            const y = Math.max(0, Math.min(H - s, Math.round(-ty / scale)));
+
+            close({ x: x, y: y, s: s, w: W, h: H });
+        };
+
+        row.appendChild(button("Cancel", "#444", "#fff", function () {
+            close(null);
+        }));
+        row.appendChild(button("Set cover", ACCENT, "#000", finish));
+
+        // The page's own keys never hear what is pressed here
+        back.addEventListener("keydown", function (ev) {
+
+            ev.stopPropagation();
+
+            if (ev.key === "Escape") {
+                close(null);
+            } else if (ev.key === "Enter" && ev.target !== slider) {
+                finish();
+            }
+        });
+
+        back.addEventListener("click", function (ev) {
+
+            ev.stopPropagation();
+
+            if (ev.target === back) {
+                close(null);
+            }
+        });
+
+        view.appendChild(img);
+        card.appendChild(head);
+        card.appendChild(view);
+        card.appendChild(slider);
+        card.appendChild(hint);
+        card.appendChild(row);
+        back.appendChild(card);
+        host.appendChild(back);
+        window.addEventListener("resize", layout);
+        layout();
+        slider.focus();
+    }
+    // END SHARED cover
+
     // BEGIN SHARED chat
     // Written by embed-webview.sh from src/shared/chat.js. Change that
     // file and run make embed, never the lines up to END SHARED chat
@@ -35677,288 +35973,6 @@
         field.focus();
     }
 
-    function buildCoverEditor(img, url, title, host, big, done) {
-
-        const W = img.naturalWidth;
-        const H = img.naturalHeight;
-
-        if (W < 1 || H < 1) {
-
-            URL.revokeObjectURL(url);
-            done(null, "the picture is empty");
-            return;
-        }
-
-        const back = document.createElement("div");
-        const card = document.createElement("div");
-        const head = document.createElement("div");
-        const view = document.createElement("div");
-        const slider = document.createElement("input");
-        const hint = document.createElement("div");
-        const row = document.createElement("div");
-        const pts = new Map();
-
-        back.style.cssText = "position:" + (host === document.body ? "fixed" : "absolute") + ";inset:0;"
-            + "background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;"
-            + "z-index:300;font-size:" + (big ? "clamp(16px,1.8vw,24px)" : "14px");
-        card.style.cssText = "background:#26262c;border:1px solid #3a3a42;border-radius:12px;padding:14px;"
-            + "display:flex;flex-direction:column;gap:10px;align-items:stretch;color:#fff";
-        head.textContent = "New cover for \"" + (title || "Untitled") + "\"";
-        head.style.cssText = "font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
-        view.style.cssText = "position:relative;overflow:hidden;touch-action:none;background:#000;"
-            + "border-radius:8px;cursor:grab;align-self:center;box-shadow:inset 0 0 0 1px #48e1eb";
-        img.draggable = false;
-        img.alt = "";
-        img.style.cssText = "position:absolute;left:0;top:0;max-width:none;max-height:none;"
-            + "transform-origin:0 0;pointer-events:none;user-select:none;width:" + W + "px;height:" + H + "px";
-        slider.type = "range";
-        slider.min = "0";
-        slider.max = "1000";
-        slider.value = "0";
-        slider.style.cssText = "width:100%;accent-color:#48e1eb";
-        hint.textContent = "Drag to move it. Pinch, scroll or slide to zoom.";
-        hint.style.cssText = "color:#aaa;font-size:0.85em";
-        row.style.cssText = "display:flex;gap:8px";
-
-        const button = function (text, bg, fg, fn) {
-
-            const b = document.createElement("button");
-
-            b.type = "button";
-            b.textContent = text;
-            b.style.cssText = "flex:1;padding:0.6em 1em;border:none;border-radius:10px;font:inherit;"
-                + "font-weight:600;cursor:pointer;background:" + bg + ";color:" + fg;
-            b.addEventListener("click", fn);
-
-            return b;
-        };
-
-        // The square's side on screen, and the picture's scale and place in it
-        let side = 0;
-        let minScale = 1;
-        let maxScale = 8;
-        let scale = 1;
-        let tx = 0;
-        let ty = 0;
-        let pinch = null;
-        let placed = false;
-
-        const clamp = function () {
-
-            scale = Math.max(minScale, Math.min(maxScale, scale));
-            tx = Math.min(0, Math.max(side - W * scale, tx));
-            ty = Math.min(0, Math.max(side - H * scale, ty));
-        };
-
-        const paint = function () {
-
-            img.style.transform = "translate(" + tx + "px," + ty + "px) scale(" + scale + ")";
-            slider.value = String(Math.round(Math.log(scale / minScale) / Math.log(maxScale / minScale) * 1000));
-        };
-
-        // Zoomed around a point in the square, which stays where it is
-        const zoomAt = function (wanted, cx, cy) {
-
-            const next = Math.max(minScale, Math.min(maxScale, wanted));
-
-            tx = cx - (cx - tx) * next / scale;
-            ty = cy - (cy - ty) * next / scale;
-            scale = next;
-            clamp();
-            paint();
-        };
-
-        // The square as large as the room allows. A change of the room keeps
-        // the same part of the picture in it
-        const layout = function () {
-
-            const room = Math.min(back.clientWidth - 64, back.clientHeight - (big ? 260 : 210));
-            const next = Math.max(140, Math.min(big ? 560 : 420, room));
-
-            if (side > 0) {
-
-                const k = next / side;
-
-                tx *= k;
-                ty *= k;
-                scale *= k;
-            }
-
-            side = next;
-            view.style.width = side + "px";
-            view.style.height = side + "px";
-            minScale = side / Math.min(W, H);
-
-            // Down to a sixteenth of the shorter side, never below 64 pixels
-            maxScale = Math.max(minScale * 1.01, side / Math.max(64, Math.min(W, H) / 16));
-
-            // At first the whole shorter side fills the square, centred
-            if (!placed) {
-
-                placed = true;
-                scale = minScale;
-                tx = (side - W * scale) / 2;
-                ty = (side - H * scale) / 2;
-            }
-
-            clamp();
-            paint();
-        };
-
-        const at = function (ev) {
-
-            const r = view.getBoundingClientRect();
-
-            return { x: ev.clientX - r.left, y: ev.clientY - r.top };
-        };
-
-        const twoFingers = function () {
-
-            const a = Array.from(pts.values());
-            const dx = a[1].x - a[0].x;
-            const dy = a[1].y - a[0].y;
-
-            return { d: Math.max(1, Math.sqrt(dx * dx + dy * dy)), x: (a[0].x + a[1].x) / 2, y: (a[0].y + a[1].y) / 2 };
-        };
-
-        view.addEventListener("pointerdown", function (ev) {
-
-            ev.preventDefault();
-            ev.stopPropagation();
-
-            try {
-                view.setPointerCapture(ev.pointerId);
-            } catch (e) {
-                // Moves are still heard while over the square
-            }
-
-            pts.set(ev.pointerId, at(ev));
-            pinch = pts.size === 2 ? twoFingers() : null;
-            view.style.cursor = "grabbing";
-        });
-
-        view.addEventListener("pointermove", function (ev) {
-
-            if (!pts.has(ev.pointerId)) {
-                return;
-            }
-
-            const was = pts.get(ev.pointerId);
-            const now = at(ev);
-
-            pts.set(ev.pointerId, now);
-
-            if (pts.size === 1) {
-
-                tx += now.x - was.x;
-                ty += now.y - was.y;
-                clamp();
-                paint();
-            } else if (pts.size === 2 && pinch) {
-
-                const p = twoFingers();
-
-                tx += p.x - pinch.x;
-                ty += p.y - pinch.y;
-                zoomAt(scale * p.d / pinch.d, p.x, p.y);
-                pinch = p;
-            }
-        });
-
-        const lift = function (ev) {
-
-            pts.delete(ev.pointerId);
-            pinch = pts.size === 2 ? twoFingers() : null;
-
-            if (pts.size === 0) {
-                view.style.cursor = "grab";
-            }
-        };
-
-        view.addEventListener("pointerup", lift);
-        view.addEventListener("pointercancel", lift);
-
-        view.addEventListener("wheel", function (ev) {
-
-            ev.preventDefault();
-            ev.stopPropagation();
-
-            const p = at(ev);
-
-            zoomAt(scale * Math.exp(-ev.deltaY * 0.0015), p.x, p.y);
-        }, { passive: false });
-
-        slider.addEventListener("input", function () {
-            zoomAt(minScale * Math.pow(maxScale / minScale, Number(slider.value) / 1000), side / 2, side / 2);
-        });
-
-        let offBack = null;
-
-        const close = function (result) {
-
-            window.removeEventListener("resize", layout);
-            back.remove();
-            URL.revokeObjectURL(url);
-
-            if (offBack) {
-                offBack();
-            }
-
-            done(result);
-        };
-
-        offBack = onBack(function () {
-            close(null);
-        });
-
-        const finish = function () {
-
-            const s = Math.max(1, Math.min(Math.min(W, H), Math.round(side / scale)));
-            const x = Math.max(0, Math.min(W - s, Math.round(-tx / scale)));
-            const y = Math.max(0, Math.min(H - s, Math.round(-ty / scale)));
-
-            close({ x: x, y: y, s: s, w: W, h: H });
-        };
-
-        row.appendChild(button("Cancel", "#444", "#fff", function () {
-            close(null);
-        }));
-        row.appendChild(button("Set cover", "#48e1eb", "#000", finish));
-
-        // The page's own keys never hear what is pressed here
-        back.addEventListener("keydown", function (ev) {
-
-            ev.stopPropagation();
-
-            if (ev.key === "Escape") {
-                close(null);
-            } else if (ev.key === "Enter" && ev.target !== slider) {
-                finish();
-            }
-        });
-
-        back.addEventListener("click", function (ev) {
-
-            ev.stopPropagation();
-
-            if (ev.target === back) {
-                close(null);
-            }
-        });
-
-        view.appendChild(img);
-        card.appendChild(head);
-        card.appendChild(view);
-        card.appendChild(slider);
-        card.appendChild(hint);
-        card.appendChild(row);
-        back.appendChild(card);
-        host.appendChild(back);
-        window.addEventListener("resize", layout);
-        layout();
-        slider.focus();
-    }
-
     // The picture to the phone. The phone's toasts say how it goes, this
     // says it only when the phone could not be reached
     function sendCover(m, file, crop) {
@@ -40484,6 +40498,414 @@
             g.fillRect(c, top, 1, Math.max(1, bottom - top));
         }
     }
+
+    // How far off an end a finger may land on the whole song and still
+    // pick it up, and how far a drag in the close up goes before it is
+    // known to be sideways or up or down
+    const TRIM_TOUCH_REACH = 32;
+    const TRIM_DECIDE_PX = 8;
+
+    // Play a stretch of the song. Past the end of the kept part it never
+    // goes, and with the fade on the last two seconds fade out as Mureka's
+    // trimmed song will
+    // What started it, for the button that is ringed while it plays: start,
+    // end, all, or kept for Play and a tap on a waveform
+    function trimPlay(from, to, mode, retried) {
+
+        trimStop();
+
+        if (tr) {
+            tr.paused = null;
+        }
+
+        if (!tr || !tr.buffer || !trimCtx || to - from < 0.02) {
+            return;
+        }
+
+        // Heard somewhere else, the web view's preview on the phone say
+        if (trimPlayElsewhere(from, to, mode)) {
+            return;
+        }
+
+        // The engine stopped moving last time, or Safari interrupted it for
+        // other sound, a new one is made while the tap still allows sound
+        if (trimCtxStuck || trimCtx.state === "interrupted") {
+
+            trimNewCtx();
+
+            if (!trimCtx) {
+                return;
+            }
+        }
+
+        trimWake();
+
+        if (trimStuckShown) {
+
+            trimStuckShown = false;
+            trimStatus("");
+        }
+
+        const at = trimCtx.currentTime + 0.05;
+        const fade = trimFades() && to >= tr.end - 0.0005;
+        const fadeFrom = fade ? Math.max(from, tr.end - TRIM_FADE) : to;
+        const pieces = [];
+
+        // The part before the fade, straight from the song
+        if (fadeFrom - from > 0.001) {
+
+            const main = trimCtx.createBufferSource();
+
+            main.buffer = tr.buffer;
+            main.connect(trimCtx.destination);
+            main.start(at, from, fadeFrom - from);
+            main.stop(at + (fadeFrom - from));
+            pieces.push(main);
+        }
+
+        // The fading second, starting on the sample where the rest ends
+        if (fade) {
+
+            const tail = trimCtx.createBufferSource();
+
+            tail.buffer = trimFadeTail(fadeFrom, tr.end);
+            tail.connect(trimCtx.destination);
+            tail.start(at + (fadeFrom - from));
+            tail.stop(at + (tr.end - from));
+            pieces.push(tail);
+        }
+
+        const last = pieces[pieces.length - 1];
+
+        last.onended = function () {
+
+            if (!tr || tr.src !== last) {
+                return;
+            }
+
+            tr.src = null;
+            tr.pieces = [];
+
+            if (tr.loop) {
+                trimPlayEnd();
+            } else {
+                trimPaint();
+            }
+        };
+
+        tr.src = last;
+        tr.pieces = pieces;
+        tr.playFrom = from;
+        tr.playTo = to;
+        tr.playAt = at;
+        tr.playMode = mode || "kept";
+        trimAnimate();
+        trimPaint();
+
+        // Safari can leave the engine standing still, the button lit and
+        // nothing heard, until the page is left and opened again. Its clock
+        // not moving gives that away: it is made again and the piece played
+        // once more, and should that not help either, the next tap makes it
+        const ctx = trimCtx;
+        const clock = ctx.currentTime;
+
+        setTimeout(function () {
+
+            if (!tr || tr.src !== last || trimCtx !== ctx || ctx.currentTime - clock > 0.1) {
+                return;
+            }
+
+            dbgLog("Trim", "the sound did not start, the engine was " + ctx.state + ", made again");
+            trimStop();
+            trimCtxStuck = true;
+
+            if (!retried) {
+
+                trimPlay(from, to, mode, true);
+                return;
+            }
+
+            trimStuckShown = true;
+            trimStatus("The sound did not start, tap play again");
+        }, 700);
+    }
+
+    // Dragging and tapping on the two waveforms
+    function installTrimPointers() {
+
+        const overview = trimUi.overview;
+        const detail = trimUi.detail;
+
+        // The time under a pointer on the whole song
+        const overviewTime = function (ev) {
+
+            const r = overview.getBoundingClientRect();
+
+            return Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)) * tr.duration;
+        };
+
+        overview.addEventListener("pointerdown", function (ev) {
+
+            if (!tr || !tr.mono) {
+                return;
+            }
+
+            const r = overview.getBoundingClientRect();
+            const px = function (t) {
+                return r.left + t / tr.duration * r.width;
+            };
+            const nearStart = Math.abs(ev.clientX - px(tr.start));
+            const nearEnd = Math.abs(ev.clientX - px(tr.end));
+
+            // A finger is wider than a mouse, so it may land further off
+            const reach = ev.pointerType === "mouse" ? 18 : TRIM_TOUCH_REACH;
+            const grab = Math.min(nearStart, nearEnd) <= reach ? (nearStart < nearEnd ? "start" : "end") : null;
+
+            dbgLog("Trim", "press on the whole song, " + (grab ? "the " + grab + " picked up" : "away from the ends, "
+                + Math.round(Math.min(nearStart, nearEnd)) + " px off"));
+
+            tr.drag = { where: "overview", edge: grab, x: ev.clientX, moved: false };
+
+            if (grab) {
+
+                tr.edge = grab;
+                trimUi.edgeRow.paint();
+            }
+
+            overview.setPointerCapture(ev.pointerId);
+            ev.preventDefault();
+        });
+
+        overview.addEventListener("pointermove", function (ev) {
+
+            if (!tr || !tr.drag || tr.drag.where !== "overview") {
+                return;
+            }
+
+            if (Math.abs(ev.clientX - tr.drag.x) > 4) {
+                tr.drag.moved = true;
+            }
+
+            if (tr.drag.edge && tr.drag.moved) {
+
+                trimSetEdge(tr.drag.edge, overviewTime(ev));
+                tr.viewC = tr[tr.drag.edge];
+                trimPaint();
+            }
+        });
+
+        const overviewUp = function (ev) {
+
+            if (!tr || !tr.drag || tr.drag.where !== "overview") {
+                return;
+            }
+
+            const drag = tr.drag;
+
+            tr.drag = null;
+
+            // A tap away from the ends plays from there to the end
+            if (!drag.moved) {
+
+                const t = overviewTime(ev);
+
+                if (t < tr.end - 0.05) {
+                    trimPlay(Math.max(t, 0), tr.end, "kept");
+                }
+            }
+        };
+
+        overview.addEventListener("pointerup", overviewUp);
+        overview.addEventListener("pointercancel", function () {
+
+            if (tr) {
+                tr.drag = null;
+            }
+        });
+
+        // In the close up the chosen end follows the finger, as finely as
+        // the zoom allows, and the view centres on it again when let go
+        detail.addEventListener("pointerdown", function (ev) {
+
+            if (!tr || !tr.mono) {
+                return;
+            }
+
+            tr.drag = { where: "detail", x: ev.clientX, y: ev.clientY, from: tr[tr.edge], gain: tr.waveGain, moved: false, mode: "" };
+            detail.setPointerCapture(ev.pointerId);
+            ev.preventDefault();
+        });
+
+        detail.addEventListener("pointermove", function (ev) {
+
+            if (!tr || !tr.drag || tr.drag.where !== "detail") {
+                return;
+            }
+
+            const r = detail.getBoundingClientRect();
+            const perPx = TRIM_ZOOMS[tr.zoom] / r.width;
+            const moveX = ev.clientX - tr.drag.x;
+            const moveY = ev.clientY - tr.drag.y;
+
+            // The first clear move decides: sideways moves the end, clearly
+            // up or down magnifies the height. A finger wobbles, so only a
+            // move mostly up or down counts as one
+            if (!tr.drag.moved && Math.max(Math.abs(moveX), Math.abs(moveY)) > TRIM_DECIDE_PX) {
+
+                tr.drag.moved = true;
+                tr.drag.mode = Math.abs(moveY) > 2 * Math.abs(moveX) ? "gain" : "edge";
+                dbgLog("Trim", tr.drag.mode === "gain" ? "dragged up or down in the close up, the height" : "dragged sideways in the close up, the " + tr.edge);
+            }
+
+            if (tr.drag.mode === "gain") {
+                trimSetGain(tr.drag.gain * Math.pow(2, -moveY / TRIM_GAIN_PX));
+            } else if (tr.drag.mode === "edge") {
+
+                trimSetEdge(tr.edge, tr.drag.from + moveX * perPx);
+                trimPaint();
+            }
+        });
+
+        detail.addEventListener("pointerup", function (ev) {
+
+            if (!tr || !tr.drag || tr.drag.where !== "detail") {
+                return;
+            }
+
+            const drag = tr.drag;
+
+            tr.drag = null;
+
+            if (drag.moved) {
+
+                if (drag.mode === "edge") {
+
+                    tr.viewC = tr[tr.edge];
+                    trimPaint();
+                }
+
+                return;
+            }
+
+            // A tap plays from the time tapped to the end
+            const r = detail.getBoundingClientRect();
+            const t = tr.viewC - TRIM_ZOOMS[tr.zoom] / 2 + (ev.clientX - r.left) / r.width * TRIM_ZOOMS[tr.zoom];
+
+            if (t < tr.end - 0.02) {
+                trimPlay(Math.max(tr.start, Math.max(0, t)), tr.end, "kept");
+            }
+        });
+
+        detail.addEventListener("pointercancel", function () {
+
+            if (tr) {
+                tr.drag = null;
+            }
+        });
+
+        // A wheel or a touch pad zooms the close up
+        detail.addEventListener("wheel", function (ev) {
+
+            if (!tr) {
+                return;
+            }
+
+            ev.preventDefault();
+
+            // With Shift held the wheel magnifies the height, some browsers
+            // then turn the wheel sideways
+            if (ev.shiftKey) {
+
+                const d = ev.deltaY || ev.deltaX;
+
+                if (d) {
+                    trimSetGain(tr.waveGain * (d < 0 ? 2 : 0.5));
+                }
+
+                return;
+            }
+
+            trimUi.zoomBy(ev.deltaY < 0 ? 1 : -1);
+        }, { passive: false });
+
+        // Two fingers on the close up pinch it: apart zooms in, together
+        // zooms out, a step each time their distance grows or shrinks by a
+        // third. An end the first finger was already dragging goes back to
+        // where it was, since a pinch was meant
+        const fingers = new Map();
+        let pinchBase = 0;
+
+        const fingerGap = function () {
+
+            const pts = Array.from(fingers.values());
+
+            return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        };
+
+        detail.addEventListener("pointerdown", function (ev) {
+
+            if (!tr || ev.pointerType !== "touch") {
+                return;
+            }
+
+            fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+
+            if (fingers.size !== 2) {
+                return;
+            }
+
+            if (tr.drag && tr.drag.where === "detail" && tr.drag.moved) {
+
+                if (tr.drag.mode === "gain") {
+                    trimSetGain(tr.drag.gain);
+                } else {
+
+                    trimSetEdge(tr.edge, tr.drag.from);
+                    trimPaint();
+                }
+            }
+
+            tr.drag = null;
+            pinchBase = fingerGap();
+        });
+
+        detail.addEventListener("pointermove", function (ev) {
+
+            if (!fingers.has(ev.pointerId)) {
+                return;
+            }
+
+            fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+
+            if (!tr || fingers.size !== 2 || pinchBase <= 0) {
+                return;
+            }
+
+            const gap = fingerGap();
+
+            if (gap > pinchBase * TRIM_PINCH_STEP) {
+
+                trimUi.zoomBy(1);
+                pinchBase = gap;
+            } else if (gap < pinchBase / TRIM_PINCH_STEP) {
+
+                trimUi.zoomBy(-1);
+                pinchBase = gap;
+            }
+        });
+
+        const fingerUp = function (ev) {
+
+            fingers.delete(ev.pointerId);
+
+            if (fingers.size < 2) {
+                pinchBase = 0;
+            }
+        };
+
+        detail.addEventListener("pointerup", fingerUp);
+        detail.addEventListener("pointercancel", fingerUp);
+    }
     // END SHARED trim
 
     let trimToken = 0;
@@ -40590,6 +41012,18 @@
         row.paint();
 
         return row;
+    }
+
+    // The songs play on the phone: the preview is heard there as well
+    function trimPlayElsewhere(from, to, mode) {
+
+        if (!trimOnPhone()) {
+            return false;
+        }
+
+        trimPlayPhone(from, to, mode);
+
+        return true;
     }
 
     function buildTrimmer() {
@@ -41260,133 +41694,6 @@
         }
     }
 
-    // Play a stretch of the song. Past the end of the kept part it never
-    // goes, and with the fade on the last two seconds fade out as Mureka's
-    // trimmed song will
-    // What started it, for the button that is ringed while it plays: start,
-    // end, all, or kept for Play and a tap on a waveform
-    function trimPlay(from, to, mode, retried) {
-
-        trimStop();
-
-        if (tr) {
-            tr.paused = null;
-        }
-
-        if (!tr || !tr.buffer || !trimCtx || to - from < 0.02) {
-            return;
-        }
-
-        // The songs play on the phone: the preview is heard there as well
-        if (trimOnPhone()) {
-
-            trimPlayPhone(from, to, mode);
-            return;
-        }
-
-        // The engine stopped moving last time, or Safari interrupted it for
-        // other sound, a new one is made while the tap still allows sound
-        if (trimCtxStuck || trimCtx.state === "interrupted") {
-
-            trimNewCtx();
-
-            if (!trimCtx) {
-                return;
-            }
-        }
-
-        trimWake();
-
-        if (trimStuckShown) {
-
-            trimStuckShown = false;
-            trimStatus("");
-        }
-
-        const at = trimCtx.currentTime + 0.05;
-        const fade = trimFades() && to >= tr.end - 0.0005;
-        const fadeFrom = fade ? Math.max(from, tr.end - TRIM_FADE) : to;
-        const pieces = [];
-
-        // The part before the fade, straight from the song
-        if (fadeFrom - from > 0.001) {
-
-            const main = trimCtx.createBufferSource();
-
-            main.buffer = tr.buffer;
-            main.connect(trimCtx.destination);
-            main.start(at, from, fadeFrom - from);
-            main.stop(at + (fadeFrom - from));
-            pieces.push(main);
-        }
-
-        // The fading second, starting on the sample where the rest ends
-        if (fade) {
-
-            const tail = trimCtx.createBufferSource();
-
-            tail.buffer = trimFadeTail(fadeFrom, tr.end);
-            tail.connect(trimCtx.destination);
-            tail.start(at + (fadeFrom - from));
-            tail.stop(at + (tr.end - from));
-            pieces.push(tail);
-        }
-
-        const last = pieces[pieces.length - 1];
-
-        last.onended = function () {
-
-            if (!tr || tr.src !== last) {
-                return;
-            }
-
-            tr.src = null;
-            tr.pieces = [];
-
-            if (tr.loop) {
-                trimPlayEnd();
-            } else {
-                trimPaint();
-            }
-        };
-
-        tr.src = last;
-        tr.pieces = pieces;
-        tr.playFrom = from;
-        tr.playTo = to;
-        tr.playAt = at;
-        tr.playMode = mode || "kept";
-        trimAnimate();
-        trimPaint();
-
-        // Safari can leave the engine standing still, the button lit and
-        // nothing heard, until the page is left and opened again. Its clock
-        // not moving gives that away: it is made again and the piece played
-        // once more, and should that not help either, the next tap makes it
-        const ctx = trimCtx;
-        const clock = ctx.currentTime;
-
-        setTimeout(function () {
-
-            if (!tr || tr.src !== last || trimCtx !== ctx || ctx.currentTime - clock > 0.1) {
-                return;
-            }
-
-            dbgLog("Trim", "the sound did not start, the engine was " + ctx.state + ", made again");
-            trimStop();
-            trimCtxStuck = true;
-
-            if (!retried) {
-
-                trimPlay(from, to, mode, true);
-                return;
-            }
-
-            trimStuckShown = true;
-            trimStatus("The sound did not start, tap play again");
-        }, 700);
-    }
-
     // The preview played by the phone while the songs play there, unless
     // the phone could not play it once since the trimmer opened
     let trimPhoneSeq = 0;
@@ -41657,274 +41964,6 @@
             de.g.textBaseline = "top";
             de.g.fillText(trimGainText(), de.w - 4 * de.dpr, 3 * de.dpr);
         }
-    }
-
-    // Dragging and tapping on the two waveforms
-    function installTrimPointers() {
-
-        const overview = trimUi.overview;
-        const detail = trimUi.detail;
-
-        // The time under a pointer on the whole song
-        const overviewTime = function (ev) {
-
-            const r = overview.getBoundingClientRect();
-
-            return Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)) * tr.duration;
-        };
-
-        overview.addEventListener("pointerdown", function (ev) {
-
-            if (!tr || !tr.mono) {
-                return;
-            }
-
-            const r = overview.getBoundingClientRect();
-            const px = function (t) {
-                return r.left + t / tr.duration * r.width;
-            };
-            const nearStart = Math.abs(ev.clientX - px(tr.start));
-            const nearEnd = Math.abs(ev.clientX - px(tr.end));
-            const grab = Math.min(nearStart, nearEnd) <= 18 ? (nearStart < nearEnd ? "start" : "end") : null;
-
-            tr.drag = { where: "overview", edge: grab, x: ev.clientX, moved: false };
-
-            if (grab) {
-
-                tr.edge = grab;
-                trimUi.edgeRow.paint();
-            }
-
-            overview.setPointerCapture(ev.pointerId);
-            ev.preventDefault();
-        });
-
-        overview.addEventListener("pointermove", function (ev) {
-
-            if (!tr || !tr.drag || tr.drag.where !== "overview") {
-                return;
-            }
-
-            if (Math.abs(ev.clientX - tr.drag.x) > 4) {
-                tr.drag.moved = true;
-            }
-
-            if (tr.drag.edge && tr.drag.moved) {
-
-                trimSetEdge(tr.drag.edge, overviewTime(ev));
-                tr.viewC = tr[tr.drag.edge];
-                trimPaint();
-            }
-        });
-
-        overview.addEventListener("pointerup", function (ev) {
-
-            if (!tr || !tr.drag || tr.drag.where !== "overview") {
-                return;
-            }
-
-            const drag = tr.drag;
-
-            tr.drag = null;
-
-            // A tap away from the ends plays from there to the end
-            if (!drag.moved) {
-
-                const t = overviewTime(ev);
-
-                if (t < tr.end - 0.05) {
-                    trimPlay(Math.max(t, 0), tr.end, "kept");
-                }
-            }
-        });
-
-        overview.addEventListener("pointercancel", function () {
-
-            if (tr) {
-                tr.drag = null;
-            }
-        });
-
-        // In the close up the chosen end follows the finger, as finely as
-        // the zoom allows, and the view centres on it again when let go
-        detail.addEventListener("pointerdown", function (ev) {
-
-            if (!tr || !tr.mono) {
-                return;
-            }
-
-            tr.drag = { where: "detail", x: ev.clientX, y: ev.clientY, from: tr[tr.edge], gain: tr.waveGain, moved: false, mode: "" };
-            detail.setPointerCapture(ev.pointerId);
-            ev.preventDefault();
-        });
-
-        detail.addEventListener("pointermove", function (ev) {
-
-            if (!tr || !tr.drag || tr.drag.where !== "detail") {
-                return;
-            }
-
-            const r = detail.getBoundingClientRect();
-            const perPx = TRIM_ZOOMS[tr.zoom] / r.width;
-            const moveX = ev.clientX - tr.drag.x;
-            const moveY = ev.clientY - tr.drag.y;
-
-            // The first clear move decides: sideways moves the end, up or
-            // down magnifies the height
-            if (!tr.drag.moved && Math.max(Math.abs(moveX), Math.abs(moveY)) > 4) {
-
-                tr.drag.moved = true;
-                tr.drag.mode = Math.abs(moveY) > Math.abs(moveX) ? "gain" : "edge";
-            }
-
-            if (tr.drag.mode === "gain") {
-                trimSetGain(tr.drag.gain * Math.pow(2, -moveY / TRIM_GAIN_PX));
-            } else if (tr.drag.mode === "edge") {
-
-                trimSetEdge(tr.edge, tr.drag.from + moveX * perPx);
-                trimPaint();
-            }
-        });
-
-        detail.addEventListener("pointerup", function (ev) {
-
-            if (!tr || !tr.drag || tr.drag.where !== "detail") {
-                return;
-            }
-
-            const drag = tr.drag;
-
-            tr.drag = null;
-
-            if (drag.moved) {
-
-                if (drag.mode === "edge") {
-
-                    tr.viewC = tr[tr.edge];
-                    trimPaint();
-                }
-
-                return;
-            }
-
-            // A tap plays from the time tapped to the end
-            const r = detail.getBoundingClientRect();
-            const t = tr.viewC - TRIM_ZOOMS[tr.zoom] / 2 + (ev.clientX - r.left) / r.width * TRIM_ZOOMS[tr.zoom];
-
-            if (t < tr.end - 0.02) {
-                trimPlay(Math.max(tr.start, Math.max(0, t)), tr.end, "kept");
-            }
-        });
-
-        detail.addEventListener("pointercancel", function () {
-
-            if (tr) {
-                tr.drag = null;
-            }
-        });
-
-        // A wheel or a touch pad zooms the close up
-        detail.addEventListener("wheel", function (ev) {
-
-            if (!tr) {
-                return;
-            }
-
-            ev.preventDefault();
-
-            // With Shift held the wheel magnifies the height, some browsers
-            // then turn the wheel sideways
-            if (ev.shiftKey) {
-
-                const d = ev.deltaY || ev.deltaX;
-
-                if (d) {
-                    trimSetGain(tr.waveGain * (d < 0 ? 2 : 0.5));
-                }
-
-                return;
-            }
-
-            trimUi.zoomBy(ev.deltaY < 0 ? 1 : -1);
-        }, { passive: false });
-
-        // Two fingers on the close up pinch it: apart zooms in, together
-        // zooms out, a step each time their distance grows or shrinks by a
-        // third. An end the first finger was already dragging goes back to
-        // where it was, since a pinch was meant
-        const fingers = new Map();
-        let pinchBase = 0;
-
-        const fingerGap = function () {
-
-            const pts = Array.from(fingers.values());
-
-            return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-        };
-
-        detail.addEventListener("pointerdown", function (ev) {
-
-            if (!tr || ev.pointerType !== "touch") {
-                return;
-            }
-
-            fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
-
-            if (fingers.size !== 2) {
-                return;
-            }
-
-            if (tr.drag && tr.drag.where === "detail" && tr.drag.moved) {
-
-                if (tr.drag.mode === "gain") {
-                    trimSetGain(tr.drag.gain);
-                } else {
-
-                    trimSetEdge(tr.edge, tr.drag.from);
-                    trimPaint();
-                }
-            }
-
-            tr.drag = null;
-            pinchBase = fingerGap();
-        });
-
-        detail.addEventListener("pointermove", function (ev) {
-
-            if (!fingers.has(ev.pointerId)) {
-                return;
-            }
-
-            fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
-
-            if (!tr || fingers.size !== 2 || pinchBase <= 0) {
-                return;
-            }
-
-            const gap = fingerGap();
-
-            if (gap > pinchBase * TRIM_PINCH_STEP) {
-
-                trimUi.zoomBy(1);
-                pinchBase = gap;
-            } else if (gap < pinchBase / TRIM_PINCH_STEP) {
-
-                trimUi.zoomBy(-1);
-                pinchBase = gap;
-            }
-        });
-
-        const fingerUp = function (ev) {
-
-            fingers.delete(ev.pointerId);
-
-            if (fingers.size < 2) {
-                pinchBase = 0;
-            }
-        };
-
-        detail.addEventListener("pointerup", fingerUp);
-        detail.addEventListener("pointercancel", fingerUp);
     }
 
     // The Trim button busy with a turning ring, and not to be pressed again
