@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.318";
+    const VERSION = "2.0.1.319";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -3226,26 +3226,6 @@
         return c < 0 ? 100 : Math.round(c * 100);
     }
 
-    // The song id behind each pie in the song list, kept as the id itself,
-    // a number or a string, the way the caching sets hold it
-    const pieSongIds = new WeakMap();
-
-    // One pie in the song list brought up to date
-    function paintListPie(dot) {
-
-        const pie = dot.firstElementChild;
-        const key = pieSongIds.get(dot);
-
-        if (!pie || key === undefined || !cachingIds.has(key)) {
-            return;
-        }
-
-        const p = cachingPercent(key);
-
-        pie.style.setProperty("--mureka-p", String(Math.max(4, p)));
-        dot.title = "Caching, " + p + "%";
-    }
-
     // The pie before the time: how much of the playing song is here. Stored
     // on this device, solid. Being stored, a pie filling as it comes in.
     // Neither, how much the player has loaded to play it. Nothing while
@@ -3306,8 +3286,13 @@
             return;
         }
 
-        for (const dot of listEl.querySelectorAll("[data-mureka-pie]")) {
-            paintListPie(dot);
+        for (const dot of listEl.querySelectorAll(".mp-sr-dot.caching[data-mureka-dot]")) {
+
+            const song = hostFindSong(dot.dataset.murekaDot);
+
+            if (song) {
+                paintCacheDot(dot, song);
+            }
         }
     }
 
@@ -15861,6 +15846,463 @@
     }
     // END SHARED misc
 
+    // BEGIN SHARED songrow
+    // Written by embed-webview.sh from src/shared/songrow.js. Change that
+    // file and run make embed, never the lines up to END SHARED songrow
+    // One song's row in a list, as the player and the web view both draw
+    // it: the stored dot, the number or a fold's chip, the title, the
+    // rating or the plays, the length, the badge with its corner marks, the
+    // repeat mark and the heart. Built from plain data, the player's song
+    // turned into it by the player and the web view's list items as the
+    // player sends them, so both look the same. The caller adds what the
+    // row does when tapped. Shared by the player and the web view's page,
+    // src/shared/songrow.js, inlined into both by embed-webview.sh
+    //
+    // item: title, number, playing, queued (the turn of a song put in the
+    // queue by hand), ignored, kept and setColor (a song of a set),
+    // rating (null when not rated), plays (null when not known),
+    // duration in seconds, badge ("shared", "new", "public", "draft" or
+    // none), badgeTitle, trimmed, remixed, note, comments, repeatOne,
+    // liked, cached ("both", "audio", "art", "caching" or none) with
+    // cachedP while caching, greyed, faded and stub.
+    // opts: fold, an element in place of the number; anyRated, the rating
+    // column shown; byPlays, the plays shown instead; onLike(ev, heart)
+    const SR_GOLD = "#f5c518";
+
+    // In em of the row's own size, so the player's 15 px rows and the
+    // web view's larger rows in a car keep the same proportions
+    const SR_CSS = ""
+        + ".mp-sr{display:flex;align-items:center;padding:0.2em 0.133em;cursor:pointer;user-select:none;-moz-user-select:none;"
+        + "-webkit-user-select:none;-webkit-touch-callout:none;box-sizing:border-box}"
+        + ".mp-sr.stub{font-style:italic}"
+        + ".mp-sr.faded{opacity:0.45}"
+        + ".mp-sr.greyed:not(.playing):not(.faded)>:not(.mp-sr-hasfold){opacity:0.45}"
+        + ".mp-sr-dot{flex:0 0 auto;margin-right:0.4em;color:" + ACCENT + ";visibility:hidden;position:relative}"
+        + ".mp-sr-dot.both{visibility:visible}"
+        + ".mp-sr-dot.audio{visibility:visible;color:#b388ff}"
+        + ".mp-sr-dot.caching{visibility:visible;color:transparent}"
+        + ".mp-sr-pie{position:absolute;left:50%;top:50%;width:0.7em;height:0.7em;transform:translate(-50%,-50%);border-radius:50%;"
+        + "background:conic-gradient(" + ACCENT + " calc(var(--mp-sr-p) * 1%),rgba(" + ACCENT_RGB + ",0.25) 0);"
+        + "animation:mp-sr-fade 1.2s ease-in-out infinite}"
+        + "@keyframes mp-sr-fade{50%{opacity:0.45}}"
+        + ".mp-sr-num{flex:0 0 auto;width:2.8em;text-align:right;margin-right:0.533em;color:#888;font-variant-numeric:tabular-nums}"
+        + ".mp-sr-title{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
+        + ".mp-sr.playing .mp-sr-title{color:" + ACCENT + ";font-weight:600}"
+        + ".mp-sr.playing .mp-sr-num{color:" + ACCENT + "}"
+        + ".mp-sr.queued .mp-sr-num{color:" + SR_GOLD + "}"
+        + ".mp-sr.queued:not(.playing) .mp-sr-title{color:#f3dc8a}"
+        + ".mp-sr.ignored:not(.playing) .mp-sr-title{color:#9a9aa2}"
+        + ".mp-sr-ign,.mp-sr-kept{flex:0 0 auto;margin-right:0.417em;font-size:0.8em}"
+        + ".mp-sr-ign{color:#888}"
+        + ".mp-sr-kept{font-weight:700}"
+        + ".mp-sr-plays,.mp-sr-rate,.mp-sr-badge,.mp-sr-rep,.mp-sr-fold,.mp-sr-state{font-size:0.733em}"
+        + ".mp-sr-plays{flex:0 0 auto;min-width:4em;margin-left:0.545em;text-align:right;"
+        + "font-variant-numeric:tabular-nums;white-space:nowrap;color:#999}"
+        + ".mp-sr-plays.unknown{color:#555}"
+        + ".mp-sr-rate{flex:0 0 auto;width:3.273em;margin-left:0.545em;text-align:right;"
+        + "font-variant-numeric:tabular-nums;white-space:nowrap;color:#777}"
+        + ".mp-sr-rate.rated{color:" + SR_GOLD + "}"
+        + ".mp-sr-time{flex:0 0 auto;margin-left:0.533em;color:#888;font-variant-numeric:tabular-nums;font-weight:400}"
+        + ".mp-sr-badge{flex:0 0 auto;width:4.182em;margin-left:0.545em;padding:0;border-radius:0.364em;line-height:1.4545;"
+        + "text-align:center;position:relative;font-weight:400}"
+        + ".mp-sr-badge.public{background:#1f3a2a;color:#7fd6a0}"
+        + ".mp-sr-badge.draft{background:#3a3a42;color:#bbb}"
+        + ".mp-sr-badge.new{background:" + ACCENT + ";color:#000;font-weight:600}"
+        + ".mp-sr-badge.shared{background:#2e2640;color:#c9a8ff}"
+        + ".mp-sr-rep{flex:0 0 auto;margin-left:0.545em;padding:0 0.4545em;border-radius:0.364em;background:" + ACCENT + ";color:#000;"
+        + "line-height:1.4545;font-weight:600}"
+        + ".mp-sr-hbox{flex:0 0 auto;position:relative;display:flex;margin-left:0.4em}"
+        + ".mp-sr-heart{flex:0 0 auto;width:1.333em;text-align:center;cursor:pointer;color:#777;font-weight:400}"
+        + ".mp-sr-heart.liked{color:#ff6b8a}"
+        + ".mp-sr-mark{position:absolute;width:1.385em;height:1.385em;border-radius:50%;color:#1d1d22;line-height:1.385em;"
+        + "font-weight:700;text-align:center;pointer-events:none;font-style:normal}"
+        + ".mp-sr-badge .mp-sr-mark{font-size:0.591em}"
+        + ".mp-sr-hbox .mp-sr-mark{font-size:0.433em}"
+        + ".mp-sr-mark.t{top:-0.615em;right:-0.4615em;background:#c9a83a;opacity:0.85}"
+        + ".mp-sr-mark.r{top:-0.615em;left:-0.4615em;background:#9b7be0;opacity:0.9}"
+        + ".mp-sr-mark.n{bottom:-0.615em;right:-0.4615em;background:#6f9cff;opacity:0.9}"
+        + ".mp-sr-mark.c{bottom:-0.615em;left:-0.4615em;min-width:1.385em;width:auto;padding:0 0.154em;box-sizing:border-box;"
+        + "border-radius:0.615em 0.615em 0.615em 0;background:#ffb454;opacity:0.95}"
+        + ".mp-sr-fold{display:inline-block;box-sizing:border-box;width:3.4545em;padding:0;border-radius:0.818em;"
+        + "border:1.5px solid " + ACCENT + ";background:rgba(" + ACCENT_RGB + ",0.1);color:" + ACCENT + ";font-weight:600;"
+        + "line-height:1.4545;text-align:center;font-variant-numeric:tabular-nums;white-space:nowrap;"
+        + "overflow:hidden;cursor:pointer;font-style:normal}"
+        + ".mp-sr-arrow{display:inline-block;width:1.05em;height:1.05em;vertical-align:-0.18em;fill:none;stroke:currentColor;"
+        + "stroke-width:3;stroke-linecap:round;stroke-linejoin:round}"
+        + ".mp-sr-fold.set{background:rgba(255,255,255,0.06)}"
+        + ".mp-sr-fold.open{background:" + ACCENT + ";color:#000}"
+        + ".mp-sr-grip{flex:0 0 auto;display:flex;align-items:center;justify-content:center;align-self:stretch;width:1.375em;"
+        + "margin-right:0.125em;color:#888;font-size:1.067em;cursor:grab;touch-action:none}"
+        + ".mp-sr-grip.off{opacity:0.3;cursor:not-allowed}"
+        + ".mp-sr.pending .mp-sr-title{opacity:0.45}"
+        + ".mp-sr.pending .mp-sr-num{display:flex;justify-content:flex-end}"
+        + ".mp-sr-state{flex:0 0 auto;margin-left:0.727em;color:#aaa;white-space:nowrap;opacity:0.7}"
+        + ".mp-sr-ring{display:inline-block;box-sizing:border-box;width:0.733em;height:0.733em;border:2px solid rgba(" + ACCENT_RGB + ",0.3);"
+        + "border-top-color:" + ACCENT + ";border-radius:50%;animation:mp-sr-spin 0.8s linear infinite}"
+        + "@keyframes mp-sr-spin{to{transform:rotate(360deg)}}";
+
+    // The rows' style sheet, once in a page
+    function srStyle() {
+
+        if (document.getElementById("mp-sr-style")) {
+            return;
+        }
+
+        const style = document.createElement("style");
+
+        style.id = "mp-sr-style";
+        style.textContent = SR_CSS;
+        (document.head || document.documentElement).appendChild(style);
+    }
+
+    // The length of a song as m:ss, or h:mm:ss
+    function srTime(sec) {
+
+        const s = Math.max(0, Math.round(Number(sec) || 0));
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const r = String(s % 60).padStart(2, "0");
+
+        return h > 0 ? h + ":" + String(m).padStart(2, "0") + ":" + r : m + ":" + r;
+    }
+
+    // The stored dot: cyan for the song and its cover, violet for the song
+    // only, a pie filling while it is being stored, hidden otherwise so the
+    // numbers stay in line
+    function srPaintDot(dot, cached, p) {
+
+        const had = cached === "caching" && dot.classList.contains("caching") ? dot.querySelector(".mp-sr-pie") : null;
+
+        // Still being stored: only the pie moves on, so its pulse goes on
+        // without starting over
+        if (had) {
+
+            had.style.setProperty("--mp-sr-p", String(typeof p === "number" && p >= 0 ? Math.max(4, Math.round(p)) : 100));
+            dot.title = typeof p === "number" && p >= 0 ? "Caching, " + Math.round(p) + "%" : "Caching";
+            return;
+        }
+
+        dot.className = "mp-sr-dot" + (cached === "both" || cached === "audio" || cached === "caching" ? " " + cached : "");
+        dot.textContent = "\u25CF";
+        dot.title = cached === "both" ? "Song and cover cached" : cached === "audio" ? "Song cached, cover not yet" : "";
+
+        if (cached === "caching") {
+
+            const pie = document.createElement("span");
+            const pct = typeof p === "number" && p >= 0 ? Math.max(4, Math.round(p)) : 100;
+
+            pie.className = "mp-sr-pie";
+            pie.style.setProperty("--mp-sr-p", String(pct));
+            dot.appendChild(pie);
+            dot.title = typeof p === "number" && p >= 0 ? "Caching, " + Math.round(p) + "%" : "Caching";
+        }
+    }
+
+    // The heart, filled when liked
+    function srPaintHeart(heart, liked) {
+
+        heart.textContent = liked ? "\u2665" : "\u2661";
+        heart.title = liked ? "Liked, tap to unlike" : "Tap to like";
+        heart.classList.toggle("liked", liked === true);
+    }
+
+    // A song's plays, exact up to 99999, a grey question mark while not known
+    function srPaintPlays(el, n) {
+
+        el.classList.toggle("unknown", typeof n !== "number");
+
+        if (typeof n !== "number") {
+
+            el.textContent = "\u25B6 ?";
+            return;
+        }
+
+        el.textContent = "\u25B6 " + (n >= 1000000 ? (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M"
+            : (n >= 100000 ? Math.round(n / 1000) + "k" : String(n)));
+    }
+
+    // A small mark on the corner of the badge or the heart: T trimmed, R
+    // remix, N a note, a count of comments
+    function srMark(kind, text, title) {
+
+        const mark = document.createElement("span");
+
+        mark.className = "mp-sr-mark " + kind;
+        mark.textContent = text;
+        mark.title = title;
+
+        return mark;
+    }
+
+    function srMarks(box, item) {
+
+        if (item.trimmed) {
+            box.appendChild(srMark("t", "T", "Trimmed"));
+        }
+
+        if (item.remixed) {
+            box.appendChild(srMark("r", "R", "Remix"));
+        }
+
+        if (item.note) {
+
+            box.appendChild(srMark("n", "N", "Note: " + item.note));
+            box.title = (box.title ? box.title + "\n\n" : "") + "Note: " + item.note;
+        }
+
+        if (item.comments > 0) {
+
+            box.appendChild(srMark("c", item.comments > 9 ? "9+" : String(item.comments),
+                item.comments + (item.comments === 1 ? " comment" : " comments") + " on Mureka"));
+        }
+    }
+
+    // The count of a fold and its arrow, in place of a number: songs the
+    // filters leave out in the accent colour, a set in its own colour.
+    // Filled while open. The arrow drawn, as some browsers' fonts have no
+    // such arrows. The caller opens and folds it, and paints it again
+    function srFoldChip(n, open, setColor) {
+
+        const chip = document.createElement("span");
+
+        chip.setAttribute("role", "button");
+        chip.dataset.foldChip = "1";
+        chip.dataset.count = String(n);
+        chip.dataset.color = setColor || "";
+        srPaintFold(chip, open);
+
+        return chip;
+    }
+
+    function srPaintFold(chip, open) {
+
+        const n = chip.dataset.count;
+        const setColor = chip.dataset.color;
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+
+        chip.className = "mp-sr-fold" + (setColor ? " set" : "") + (open ? " open" : "");
+        chip.dataset.open = open ? "1" : "";
+        chip.textContent = "";
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("class", "mp-sr-arrow");
+        path.setAttribute("d", open ? "M6 9l6 6 6-6" : "M9 6l6 6-6 6");
+        svg.appendChild(path);
+        chip.appendChild(svg);
+        chip.appendChild(document.createTextNode(n));
+        chip.title = setColor
+            ? (open ? "Fold the set's " + n + " songs" : "A set of " + n + " songs, tap to show them")
+            : (open ? "Fold the " + n + " songs the filters leave out" : n + " songs the filters leave out, tap to show them");
+        chip.setAttribute("aria-label", chip.title);
+        chip.style.borderColor = setColor || "";
+        chip.style.color = setColor ? (open ? "#000" : setColor) : "";
+        chip.style.background = setColor && open ? setColor : "";
+    }
+
+    // The handle to drag a song to another place in the queue or a
+    // playlist, first in its row. off, the list is not in an order to move
+    // songs in, sorted or searched say
+    function srGrip(off) {
+
+        const grip = document.createElement("span");
+
+        srStyle();
+        grip.className = "mp-sr-grip" + (off ? " off" : "");
+        grip.textContent = "\u2261";
+        grip.title = "Drag to move";
+
+        return grip;
+    }
+
+    function srRow(item, opts) {
+
+        const o = opts || {};
+        const row = document.createElement("div");
+        const dot = document.createElement("span");
+        const num = document.createElement("span");
+        const title = document.createElement("span");
+        const heart = document.createElement("span");
+
+        srStyle();
+        row.className = "mp-sr" + (item.playing ? " playing" : "") + (item.queued ? " queued" : "")
+            + (item.ignored ? " ignored" : "") + (item.greyed ? " greyed" : "") + (item.faded ? " faded" : "")
+            + (item.stub ? " stub" : "");
+        row.title = item.greyed ? "Left out by the filters. Tap to play; long press or right-click for options"
+            : "Play; long press or right-click for options";
+
+        srPaintDot(dot, item.cached, item.cachedP);
+        row.appendChild(dot);
+
+        num.className = "mp-sr-num";
+        num.textContent = item.number === undefined || item.number === null ? "" : String(item.number);
+
+        // Put in the queue by hand: its turn in place of its number
+        if (item.queued) {
+
+            num.textContent = "Q" + item.queued;
+            row.title = "Queued, number " + item.queued + " of the songs put in by hand";
+        }
+
+        if (o.fold) {
+
+            num.textContent = "";
+            num.classList.add("mp-sr-hasfold");
+            num.appendChild(o.fold);
+        }
+
+        row.appendChild(num);
+
+        if (item.ignored) {
+
+            const mark = document.createElement("span");
+
+            mark.className = "mp-sr-ign";
+            mark.textContent = "\u2298";
+            mark.title = "Ignored, queues made from the list leave it out";
+            row.appendChild(mark);
+        }
+
+        // A song of a set has a bar of the set's colour at its start, and a
+        // kept one a tick before its title
+        if (item.setColor) {
+
+            row.style.boxShadow = "inset 3px 0 0 " + item.setColor;
+            row.dataset.setBar = row.style.boxShadow;
+
+            if (item.kept) {
+
+                const tick = document.createElement("span");
+
+                tick.className = "mp-sr-kept";
+                tick.textContent = "\u2713";
+                tick.title = "Kept";
+                tick.style.color = item.setColor;
+                row.appendChild(tick);
+            }
+        }
+
+        title.className = "mp-sr-title";
+        title.textContent = item.title || "Untitled";
+        row.appendChild(title);
+
+        // Sorted by plays, the plays take the rating's place. The rating
+        // only once any song has one, so a library nobody has rated keeps
+        // the room for titles
+        if (o.byPlays) {
+
+            const plays = document.createElement("span");
+
+            plays.className = "mp-sr-plays";
+            srPaintPlays(plays, item.plays);
+            row.appendChild(plays);
+        } else if (o.anyRated) {
+
+            const rate = document.createElement("span");
+            const r = item.rating;
+
+            rate.className = "mp-sr-rate" + (r ? " rated" : "");
+            rate.textContent = r === null || r === undefined ? "" : String(r) + "\u2605";
+            row.appendChild(rate);
+        }
+
+        if (item.duration > 0) {
+
+            const time = document.createElement("span");
+
+            time.className = "mp-sr-time";
+            time.textContent = srTime(item.duration);
+            row.appendChild(time);
+        }
+
+        if (item.badge) {
+
+            const badge = document.createElement("span");
+
+            badge.className = "mp-sr-badge " + item.badge;
+            badge.textContent = item.badge;
+            badge.title = item.badgeTitle || "";
+            srMarks(badge, item);
+            row.appendChild(badge);
+        }
+
+        if (item.repeatOne) {
+
+            const rep = document.createElement("span");
+
+            rep.className = "mp-sr-rep";
+            rep.textContent = "\u21BB 1";
+            rep.title = "Repeat one";
+            row.appendChild(rep);
+        }
+
+        // The heart, always there so the columns stay in line. Without a
+        // badge, the corner marks sit on the heart instead
+        const hbox = document.createElement("span");
+
+        hbox.className = "mp-sr-hbox";
+        heart.className = "mp-sr-heart";
+        srPaintHeart(heart, item.liked === true);
+        hbox.appendChild(heart);
+
+        if (!item.badge) {
+            srMarks(hbox, item);
+        }
+
+        row.appendChild(hbox);
+
+        if (typeof o.onLike === "function") {
+
+            heart.addEventListener("click", function (ev) {
+
+                ev.stopPropagation();
+                o.onLike(ev, heart);
+            });
+        }
+
+        return { el: row, dot: dot, num: num, title: title, heart: heart };
+    }
+
+    // A song still being generated: a ring turning where the number goes,
+    // the title greyed and what happens with it once ready
+    function srPendingRow(item) {
+
+        const row = document.createElement("div");
+        const dot = document.createElement("span");
+        const num = document.createElement("span");
+        const ring = document.createElement("span");
+        const title = document.createElement("span");
+        const state = document.createElement("span");
+
+        srStyle();
+        row.className = "mp-sr pending";
+        row.title = "Still generating on Mureka";
+        dot.className = "mp-sr-dot";
+        dot.textContent = "\u25CF";
+        num.className = "mp-sr-num";
+        ring.className = "mp-sr-ring";
+        num.appendChild(ring);
+        title.className = "mp-sr-title";
+        title.textContent = item.title || "Untitled";
+        state.className = "mp-sr-state";
+        state.textContent = item.sending ? "Asked of Mureka"
+            : item.playWhenReady ? (item.playAfter ? "Plays next when ready" : "Plays when ready") : "Generating";
+
+        row.appendChild(dot);
+        row.appendChild(num);
+        row.appendChild(title);
+        row.appendChild(state);
+
+        // Put in a set already, the set's bar as its songs have
+        if (item.setColor) {
+
+            row.style.boxShadow = "inset 3px 0 0 " + item.setColor;
+            row.dataset.setBar = row.style.boxShadow;
+        }
+
+        return { el: row, title: title };
+    }
+    // END SHARED songrow
+
     // BEGIN SHARED chat
     // Written by embed-webview.sh from src/shared/chat.js. Change that
     // file and run make embed, never the lines up to END SHARED chat
@@ -27580,19 +28022,7 @@
     // A song's plays in the list, exact up to 99999, a grey question mark
     // while not known
     function paintRowPlays(el, song) {
-
-        const n = songPlays(song);
-
-        if (n === null) {
-
-            el.textContent = "\u25B6 ?";
-            el.style.color = "#555";
-            return;
-        }
-
-        el.textContent = "\u25B6 " + (n >= 1000000 ? (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M"
-            : (n >= 100000 ? Math.round(n / 1000) + "k" : String(n)));
-        el.style.color = "#999";
+        srPaintPlays(el, songPlays(song));
     }
 
     // A new count shows in its row at once, the order follows the next time
@@ -42934,35 +43364,24 @@
                 continue;
             }
 
-            songs.push({
-                id: String(song.song_id),
-                title: title,
+            songs.push(Object.assign(rowItemOf(song, {
                 number: numbers.get(song.song_id) || null,
+                playing: String(song.song_id) === playingId,
+                greyed: e.greyed === true,
+                queued: queuedTurns.get(String(song.song_id)) || 0,
+                setColor: e.setColor || "",
+                kept: e.setKept === true
+            }), {
                 published: song.publish_state === 1,
-                cached: hostCacheState(song),
-                isNew: song.is_played === false,
-                trimmed: isTrimmed(song),
-                remixed: isRemixed(song) || undefined,
-                note: songNote(song).slice(0, 500) || undefined,
-                ignored: isIgnored(song),
                 shared: song.shared === true,
                 cover: coverUrl(song),
-                rating: getRating(song),
-                liked: song.is_liked === true,
-                duration: (song.duration_milliseconds || 0) / 1000,
-                playing: String(song.song_id) === playingId,
                 playNext: isPlayNext(song.song_id),
                 playLast: isPlayLast(song.song_id),
-                queued: queuedTurns.get(String(song.song_id)) || 0,
-                plays: songPlays(song),
-                comments: songComments(song) || undefined,
-                greyed: e.greyed === true,
                 place: e.greyed ? 0 : (placeOf.get(String(song.song_id)) || 0),
 
-                // Its set: the color, and on the first of several how many
-                // and whether opened, the others marked as under it
+                // Its set: on the first of several how many and whether
+                // opened, the others marked as under it
                 setId: e.setId || "",
-                setColor: e.setColor || "",
                 setCount: e.setCount || 0,
                 setOpen: e.setOpen === true,
                 setMember: e.setMember === true,
@@ -42974,7 +43393,7 @@
                 runHead: e.runHead || "",
                 run: e.runCount || 0,
                 runOpen: e.runOpen === true
-            });
+            }));
         }
 
         // The songs the filters let through and those shown greyed, apart
@@ -43037,36 +43456,25 @@
                     playingAt = rows.length;
                 }
 
-                rows.push({
-                    id: id,
-                    title: (x.title || "").trim() || "Untitled",
+                rows.push(Object.assign(rowItemOf(x, {
                     number: numbers.get(x.song_id) || null,
+                    playing: id === playingId,
+                    greyed: !setSongMatches(x),
+                    queued: queuedTurns.get(id) || 0,
+                    inSets: true,
+                    setColor: setMarkColor(e.set),
+                    kept: isKept(x)
+                }), {
                     published: x.publish_state === 1,
-                    cached: hostCacheState(x),
-                    isNew: x.is_played === false,
-                    trimmed: isTrimmed(x),
-                    remixed: isRemixed(x) || undefined,
-                    note: songNote(x).slice(0, 500) || undefined,
-                    ignored: isIgnored(x),
                     shared: x.shared === true,
                     cover: coverUrl(x),
-                    rating: getRating(x),
-                    liked: x.is_liked === true,
-                    duration: (x.duration_milliseconds || 0) / 1000,
-                    playing: id === playingId,
                     playNext: isPlayNext(x.song_id),
                     playLast: isPlayLast(x.song_id),
-                    queued: queuedTurns.get(String(x.song_id)) || 0,
-                    plays: songPlays(x),
-                    comments: songComments(x) || undefined,
-                    greyed: !setSongMatches(x),
                     place: 0,
                     setId: e.set.id,
-                    setColor: setMarkColor(e.set),
                     setMember: true,
-                    setKept: isKept(x),
                     inSets: true
-                });
+                }));
             }
         };
 
@@ -43121,33 +43529,20 @@
 
             const song = queue[i];
 
-            const title = (song.title || "").trim() || "Untitled";
-
             if (!searchMatches(song, q)) {
                 continue;
             }
 
-            items.push({
-                index: i,
-                id: String(song.song_id),
-                title: title,
+            items.push(Object.assign(rowItemOf(song, {
                 number: numbers.get(song.song_id) || null,
+                playing: i === queuePos,
+                inQueue: true
+            }), {
+                index: i,
                 published: song.publish_state === 1,
-                cached: hostCacheState(song),
-                isNew: song.is_played === false,
-                trimmed: isTrimmed(song),
-                remixed: isRemixed(song) || undefined,
-                note: songNote(song).slice(0, 500) || undefined,
-                ignored: isIgnored(song),
                 shared: song.shared === true,
-                stub: isStubSong(song) && !song.__gone,
-                cover: coverUrl(song),
-                rating: getRating(song),
-                liked: song.is_liked === true,
-                duration: (song.duration_milliseconds || 0) / 1000,
-                plays: songPlays(song),
-                comments: songComments(song) || undefined
-            });
+                cover: coverUrl(song)
+            }));
         }
 
         // Songs still generating that play once ready, right after the
@@ -52863,47 +53258,13 @@
         paint(rescanButton, "rescan", "Rescan");
     }
 
-    // A row's dot: whether the song is stored, hidden keeps the text
-    // aligned. A pie filling while it is being cached, solid once cached.
-    // A cover stored without the song gets no dot. Drawn again on its own
-    // while songs are being cached, so the whole list is not
+    // A row's dot, drawn by srPaintDot: whether the song is stored, a pie
+    // filling while it is being stored. Drawn again on its own while songs
+    // are being cached, so the whole list is not
     function paintCacheDot(dot, song) {
 
-        const caching = cachingIds.has(song.song_id);
-        const audioCached = cachedIds.has(song.song_id);
-        const artCached = artCachedIds.has(String(song.song_id));
-
-        // Cyan when both the song and its cover are stored, violet while the
-        // cover is not yet
-        const dotColor = audioCached && !artCached ? "#b388ff" : ACCENT;
-
-        dot.textContent = "\u25CF";
-        dot.title = "";
         dot.dataset.murekaDot = String(song.song_id);
-        delete dot.dataset.murekaPie;
-        pieSongIds.delete(dot);
-        dot.style.cssText = "color:" + dotColor + ";margin-right:6px;flex:0 0 auto;visibility:"
-            + ((caching || audioCached) ? "visible" : "hidden");
-
-        if (caching) {
-
-            // The glyph keeps its room in the row, unseen, and a pie over it
-            // fills as the song comes in, kept up to date by paintCachePies
-            const pie = document.createElement("span");
-
-            pie.className = "mureka-pie mureka-pie-loading";
-            pie.style.cssText = "position:absolute;left:50%;top:50%;width:0.7em;height:0.7em;transform:translate(-50%,-50%)";
-            dot.style.color = "transparent";
-            dot.style.position = "relative";
-            dot.dataset.murekaPie = "1";
-            pieSongIds.set(dot, song.song_id);
-            dot.appendChild(pie);
-            paintListPie(dot);
-        } else if (audioCached && artCached) {
-            dot.title = "Song and cover cached";
-        } else if (audioCached) {
-            dot.title = "Song cached, cover not yet";
-        }
+        srPaintDot(dot, hostCacheState(song), cachingIds.has(song.song_id) ? cachingPercent(song.song_id) : -1);
     }
 
     // One song's dots drawn again where its rows are, after it started or
@@ -53276,6 +53637,13 @@
             return;
         }
 
+        // A list row's heart, drawn the way both lists draw it
+        if (heartEl.classList.contains("mp-sr-heart")) {
+
+            srPaintHeart(heartEl, liked);
+            return;
+        }
+
         heartEl.textContent = liked ? "\u2665" : "\u2661";
         heartEl.title = liked ? "Liked, click to unlike" : "Click to like";
         heartEl.style.color = liked ? "#ff6b8a" : "#777";
@@ -53558,12 +53926,7 @@
     // scrolls along near its edges. Let go, the song moves there
     function buildQueueGrip(item, from, moved) {
 
-        const grip = document.createElement("span");
-
-        grip.textContent = "\u2261";
-        grip.title = "Drag to move";
-        grip.style.cssText = "flex:0 0 auto;width:22px;margin-right:2px;text-align:center;color:#888;"
-            + "font-size:16px;line-height:16px;cursor:grab;touch-action:none";
+        const grip = srGrip(false);
 
         // The row's own tap, long press and menu stay off the handle
         for (const kind of ["click", "touchstart", "contextmenu"]) {
@@ -53732,42 +54095,14 @@
     // A song still being generated, greyed, saying so, and a tap tells
     function buildPendingRow(song, fold) {
 
-        const item = document.createElement("div");
-        const dot = document.createElement("span");
-        const numEl = document.createElement("span");
-        const titleEl = document.createElement("span");
-        const stateEl = document.createElement("span");
-
-        const ring = document.createElement("span");
-
-        item.style.cssText = "display:flex;align-items:center;padding:3px 2px;cursor:pointer;"
-            + "user-select:none;-webkit-user-select:none;-webkit-touch-callout:none";
-        item.title = "Still generating on Mureka";
-        dot.textContent = "\u25CF";
-        dot.style.cssText = "margin-right:6px;flex:0 0 auto;visibility:hidden";
-
-        // A ring turning where the number goes, while Mureka is asked
-        numEl.style.cssText = "flex:0 0 auto;width:42px;margin-right:8px;display:flex;justify-content:flex-end";
-        ring.style.cssText = "display:inline-block;width:11px;height:11px;border:2px solid rgba(" + ACCENT_RGB + ",0.3);"
-            + "border-top-color:" + ACCENT + ";border-radius:50%;animation:mureka-spin 0.8s linear infinite";
-        numEl.appendChild(ring);
-        titleEl.textContent = (song.title || "").trim() || "Untitled";
-        titleEl.style.cssText = "flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0.45";
-        stateEl.textContent = isSendingSong(song) ? "Asked of Mureka" : pendingPlay.has(String(song.song_id))
-            ? (pendingPlay.get(String(song.song_id)) === "after" ? "Plays next when ready" : "Plays when ready") : "Generating";
-        stateEl.style.cssText = "flex:0 0 auto;margin-left:8px;font-size:11px;color:#aaa;white-space:nowrap;opacity:0.7";
-
-        item.appendChild(dot);
-        item.appendChild(numEl);
-        item.appendChild(titleEl);
-        item.appendChild(stateEl);
-
-        // Put in a set already, the set's bar as its songs have
-        if (fold && fold.setColor) {
-
-            item.dataset.setBar = "inset 3px 0 0 " + fold.setColor;
-            item.style.boxShadow = item.dataset.setBar;
-        }
+        const id = String(song.song_id);
+        const item = srPendingRow({
+            title: song.title,
+            sending: isSendingSong(song),
+            playWhenReady: pendingPlay.has(id),
+            playAfter: pendingPlay.get(id) === "after",
+            setColor: fold && fold.setColor ? fold.setColor : ""
+        }).el;
 
         item.addEventListener("click", function () {
             pendingTap(song);
@@ -53782,96 +54117,15 @@
         return item;
     }
 
-    // The small yellow T of a song made by trimming, on the corner of the
-    // badge or of the heart
-    // The small purple R of a song made by remixing, on the top left
-    // corner of the badge or of the heart
-    function remixRowMark() {
-
-        const mark = document.createElement("span");
-
-        mark.textContent = "R";
-        mark.title = "Remix";
-        mark.style.cssText = "position:absolute;top:-4px;left:-3px;width:9px;height:9px;border-radius:50%;background:#9b7be0;color:#1d1d22;font-size:6.5px;line-height:9px;font-weight:700;text-align:center;opacity:0.9;pointer-events:none";
-
-        return mark;
-    }
-
-    function trimRowMark() {
-
-        const mark = document.createElement("span");
-
-        mark.textContent = "T";
-        mark.title = "Trimmed";
-        mark.style.cssText = "position:absolute;top:-4px;right:-3px;width:9px;height:9px;border-radius:50%;background:#c9a83a;color:#1d1d22;font-size:6.5px;line-height:9px;font-weight:700;text-align:center;opacity:0.85;pointer-events:none";
-
-        return mark;
-    }
-
-    // The small blue N of a song with a note, on the lower right corner of
-    // the badge or of the heart, the note itself under the mouse
-    // A song with comments on Mureka, a small orange speech bubble with
-    // their count on the badge's lower left corner
-    function commentRowMark(n) {
-
-        const mark = document.createElement("span");
-
-        mark.textContent = n > 9 ? "9+" : String(n);
-        mark.title = n + (n === 1 ? " comment" : " comments") + " on Mureka";
-        mark.style.cssText = "position:absolute;bottom:-4px;left:-3px;min-width:9px;height:9px;padding:0 1px;box-sizing:border-box;"
-            + "border-radius:4px 4px 4px 0;background:#ffb454;color:#1d1d22;font-size:6.5px;line-height:9px;font-weight:700;"
-            + "text-align:center;opacity:0.95;pointer-events:none";
-
-        return mark;
-    }
-
-    function noteRowMark(note) {
-
-        const mark = document.createElement("span");
-
-        mark.textContent = "N";
-        mark.title = "Note: " + note;
-        mark.style.cssText = "position:absolute;bottom:-4px;right:-3px;width:9px;height:9px;border-radius:50%;background:#6f9cff;color:#1d1d22;font-size:6.5px;line-height:9px;font-weight:700;text-align:center;opacity:0.9;pointer-events:none";
-
-        return mark;
-    }
-
     // The count of a fold and its arrow, opening or folding it. The list
     // stays where it was, the rows under it move
     function buildFoldChip(fold, kind) {
 
-        const chip = document.createElement("span");
         const isSet = kind === "set";
-        const n = isSet ? fold.setCount : fold.runCount;
-        const open = isSet ? fold.setOpen : fold.runOpen;
         const opened = isSet ? openedSets : openedRuns;
         const key = isSet ? fold.setId : fold.runHead;
-
-        chip.textContent = (open ? "\u25BE" : "\u25B8") + n;
-        chip.title = isSet
-            ? (open ? "Fold the set's " + n + " songs" : "A set of " + n + " songs, tap to show them")
-            : (open ? "Fold the " + n + " songs the filters leave out" : n + " songs the filters leave out, tap to show them");
-        chip.setAttribute("role", "button");
-        chip.dataset.foldChip = "1";
-        // In color so it is easy to notice, the accent for songs the
-        // filters leave out, a set's own color for a set
-        chip.style.cssText = "display:inline-block;box-sizing:border-box;width:38px;padding:0;border-radius:9px;border:1.5px solid " + ACCENT + ";"
-            + "background:rgba(" + ACCENT_RGB + ",0.1);color:" + ACCENT + ";font-weight:600;font-size:11px;line-height:16px;text-align:center;"
-            + "font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;cursor:pointer";
-
-        if (isSet) {
-
-            chip.style.borderColor = fold.setColor;
-            chip.style.color = fold.setColor;
-            chip.style.background = "rgba(255,255,255,0.06)";
-        }
-
-        // Opened, the chip is filled
-        if (open) {
-
-            chip.style.background = isSet ? fold.setColor : ACCENT;
-            chip.style.color = "#000";
-        }
+        const chip = srFoldChip(isSet ? fold.setCount : fold.runCount, isSet ? fold.setOpen : fold.runOpen,
+            isSet ? fold.setColor : "");
 
         chip.addEventListener("click", function (ev) {
 
@@ -54289,279 +54543,97 @@
     // fold, for a row of the list: whether the filters leave it out, and
     // for the first of several in a row how many there are and whether
     // they are opened
+    // A song as a list row shows it, drawn by srRow in this list and in the
+    // web view's. o: number, playing, greyed, faded, queued (the turn of a
+    // song put in the queue by hand), inQueue, inSets, setColor and kept
+    function rowItemOf(song, o) {
+
+        const opt = o || {};
+        const shared = song.shared === true;
+        const isNew = song.is_played === false && !shared;
+        const published = song.publish_state === 1;
+
+        // In the Sets view the filters do not choose the songs, so each
+        // says whether it is public. See rowBadgeShown for the others
+        const showBadge = rowBadgeShown(song, opt.inQueue === true) || (opt.inSets === true && !creatorSource);
+        let badgeTitle = "";
+
+        if (shared) {
+            badgeTitle = "Shared with you from another account, it may not be public";
+        } else if (isNew) {
+            badgeTitle = published ? "Not played yet, public" : "Not played yet, draft";
+        }
+
+        return {
+            id: String(song.song_id),
+            title: (song.title || "").trim() || "Untitled",
+            number: opt.number === undefined ? null : opt.number,
+            playing: opt.playing === true,
+            queued: opt.queued || 0,
+            ignored: isIgnored(song),
+            setColor: opt.setColor || "",
+            kept: opt.kept === true,
+            rating: getRating(song),
+            plays: songPlays(song),
+            duration: (song.duration_milliseconds || 0) / 1000,
+            badge: showBadge ? (shared ? "shared" : isNew ? "new" : published ? "public" : "draft") : "",
+            badgeTitle: badgeTitle,
+            trimmed: isTrimmed(song),
+            remixed: isRemixed(song) === true,
+            note: creatorSource ? "" : songNote(song).trim().slice(0, 500),
+            comments: songComments(song) || 0,
+            repeatOne: opt.playing === true && repeatMode === "one",
+            liked: song.is_liked === true,
+            cached: hostCacheState(song),
+            cachedP: cachingIds.has(song.song_id) ? cachingPercent(song.song_id) : -1,
+            greyed: opt.greyed === true,
+            faded: opt.faded === true,
+            stub: isStubSong(song) && !song.__gone
+        };
+    }
+
     function buildSongRow(song, number, isPlaying, dimmed, queueIndex, fold) {
 
         if (isPendingSong(song)) {
             return buildPendingRow(song, fold);
         }
 
-        const title = (song.title || "").trim() || "Untitled";
+        const greyed = !!(fold && fold.greyed);
 
-        const item = document.createElement("div");
-        item.style.cssText = "display:flex;align-items:center;padding:3px 2px;cursor:pointer;user-select:none;-moz-user-select:none;-webkit-user-select:none;-webkit-touch-callout:none";
-        item.title = "Play; long press or right-click for options";
+        // Put in the queue by hand: its turn in place of its number, outside
+        // the queue view
+        const turn = lazyState && lazyState.queued ? lazyState.queued.get(String(song.song_id)) : 0;
+        const row = srRow(rowItemOf(song, {
+            number: number,
+            playing: isPlaying,
+            greyed: greyed,
+            queued: turn,
+            inQueue: listView === "queue",
+            inSets: !!(fold && fold.inSets),
+            setColor: fold && fold.setColor ? fold.setColor : "",
+            kept: !!(fold && fold.setKept),
+            faded: dimmed || (offlineMode() && !cachedIds.has(song.song_id))
+        }), {
+            fold: fold && (fold.runCount > 1 || fold.setCount > 1) ? buildFoldChip(fold, fold.setCount > 1 ? "set" : "run") : null,
+            anyRated: ratings.size > 0,
+            byPlays: listView === "plays" && settings.playsOn === true,
+            onLike: function (ev, heart) {
+                toggleLike(song, heart);
+            }
+        });
+        const item = row.el;
+
+        // The parts drawn again on their own: the dot while caching, the
+        // plays as counts come in
+        paintCacheDot(row.dot, song);
+
+        if (item.querySelector(".mp-sr-plays")) {
+            item.querySelector(".mp-sr-plays").dataset.playsFor = String(song.song_id);
+        }
 
         // Read from Mureka once the row is in sight
         if (isStubSong(song) && !song.__gone) {
-
             item.dataset.stubId = String(song.song_id);
-            item.style.fontStyle = "italic";
-        }
-
-        const greyed = !!(fold && fold.greyed);
-
-        const faded = dimmed || (offlineMode() && !cachedIds.has(song.song_id));
-
-        if (faded) {
-            item.style.opacity = "0.45";
-        }
-
-        if (greyed) {
-            item.title = "Left out by the filters. Tap to play; long press or right-click for options";
-        }
-
-        // The dot marks whether the song is stored
-        const dot = document.createElement("span");
-
-        paintCacheDot(dot, song);
-
-        // Number column, right aligned and fixed width so titles line up
-        const numEl = document.createElement("span");
-        numEl.textContent = (number === undefined || number === null) ? "" : number;
-        numEl.style.cssText = "flex:0 0 auto;width:42px;text-align:right;margin-right:8px;color:#888;font-variant-numeric:tabular-nums";
-
-        // Title column, left aligned and filling the rest of the row
-        const titleEl = document.createElement("span");
-        titleEl.textContent = title;
-        titleEl.style.cssText = "flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
-
-        if (isPlaying) {
-            titleEl.style.color = ACCENT;
-            titleEl.style.fontWeight = "600";
-            numEl.style.color = ACCENT;
-        }
-
-        // Put in the queue by hand: its turn in place of its number and a
-        // golden title, outside the queue view
-        const turn = lazyState && lazyState.queued ? lazyState.queued.get(String(song.song_id)) : 0;
-
-        if (turn) {
-
-            numEl.textContent = "Q" + turn;
-            numEl.style.color = STAR_GOLD;
-            item.title = "Queued, number " + turn + " of the songs put in by hand";
-
-            if (!isPlaying) {
-                titleEl.style.color = "#f3dc8a";
-            }
-        }
-
-        item.appendChild(dot);
-        item.appendChild(numEl);
-
-        // An ignored song carries a small crossed circle before its title,
-        // which is grey rather than white, unless it is the one playing
-        if (isIgnored(song)) {
-
-            const mark = document.createElement("span");
-
-            if (!isPlaying) {
-                titleEl.style.color = "#9a9aa2";
-            }
-
-            mark.textContent = "\u2298";
-            mark.title = "Ignored, queues made from the list leave it out";
-            mark.style.cssText = "flex:0 0 auto;margin-right:5px;color:#888;font-size:12px";
-            item.appendChild(mark);
-        }
-
-        item.appendChild(titleEl);
-
-        // The first of several songs in a row the filters leave out: how
-        // many, this one counted, and an arrow to open or fold them, in
-        // place of its number, so the title keeps its room. The first of a
-        // set the same, in the set's color
-        if (fold && (fold.runCount > 1 || fold.setCount > 1)) {
-
-            numEl.textContent = "";
-            numEl.dataset.foldChip = "1";
-            numEl.appendChild(buildFoldChip(fold, fold.setCount > 1 ? "set" : "run"));
-        }
-
-        // A song of a set has a bar of the set's color at its start, and a
-        // kept one a tick before its title
-        if (fold && fold.setColor) {
-
-            item.dataset.setBar = "inset 3px 0 0 " + fold.setColor;
-            item.style.boxShadow = item.dataset.setBar;
-
-            if (fold.setKept) {
-
-                const tick = document.createElement("span");
-
-                tick.textContent = "\u2713";
-                tick.title = "Kept";
-                tick.style.cssText = "flex:0 0 auto;margin-right:5px;font-size:12px;font-weight:700;color:" + fold.setColor;
-                item.insertBefore(tick, titleEl);
-            }
-        }
-
-        // Sorted by plays, each song's plays take the place of the rating,
-        // filled in as counts come in
-        if (listView === "plays" && settings.playsOn === true) {
-
-            const playsEl = document.createElement("span");
-
-            playsEl.dataset.playsFor = String(song.song_id);
-            playsEl.style.cssText = "flex:0 0 auto;min-width:44px;margin-left:6px;text-align:right;font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap";
-            paintRowPlays(playsEl, song);
-            item.appendChild(playsEl);
-        } else if (ratings.size > 0) {
-
-            // The rating, but only once any song has one, so a library nobody
-            // has rated keeps the full width for titles. A fixed column keeps
-            // the durations lined up, zero stars shows grey, not rated nothing
-
-            const r = getRating(song);
-            const rateEl = document.createElement("span");
-
-            // The number before the star, right aligned, so the stars line
-            // up down the list whether the rating is 3 or 4.75
-            rateEl.textContent = r === null ? "" : ratingNumber(r) + "\u2605";
-            rateEl.style.cssText = "flex:0 0 auto;width:36px;margin-left:6px;text-align:right;font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap;color:"
-                + (r ? STAR_GOLD : "#777");
-
-            item.appendChild(rateEl);
-        }
-
-        // Song length, right aligned next to the title
-        if (song.duration_milliseconds) {
-
-            const dur = document.createElement("span");
-            dur.textContent = formatTime(song.duration_milliseconds / 1000);
-            dur.style.cssText = "flex:0 0 auto;margin-left:8px;color:#888;font-variant-numeric:tabular-nums";
-            item.appendChild(dur);
-        }
-
-        // Mark a song as public, draft or new where that tells something,
-        // see rowBadgeShown
-        // In the Sets view the filters do not choose the songs, so each
-        // says whether it is public
-        const badgeShown = rowBadgeShown(song, listView === "queue") || !!(fold && fold.inSets && !creatorSource);
-        const note = creatorSource ? "" : songNote(song).trim().slice(0, 500);
-
-        if (badgeShown) {
-
-            const published = song.publish_state === 1;
-            const isNew = song.is_played === false && song.shared !== true;
-
-            // Fixed width, so the badge column lines up and the title beside it
-            // keeps the same room whichever word the badge happens to carry
-            const badge = document.createElement("span");
-            badge.textContent = song.shared === true ? "shared" : (isNew ? "new" : (published ? "public" : "draft"));
-            badge.style.cssText = "flex:0 0 auto;width:46px;margin-left:6px;padding:0;border-radius:4px;font-size:11px;line-height:16px;text-align:center;"
-                + (!badgeShown ? "background:transparent;color:transparent" : song.shared === true
-                    ? "background:#2e2640;color:#c9a8ff"
-                    : (isNew
-                        ? "background:" + ACCENT + ";color:#000;font-weight:600"
-                        : (published
-                            ? "background:#1f3a2a;color:#7fd6a0"
-                            : "background:#3a3a42;color:#bbb")));
-
-            if (song.shared === true) {
-                badge.title = "Shared with you from another account, it may not be public";
-            } else if (isNew) {
-                badge.title = published ? "Not played yet, public" : "Not played yet, draft";
-            }
-
-            // A song made by trimming carries a small yellow T on the top
-            // right corner of its badge
-            if (isTrimmed(song)) {
-
-                badge.style.position = "relative";
-                badge.appendChild(trimRowMark());
-            }
-
-            // A song made by remixing, a small purple R on the top left
-            if (isRemixed(song)) {
-
-                badge.style.position = "relative";
-                badge.appendChild(remixRowMark());
-            }
-
-            // A song with a note, a small blue N on the lower right corner,
-            // the note under the mouse
-            if (badgeShown && note) {
-
-                badge.style.position = "relative";
-                badge.appendChild(noteRowMark(note));
-                badge.title = (badge.title ? badge.title + "\n\n" : "") + "Note: " + note;
-            }
-
-            // Comments on Mureka, a small speech bubble on the lower left
-            if (badgeShown && songComments(song) > 0) {
-
-                badge.style.position = "relative";
-                badge.appendChild(commentRowMark(songComments(song)));
-            }
-
-            item.appendChild(badge);
-        }
-
-        // Show on the playing row when it is set to repeat just this song
-        if (isPlaying && repeatMode === "one") {
-
-            const rep = document.createElement("span");
-            rep.textContent = "\u21BB 1";
-            rep.title = "Repeat one";
-            rep.style.cssText = "flex:0 0 auto;margin-left:6px;padding:0 5px;border-radius:4px;background:" + ACCENT + ";color:#000;font-size:11px;line-height:16px;font-weight:600";
-            item.appendChild(rep);
-        }
-
-        // Like control, filled heart when liked, outline heart to like it
-        // Always present so the duration column stays aligned across rows
-        const heart = document.createElement("span");
-        heart.style.cssText = "flex:0 0 auto;width:20px;margin-left:6px;text-align:center;cursor:pointer";
-        paintHeart(heart, song.is_liked === true);
-
-        heart.addEventListener("click", function (ev) {
-
-            // Do not also play the song when the heart is clicked
-            ev.stopPropagation();
-            toggleLike(song, heart);
-        });
-
-        // Without a badge, a trimmed song's T sits on the heart's corner
-        // instead, so the row keeps the columns of the rows around it. The
-        // heart is wrapped, as painting it sets its text
-        if (!badgeShown && (isTrimmed(song) || isRemixed(song) || note || songComments(song) > 0)) {
-
-            const box = document.createElement("span");
-
-            box.style.cssText = "flex:0 0 auto;position:relative;display:flex";
-            box.appendChild(heart);
-
-            if (isTrimmed(song)) {
-                box.appendChild(trimRowMark());
-            }
-
-            if (isRemixed(song)) {
-                box.appendChild(remixRowMark());
-            }
-
-            if (note) {
-
-                box.appendChild(noteRowMark(note));
-                box.title = "Note: " + note;
-            }
-
-            if (songComments(song) > 0) {
-                box.appendChild(commentRowMark(songComments(song)));
-            }
-
-            item.appendChild(box);
-        } else {
-            item.appendChild(heart);
         }
 
         // A row of the queue view: its place in the queue, for the menu, and
@@ -54759,17 +54831,6 @@
             unlight(false);
         });
 
-
-        // Greyed, everything but the fold's chip, which stays plain to read
-        if (greyed && !isPlaying && !faded) {
-
-            for (const part of item.children) {
-
-                if (!part.dataset || part.dataset.foldChip !== "1") {
-                    part.style.opacity = "0.45";
-                }
-            }
-        }
         return item;
     }
 
@@ -81549,13 +81610,11 @@
         height: clamp(40px, 4.4vw, 68px);
     }
 
-    #like.liked,
-    .rowHeart.liked {
+    #like.liked {
         color: var(--heart);
     }
 
-    #like.liked .ico,
-    .rowHeart.liked .ico {
+    #like.liked .ico {
         fill: currentColor;
     }
 
@@ -82897,12 +82956,6 @@
         font-size: clamp(18px, 1.9vw, 28px);
         padding: 18px 8px;
         cursor: pointer;
-    }
-
-    .row.playing,
-    .row.playing .rowNum {
-        color: var(--accent);
-        font-weight: 600;
     }
 
     /* How far the phone has come with a load, a rescan or caching */
@@ -84542,16 +84595,6 @@
         text-align: center;
     }
 
-    /* A song put in the queue by hand: its turn and title in gold */
-    .row.queued .rowNum {
-        color: var(--gold);
-        font-weight: 600;
-    }
-
-    .row.queued:not(.playing) .rowTitle {
-        color: #f3dc8a;
-    }
-
     /* At the top instead, where it would cover a button of a box open */
     /* The phone's real volume, step and mixer, small under the level */
     #toast .toastSub {
@@ -84645,59 +84688,12 @@
         animation: spinTurn 0.8s linear infinite;
     }
 
-    /* The handle to drag a song to another place in the queue */
-    /* A song still being generated, greyed, its cover unknown, with a ring
-       turning in front of it */
-    .row.pending > :not(.rowNum) {
-        opacity: 0.45;
-    }
-
-    .pendRing {
-        display: inline-block;
-        width: 0.8em;
-        height: 0.8em;
-        border: 2px solid rgba(72, 225, 235, 0.3);
-        border-top-color: var(--accent);
-        border-radius: 50%;
-        animation: spinTurn 0.8s linear infinite;
-    }
-
-    .row.pending .rowTime {
-        width: auto;
-        white-space: nowrap;
-        font-size: 0.8em;
-    }
-
     .thumb.unknown {
         display: flex;
         align-items: center;
         justify-content: center;
         color: var(--muted);
         font-weight: 600;
-    }
-
-    .rowGrip {
-        flex: 0 0 auto;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 1.6em;
-        align-self: stretch;
-        margin: -18px 0 -18px -8px;
-        padding: 0 0 0 8px;
-        color: var(--muted);
-        cursor: grab;
-        touch-action: none;
-    }
-
-    .rowGrip .ico {
-        width: 1.2em;
-        height: 1.2em;
-    }
-
-    .rowGrip.off {
-        opacity: 0.3;
-        cursor: not-allowed;
     }
 
     .row.dragging {
@@ -84986,11 +84982,6 @@
         border-radius: 6px;
     }
 
-    #miniRows .rowGrip {
-        margin: -8px 0 -8px -4px;
-        padding: 0 0 0 4px;
-    }
-
     #miniRows .rowNext {
         width: 2.3em;
         height: 2.3em;
@@ -85126,63 +85117,8 @@
         color: var(--muted);
     }
 
-    .rowTitle {
-        flex: 1;
-        min-width: 0;
-        overflow: hidden;
-        white-space: nowrap;
-        text-overflow: ellipsis;
-    }
-
-    /* The title of an ignored song is grey, unless it is the one playing */
-    .row:not(.playing) .rowTitle.ignored {
-        color: #9a9aa2;
-    }
-
-    /* The crossed circle before the title of an ignored song */
-    .rowIgnored {
-        display: inline-block;
-        width: 0.85em;
-        height: 0.85em;
-        margin-right: 0.35em;
-        vertical-align: -0.08em;
-        color: var(--muted);
-    }
-
-    .rowRate {
-        flex: 0 0 auto;
-        color: var(--gold);
-        font-variant-numeric: tabular-nums;
-        font-size: 0.8em;
-    }
-
-    /* Never bold, a bolder length on the playing row would push the
-       heart out of line with the rows around it */
-    .rowTime {
-        flex: 0 0 auto;
-        font-weight: 400;
-        color: var(--muted);
-        font-variant-numeric: tabular-nums;
-        font-size: 0.85em;
-    }
-
-    .rowHeart {
-        flex: 0 0 auto;
-        background: none;
-        border: none;
-        padding: 8px;
-        line-height: 0;
-        color: var(--empty);
-        cursor: pointer;
-    }
-
     .rowNext .ico {
         margin: 0 auto;
-    }
-
-    .rowHeart .ico {
-        width: 1.4em;
-        height: 1.4em;
     }
 
     #edgeBtn {
@@ -85207,19 +85143,6 @@
         font: inherit;
         font-size: 1.2em;
         cursor: pointer;
-    }
-
-    /* Songs of the queue already played are greyed out, cover and all, as
-       in the phone's list */
-    .row.past {
-        color: var(--muted);
-        opacity: 0.45;
-    }
-
-    /* A song the filters leave out, greyed, its fold's count and arrow
-       kept plain to read and to tap */
-    .row.greyed:not(.playing) > :not(.hasFold) {
-        opacity: 0.45;
     }
 
     /* The Sets view: a row for each set, its color at its start, its
@@ -85306,76 +85229,9 @@
         width: calc(100% - 12px);
     }
 
-    /* A kept song of a set, a tick in the set's color before its title */
-    .keptMark .ico {
-        display: inline-block;
-        width: 0.9em;
-        height: 0.9em;
-        vertical-align: -0.1em;
-        stroke-width: 3;
-    }
-
-    .keptMark {
-        margin-right: 0.35em;
-        font-weight: 700;
-        color: var(--setColor);
-    }
-
     /* A song of a set, a bar of the set's color at its start */
     .row.inSet {
         box-shadow: inset 4px 0 0 var(--setColor, transparent);
-    }
-
-    /* In the number column of a fold's first song, so the title keeps its
-       room, the same width whatever the count */
-    /* A set's chip in the set's color */
-    .foldChip[data-kind="set"] {
-        background: rgba(255, 255, 255, 0.06);
-    }
-
-    /* Opened, the chip is filled */
-    .foldChip[data-open="1"] {
-        background: var(--chipColor);
-        color: #000;
-    }
-
-    /* The arrow drawn, before the count */
-    .foldChip .ico {
-        display: inline-block;
-        width: 1.05em;
-        height: 1.05em;
-        margin-right: 0.05em;
-        vertical-align: -0.18em;
-        stroke-width: 3;
-    }
-
-    .foldChip {
-        --chipColor: var(--accent);
-        display: inline-block;
-        box-sizing: border-box;
-        width: 3em;
-        padding: 0.5em 0;
-        border: 2px solid var(--chipColor);
-        border-radius: 999px;
-        background: rgba(72, 225, 235, 0.1);
-        color: var(--chipColor);
-        font: inherit;
-        font-weight: 600;
-        font-size: 0.8em;
-        line-height: 1;
-        text-align: center;
-        font-variant-numeric: tabular-nums;
-        white-space: nowrap;
-        overflow: hidden;
-        cursor: pointer;
-    }
-
-    .rowNum {
-        flex: 0 0 auto;
-        min-width: 2.4em;
-        color: var(--muted);
-        font-variant-numeric: tabular-nums;
-        font-size: 0.8em;
     }
 
     #bottom .chip {
@@ -87498,6 +87354,17 @@
         display: none;
     }
 
+    /* A car's song row: the room of its large rows, the parts spaced by
+       their own margins, the cover after the number */
+    .row.mp-sr {
+        gap: 0;
+        padding: 18px 8px;
+    }
+
+    .row.mp-sr .thumb {
+        margin-right: 0.6em;
+    }
+
     .thumb {
         position: relative;
         flex: 0 0 auto;
@@ -87738,51 +87605,12 @@
         font-size: clamp(18px, 1.9vw, 26px);
     }
 
-    .rowNum {
-        text-align: right;
-    }
-
-    .rowDot {
-        flex: 0 0 auto;
-        width: 0.6em;
-        height: 0.6em;
-        border-radius: 50%;
-        visibility: hidden;
-    }
-
-    .rowDot.both {
-        visibility: visible;
-        background: #48e1eb;
-    }
-
-    /* The dot is about the song on the phone only, cyan once it is stored,
-       the cover makes no difference here */
-    .rowDot.audio {
-        visibility: visible;
-        background: #48e1eb;
-    }
-
-    .rowDot.art {
-        visibility: hidden;
-    }
-
     /* How much of a song has come in, grown smoothly between the phone's
        updates */
     @property --p {
         syntax: "<number>";
         inherits: false;
         initial-value: 100;
-    }
-
-    /* A song on its way: purple like a cached song, fading in and out, and
-       filling like a pie as more of it has come in. --p is how much, in
-       percent, 100 while the size is not known */
-    .rowDot.caching {
-        visibility: visible;
-        transform: scale(1.25);
-        background: conic-gradient(#48e1eb calc(var(--p) * 1%), rgba(72, 225, 235, 0.25) 0);
-        animation: fadeDot 1.2s ease-in-out infinite;
-        transition: --p 1s linear;
     }
 
     @keyframes fadeDot {
@@ -87825,36 +87653,6 @@
         color: #333;
         font-size: 64px;
         transition: left 2s, top 2s;
-    }
-
-    .rowRate {
-        min-width: 3.2em;
-        text-align: right;
-    }
-
-    .rowRate.zero {
-        color: var(--empty);
-    }
-
-    /* How many times a song has been played, shown while sorting by plays */
-    .rowPlays {
-        flex: 0 0 auto;
-        min-width: 4.2em;
-        text-align: right;
-        color: var(--muted);
-        font-variant-numeric: tabular-nums;
-        font-size: 0.8em;
-        font-weight: 400;
-        white-space: nowrap;
-    }
-
-    .rowPlays.unknown {
-        color: var(--empty);
-    }
-
-    /* The small list is narrow, the plays take the place of the stars there */
-    #miniRows .row.byPlays .rowRate {
-        display: none;
     }
 
     .rowBadge {
@@ -87917,12 +87715,6 @@
         color: var(--text);
     }
 
-    /* A song shared from another account, which may not be public */
-    .row.stub .rowTitle {
-        font-style: italic;
-        opacity: 0.7;
-    }
-
     .rowBadge.shared {
         background: #2e2640;
         color: #c9a8ff;
@@ -87931,37 +87723,6 @@
     /* A song made by trimming, a small yellow T on the badge's corner */
     .rowBadge {
         position: relative;
-    }
-
-    /* Without a badge, the T on the heart's corner instead */
-    .rowHeart {
-        position: relative;
-    }
-
-    /* A button keeps the browser's own font, so the page's is set again,
-       at the size the T has on a badge, which goes with the heart's */
-    .rowHeart .rowTrim {
-        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-        font-size: 0.55em;
-        top: 0.6em;
-        right: 0.5em;
-    }
-
-    .rowHeart .rowNote {
-        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-        font-size: 0.55em;
-        bottom: 0.6em;
-        right: 0.5em;
-    }
-
-    html.phone .rowHeart .rowNote {
-        bottom: -0.2em;
-        right: -0.4em;
-    }
-
-    html.phone .rowHeart .rowTrim {
-        top: -0.2em;
-        right: -0.4em;
     }
 
     /* A song with comments on Mureka, a small orange speech bubble with
@@ -87983,18 +87744,6 @@
         text-align: center;
         opacity: 0.95;
         pointer-events: none;
-    }
-
-    .rowHeart .rowComments {
-        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-        font-size: 0.55em;
-        bottom: 0.6em;
-        left: 0.5em;
-    }
-
-    html.phone .rowHeart .rowComments {
-        bottom: -0.2em;
-        left: -0.4em;
     }
 
     /* A song with a note of its own, a small blue N on the badge's lower
@@ -88352,7 +88101,6 @@
     html.phone #settingsBtn {
         grid-column: 5;
     }
-
 
     html.phone #bottom .chip,
     html.phone #volBtn,
@@ -88753,38 +88501,17 @@
         display: none;
     }
 
-    html.phone .row {
-        gap: 8px;
+    /* A song's row as in the mobile player, see src/shared/songrow.js */
+    html.phone .row.mp-sr {
         padding: 9px 2px;
         border-bottom: none;
         font-size: 15px;
     }
 
     html.phone .row .thumb,
-    html.phone .rowNext {
+    html.phone .rowNext,
+    html.phone .rowPlace {
         display: none;
-    }
-
-    html.phone .rowNum {
-        min-width: 2.6em;
-        font-size: 1em;
-        text-align: right;
-    }
-
-    /* The heart last, after the length, as in the mobile player */
-    html.phone .rowHeart {
-        order: 1;
-        padding: 2px;
-    }
-
-    html.phone .rowHeart .ico {
-        width: 1.2em;
-        height: 1.2em;
-    }
-
-    html.phone .rowGrip {
-        margin: -9px 0 -9px -2px;
-        padding: 0 0 0 2px;
     }
 
     /* The settings and the other panels edge to edge */
@@ -93288,6 +93015,463 @@
     }
     // END SHARED misc
 
+    // BEGIN SHARED songrow
+    // Written by embed-webview.sh from src/shared/songrow.js. Change that
+    // file and run make embed, never the lines up to END SHARED songrow
+    // One song's row in a list, as the player and the web view both draw
+    // it: the stored dot, the number or a fold's chip, the title, the
+    // rating or the plays, the length, the badge with its corner marks, the
+    // repeat mark and the heart. Built from plain data, the player's song
+    // turned into it by the player and the web view's list items as the
+    // player sends them, so both look the same. The caller adds what the
+    // row does when tapped. Shared by the player and the web view's page,
+    // src/shared/songrow.js, inlined into both by embed-webview.sh
+    //
+    // item: title, number, playing, queued (the turn of a song put in the
+    // queue by hand), ignored, kept and setColor (a song of a set),
+    // rating (null when not rated), plays (null when not known),
+    // duration in seconds, badge ("shared", "new", "public", "draft" or
+    // none), badgeTitle, trimmed, remixed, note, comments, repeatOne,
+    // liked, cached ("both", "audio", "art", "caching" or none) with
+    // cachedP while caching, greyed, faded and stub.
+    // opts: fold, an element in place of the number; anyRated, the rating
+    // column shown; byPlays, the plays shown instead; onLike(ev, heart)
+    const SR_GOLD = "#f5c518";
+
+    // In em of the row's own size, so the player's 15 px rows and the
+    // web view's larger rows in a car keep the same proportions
+    const SR_CSS = ""
+        + ".mp-sr{display:flex;align-items:center;padding:0.2em 0.133em;cursor:pointer;user-select:none;-moz-user-select:none;"
+        + "-webkit-user-select:none;-webkit-touch-callout:none;box-sizing:border-box}"
+        + ".mp-sr.stub{font-style:italic}"
+        + ".mp-sr.faded{opacity:0.45}"
+        + ".mp-sr.greyed:not(.playing):not(.faded)>:not(.mp-sr-hasfold){opacity:0.45}"
+        + ".mp-sr-dot{flex:0 0 auto;margin-right:0.4em;color:" + ACCENT + ";visibility:hidden;position:relative}"
+        + ".mp-sr-dot.both{visibility:visible}"
+        + ".mp-sr-dot.audio{visibility:visible;color:#b388ff}"
+        + ".mp-sr-dot.caching{visibility:visible;color:transparent}"
+        + ".mp-sr-pie{position:absolute;left:50%;top:50%;width:0.7em;height:0.7em;transform:translate(-50%,-50%);border-radius:50%;"
+        + "background:conic-gradient(" + ACCENT + " calc(var(--mp-sr-p) * 1%),rgba(" + ACCENT_RGB + ",0.25) 0);"
+        + "animation:mp-sr-fade 1.2s ease-in-out infinite}"
+        + "@keyframes mp-sr-fade{50%{opacity:0.45}}"
+        + ".mp-sr-num{flex:0 0 auto;width:2.8em;text-align:right;margin-right:0.533em;color:#888;font-variant-numeric:tabular-nums}"
+        + ".mp-sr-title{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
+        + ".mp-sr.playing .mp-sr-title{color:" + ACCENT + ";font-weight:600}"
+        + ".mp-sr.playing .mp-sr-num{color:" + ACCENT + "}"
+        + ".mp-sr.queued .mp-sr-num{color:" + SR_GOLD + "}"
+        + ".mp-sr.queued:not(.playing) .mp-sr-title{color:#f3dc8a}"
+        + ".mp-sr.ignored:not(.playing) .mp-sr-title{color:#9a9aa2}"
+        + ".mp-sr-ign,.mp-sr-kept{flex:0 0 auto;margin-right:0.417em;font-size:0.8em}"
+        + ".mp-sr-ign{color:#888}"
+        + ".mp-sr-kept{font-weight:700}"
+        + ".mp-sr-plays,.mp-sr-rate,.mp-sr-badge,.mp-sr-rep,.mp-sr-fold,.mp-sr-state{font-size:0.733em}"
+        + ".mp-sr-plays{flex:0 0 auto;min-width:4em;margin-left:0.545em;text-align:right;"
+        + "font-variant-numeric:tabular-nums;white-space:nowrap;color:#999}"
+        + ".mp-sr-plays.unknown{color:#555}"
+        + ".mp-sr-rate{flex:0 0 auto;width:3.273em;margin-left:0.545em;text-align:right;"
+        + "font-variant-numeric:tabular-nums;white-space:nowrap;color:#777}"
+        + ".mp-sr-rate.rated{color:" + SR_GOLD + "}"
+        + ".mp-sr-time{flex:0 0 auto;margin-left:0.533em;color:#888;font-variant-numeric:tabular-nums;font-weight:400}"
+        + ".mp-sr-badge{flex:0 0 auto;width:4.182em;margin-left:0.545em;padding:0;border-radius:0.364em;line-height:1.4545;"
+        + "text-align:center;position:relative;font-weight:400}"
+        + ".mp-sr-badge.public{background:#1f3a2a;color:#7fd6a0}"
+        + ".mp-sr-badge.draft{background:#3a3a42;color:#bbb}"
+        + ".mp-sr-badge.new{background:" + ACCENT + ";color:#000;font-weight:600}"
+        + ".mp-sr-badge.shared{background:#2e2640;color:#c9a8ff}"
+        + ".mp-sr-rep{flex:0 0 auto;margin-left:0.545em;padding:0 0.4545em;border-radius:0.364em;background:" + ACCENT + ";color:#000;"
+        + "line-height:1.4545;font-weight:600}"
+        + ".mp-sr-hbox{flex:0 0 auto;position:relative;display:flex;margin-left:0.4em}"
+        + ".mp-sr-heart{flex:0 0 auto;width:1.333em;text-align:center;cursor:pointer;color:#777;font-weight:400}"
+        + ".mp-sr-heart.liked{color:#ff6b8a}"
+        + ".mp-sr-mark{position:absolute;width:1.385em;height:1.385em;border-radius:50%;color:#1d1d22;line-height:1.385em;"
+        + "font-weight:700;text-align:center;pointer-events:none;font-style:normal}"
+        + ".mp-sr-badge .mp-sr-mark{font-size:0.591em}"
+        + ".mp-sr-hbox .mp-sr-mark{font-size:0.433em}"
+        + ".mp-sr-mark.t{top:-0.615em;right:-0.4615em;background:#c9a83a;opacity:0.85}"
+        + ".mp-sr-mark.r{top:-0.615em;left:-0.4615em;background:#9b7be0;opacity:0.9}"
+        + ".mp-sr-mark.n{bottom:-0.615em;right:-0.4615em;background:#6f9cff;opacity:0.9}"
+        + ".mp-sr-mark.c{bottom:-0.615em;left:-0.4615em;min-width:1.385em;width:auto;padding:0 0.154em;box-sizing:border-box;"
+        + "border-radius:0.615em 0.615em 0.615em 0;background:#ffb454;opacity:0.95}"
+        + ".mp-sr-fold{display:inline-block;box-sizing:border-box;width:3.4545em;padding:0;border-radius:0.818em;"
+        + "border:1.5px solid " + ACCENT + ";background:rgba(" + ACCENT_RGB + ",0.1);color:" + ACCENT + ";font-weight:600;"
+        + "line-height:1.4545;text-align:center;font-variant-numeric:tabular-nums;white-space:nowrap;"
+        + "overflow:hidden;cursor:pointer;font-style:normal}"
+        + ".mp-sr-arrow{display:inline-block;width:1.05em;height:1.05em;vertical-align:-0.18em;fill:none;stroke:currentColor;"
+        + "stroke-width:3;stroke-linecap:round;stroke-linejoin:round}"
+        + ".mp-sr-fold.set{background:rgba(255,255,255,0.06)}"
+        + ".mp-sr-fold.open{background:" + ACCENT + ";color:#000}"
+        + ".mp-sr-grip{flex:0 0 auto;display:flex;align-items:center;justify-content:center;align-self:stretch;width:1.375em;"
+        + "margin-right:0.125em;color:#888;font-size:1.067em;cursor:grab;touch-action:none}"
+        + ".mp-sr-grip.off{opacity:0.3;cursor:not-allowed}"
+        + ".mp-sr.pending .mp-sr-title{opacity:0.45}"
+        + ".mp-sr.pending .mp-sr-num{display:flex;justify-content:flex-end}"
+        + ".mp-sr-state{flex:0 0 auto;margin-left:0.727em;color:#aaa;white-space:nowrap;opacity:0.7}"
+        + ".mp-sr-ring{display:inline-block;box-sizing:border-box;width:0.733em;height:0.733em;border:2px solid rgba(" + ACCENT_RGB + ",0.3);"
+        + "border-top-color:" + ACCENT + ";border-radius:50%;animation:mp-sr-spin 0.8s linear infinite}"
+        + "@keyframes mp-sr-spin{to{transform:rotate(360deg)}}";
+
+    // The rows' style sheet, once in a page
+    function srStyle() {
+
+        if (document.getElementById("mp-sr-style")) {
+            return;
+        }
+
+        const style = document.createElement("style");
+
+        style.id = "mp-sr-style";
+        style.textContent = SR_CSS;
+        (document.head || document.documentElement).appendChild(style);
+    }
+
+    // The length of a song as m:ss, or h:mm:ss
+    function srTime(sec) {
+
+        const s = Math.max(0, Math.round(Number(sec) || 0));
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const r = String(s % 60).padStart(2, "0");
+
+        return h > 0 ? h + ":" + String(m).padStart(2, "0") + ":" + r : m + ":" + r;
+    }
+
+    // The stored dot: cyan for the song and its cover, violet for the song
+    // only, a pie filling while it is being stored, hidden otherwise so the
+    // numbers stay in line
+    function srPaintDot(dot, cached, p) {
+
+        const had = cached === "caching" && dot.classList.contains("caching") ? dot.querySelector(".mp-sr-pie") : null;
+
+        // Still being stored: only the pie moves on, so its pulse goes on
+        // without starting over
+        if (had) {
+
+            had.style.setProperty("--mp-sr-p", String(typeof p === "number" && p >= 0 ? Math.max(4, Math.round(p)) : 100));
+            dot.title = typeof p === "number" && p >= 0 ? "Caching, " + Math.round(p) + "%" : "Caching";
+            return;
+        }
+
+        dot.className = "mp-sr-dot" + (cached === "both" || cached === "audio" || cached === "caching" ? " " + cached : "");
+        dot.textContent = "\u25CF";
+        dot.title = cached === "both" ? "Song and cover cached" : cached === "audio" ? "Song cached, cover not yet" : "";
+
+        if (cached === "caching") {
+
+            const pie = document.createElement("span");
+            const pct = typeof p === "number" && p >= 0 ? Math.max(4, Math.round(p)) : 100;
+
+            pie.className = "mp-sr-pie";
+            pie.style.setProperty("--mp-sr-p", String(pct));
+            dot.appendChild(pie);
+            dot.title = typeof p === "number" && p >= 0 ? "Caching, " + Math.round(p) + "%" : "Caching";
+        }
+    }
+
+    // The heart, filled when liked
+    function srPaintHeart(heart, liked) {
+
+        heart.textContent = liked ? "\u2665" : "\u2661";
+        heart.title = liked ? "Liked, tap to unlike" : "Tap to like";
+        heart.classList.toggle("liked", liked === true);
+    }
+
+    // A song's plays, exact up to 99999, a grey question mark while not known
+    function srPaintPlays(el, n) {
+
+        el.classList.toggle("unknown", typeof n !== "number");
+
+        if (typeof n !== "number") {
+
+            el.textContent = "\u25B6 ?";
+            return;
+        }
+
+        el.textContent = "\u25B6 " + (n >= 1000000 ? (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M"
+            : (n >= 100000 ? Math.round(n / 1000) + "k" : String(n)));
+    }
+
+    // A small mark on the corner of the badge or the heart: T trimmed, R
+    // remix, N a note, a count of comments
+    function srMark(kind, text, title) {
+
+        const mark = document.createElement("span");
+
+        mark.className = "mp-sr-mark " + kind;
+        mark.textContent = text;
+        mark.title = title;
+
+        return mark;
+    }
+
+    function srMarks(box, item) {
+
+        if (item.trimmed) {
+            box.appendChild(srMark("t", "T", "Trimmed"));
+        }
+
+        if (item.remixed) {
+            box.appendChild(srMark("r", "R", "Remix"));
+        }
+
+        if (item.note) {
+
+            box.appendChild(srMark("n", "N", "Note: " + item.note));
+            box.title = (box.title ? box.title + "\n\n" : "") + "Note: " + item.note;
+        }
+
+        if (item.comments > 0) {
+
+            box.appendChild(srMark("c", item.comments > 9 ? "9+" : String(item.comments),
+                item.comments + (item.comments === 1 ? " comment" : " comments") + " on Mureka"));
+        }
+    }
+
+    // The count of a fold and its arrow, in place of a number: songs the
+    // filters leave out in the accent colour, a set in its own colour.
+    // Filled while open. The arrow drawn, as some browsers' fonts have no
+    // such arrows. The caller opens and folds it, and paints it again
+    function srFoldChip(n, open, setColor) {
+
+        const chip = document.createElement("span");
+
+        chip.setAttribute("role", "button");
+        chip.dataset.foldChip = "1";
+        chip.dataset.count = String(n);
+        chip.dataset.color = setColor || "";
+        srPaintFold(chip, open);
+
+        return chip;
+    }
+
+    function srPaintFold(chip, open) {
+
+        const n = chip.dataset.count;
+        const setColor = chip.dataset.color;
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+
+        chip.className = "mp-sr-fold" + (setColor ? " set" : "") + (open ? " open" : "");
+        chip.dataset.open = open ? "1" : "";
+        chip.textContent = "";
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("class", "mp-sr-arrow");
+        path.setAttribute("d", open ? "M6 9l6 6 6-6" : "M9 6l6 6-6 6");
+        svg.appendChild(path);
+        chip.appendChild(svg);
+        chip.appendChild(document.createTextNode(n));
+        chip.title = setColor
+            ? (open ? "Fold the set's " + n + " songs" : "A set of " + n + " songs, tap to show them")
+            : (open ? "Fold the " + n + " songs the filters leave out" : n + " songs the filters leave out, tap to show them");
+        chip.setAttribute("aria-label", chip.title);
+        chip.style.borderColor = setColor || "";
+        chip.style.color = setColor ? (open ? "#000" : setColor) : "";
+        chip.style.background = setColor && open ? setColor : "";
+    }
+
+    // The handle to drag a song to another place in the queue or a
+    // playlist, first in its row. off, the list is not in an order to move
+    // songs in, sorted or searched say
+    function srGrip(off) {
+
+        const grip = document.createElement("span");
+
+        srStyle();
+        grip.className = "mp-sr-grip" + (off ? " off" : "");
+        grip.textContent = "\u2261";
+        grip.title = "Drag to move";
+
+        return grip;
+    }
+
+    function srRow(item, opts) {
+
+        const o = opts || {};
+        const row = document.createElement("div");
+        const dot = document.createElement("span");
+        const num = document.createElement("span");
+        const title = document.createElement("span");
+        const heart = document.createElement("span");
+
+        srStyle();
+        row.className = "mp-sr" + (item.playing ? " playing" : "") + (item.queued ? " queued" : "")
+            + (item.ignored ? " ignored" : "") + (item.greyed ? " greyed" : "") + (item.faded ? " faded" : "")
+            + (item.stub ? " stub" : "");
+        row.title = item.greyed ? "Left out by the filters. Tap to play; long press or right-click for options"
+            : "Play; long press or right-click for options";
+
+        srPaintDot(dot, item.cached, item.cachedP);
+        row.appendChild(dot);
+
+        num.className = "mp-sr-num";
+        num.textContent = item.number === undefined || item.number === null ? "" : String(item.number);
+
+        // Put in the queue by hand: its turn in place of its number
+        if (item.queued) {
+
+            num.textContent = "Q" + item.queued;
+            row.title = "Queued, number " + item.queued + " of the songs put in by hand";
+        }
+
+        if (o.fold) {
+
+            num.textContent = "";
+            num.classList.add("mp-sr-hasfold");
+            num.appendChild(o.fold);
+        }
+
+        row.appendChild(num);
+
+        if (item.ignored) {
+
+            const mark = document.createElement("span");
+
+            mark.className = "mp-sr-ign";
+            mark.textContent = "\u2298";
+            mark.title = "Ignored, queues made from the list leave it out";
+            row.appendChild(mark);
+        }
+
+        // A song of a set has a bar of the set's colour at its start, and a
+        // kept one a tick before its title
+        if (item.setColor) {
+
+            row.style.boxShadow = "inset 3px 0 0 " + item.setColor;
+            row.dataset.setBar = row.style.boxShadow;
+
+            if (item.kept) {
+
+                const tick = document.createElement("span");
+
+                tick.className = "mp-sr-kept";
+                tick.textContent = "\u2713";
+                tick.title = "Kept";
+                tick.style.color = item.setColor;
+                row.appendChild(tick);
+            }
+        }
+
+        title.className = "mp-sr-title";
+        title.textContent = item.title || "Untitled";
+        row.appendChild(title);
+
+        // Sorted by plays, the plays take the rating's place. The rating
+        // only once any song has one, so a library nobody has rated keeps
+        // the room for titles
+        if (o.byPlays) {
+
+            const plays = document.createElement("span");
+
+            plays.className = "mp-sr-plays";
+            srPaintPlays(plays, item.plays);
+            row.appendChild(plays);
+        } else if (o.anyRated) {
+
+            const rate = document.createElement("span");
+            const r = item.rating;
+
+            rate.className = "mp-sr-rate" + (r ? " rated" : "");
+            rate.textContent = r === null || r === undefined ? "" : String(r) + "\u2605";
+            row.appendChild(rate);
+        }
+
+        if (item.duration > 0) {
+
+            const time = document.createElement("span");
+
+            time.className = "mp-sr-time";
+            time.textContent = srTime(item.duration);
+            row.appendChild(time);
+        }
+
+        if (item.badge) {
+
+            const badge = document.createElement("span");
+
+            badge.className = "mp-sr-badge " + item.badge;
+            badge.textContent = item.badge;
+            badge.title = item.badgeTitle || "";
+            srMarks(badge, item);
+            row.appendChild(badge);
+        }
+
+        if (item.repeatOne) {
+
+            const rep = document.createElement("span");
+
+            rep.className = "mp-sr-rep";
+            rep.textContent = "\u21BB 1";
+            rep.title = "Repeat one";
+            row.appendChild(rep);
+        }
+
+        // The heart, always there so the columns stay in line. Without a
+        // badge, the corner marks sit on the heart instead
+        const hbox = document.createElement("span");
+
+        hbox.className = "mp-sr-hbox";
+        heart.className = "mp-sr-heart";
+        srPaintHeart(heart, item.liked === true);
+        hbox.appendChild(heart);
+
+        if (!item.badge) {
+            srMarks(hbox, item);
+        }
+
+        row.appendChild(hbox);
+
+        if (typeof o.onLike === "function") {
+
+            heart.addEventListener("click", function (ev) {
+
+                ev.stopPropagation();
+                o.onLike(ev, heart);
+            });
+        }
+
+        return { el: row, dot: dot, num: num, title: title, heart: heart };
+    }
+
+    // A song still being generated: a ring turning where the number goes,
+    // the title greyed and what happens with it once ready
+    function srPendingRow(item) {
+
+        const row = document.createElement("div");
+        const dot = document.createElement("span");
+        const num = document.createElement("span");
+        const ring = document.createElement("span");
+        const title = document.createElement("span");
+        const state = document.createElement("span");
+
+        srStyle();
+        row.className = "mp-sr pending";
+        row.title = "Still generating on Mureka";
+        dot.className = "mp-sr-dot";
+        dot.textContent = "\u25CF";
+        num.className = "mp-sr-num";
+        ring.className = "mp-sr-ring";
+        num.appendChild(ring);
+        title.className = "mp-sr-title";
+        title.textContent = item.title || "Untitled";
+        state.className = "mp-sr-state";
+        state.textContent = item.sending ? "Asked of Mureka"
+            : item.playWhenReady ? (item.playAfter ? "Plays next when ready" : "Plays when ready") : "Generating";
+
+        row.appendChild(dot);
+        row.appendChild(num);
+        row.appendChild(title);
+        row.appendChild(state);
+
+        // Put in a set already, the set's bar as its songs have
+        if (item.setColor) {
+
+            row.style.boxShadow = "inset 3px 0 0 " + item.setColor;
+            row.dataset.setBar = row.style.boxShadow;
+        }
+
+        return { el: row, title: title };
+    }
+    // END SHARED songrow
+
     // BEGIN SHARED chat
     // Written by embed-webview.sh from src/shared/chat.js. Change that
     // file and run make embed, never the lines up to END SHARED chat
@@ -96531,10 +96715,10 @@
             // The playing song's heart in both lists follows its like
             for (const row of document.querySelectorAll("#rows .row, #miniRows .row")) {
 
-                const heart = row.dataset.id === String(s.id) ? row.querySelector(".rowHeart") : null;
+                const heart = row.dataset.id === String(s.id) ? row.querySelector(".mp-sr-heart") : null;
 
                 if (heart) {
-                    heart.classList.toggle("liked", !!s.liked);
+                    srPaintHeart(heart, !!s.liked);
                 }
             }
         }
@@ -99967,11 +100151,12 @@
     function queueRow(item, pos) {
 
         const row = document.createElement("div");
-        const num = document.createElement("span");
 
         row.setAttribute("role", "button");
-        row.className = "row" + (item.index === pos ? " playing" : "")
-            + (item.index < pos ? " past" : "");
+        row.className = "row";
+
+        // Played already, faded as in the phone's queue
+        item.faded = item.index < pos;
         row.dataset.qi = String(item.index);
         row.dataset.id = String(item.id);
         attachLongPress(row, item.id);
@@ -99979,11 +100164,8 @@
         // A handle to drag any song, played, playing or to come, to another
         // place. Only in the queue's own order, a sorted or searched list is
         // not its order
-        const grip = document.createElement("span");
         const movable = !listSort && !listQuery;
-
-        grip.className = "rowGrip" + (movable ? "" : " off");
-        grip.appendChild(icon("grip"));
+        const grip = srGrip(!movable);
 
         if (movable) {
 
@@ -100125,10 +100307,8 @@
             return;
         }
 
-        const grip = document.createElement("span");
+        const grip = srGrip(false);
 
-        grip.className = "rowGrip";
-        grip.appendChild(icon("grip"));
         grip.title = "Drag to move in " + pd.name;
         grip.addEventListener("pointerdown", function (ev) {
             startQueueDrag(row, ev, false, box, "playlist");
@@ -100758,159 +100938,108 @@
     // What the phone's list shows beside the titles, sent with every list
     let rowMeta = { anyRated: false, badges: false };
 
-    // One song line, laid out like a row in the phone's list: the number,
-    // the cover, the title, the rating column once any song is rated, the
-    // heart, the length, and public or draft when both kinds are listed
-    function songLine(song, row) {
+    // One song line, drawn by srRow as the phone's list draws it, into
+    // the row the caller made, a car's with the cover after the number
+    function songLine(song, row, before) {
 
-        const num = document.createElement("span");
-        const title = document.createElement("span");
-        const rate = document.createElement("span");
-        const time = document.createElement("span");
-        const heart = document.createElement("button");
-        const rated = song.rating !== null && song.rating !== undefined;
+        const isSet = song.setCount > 1;
+        let fold = null;
 
-        // The cache dot, as on the phone: cyan for song and cover, purple
-        // for the song only, orange for the cover only, pulsing while caching
-        const dot = document.createElement("span");
+        // The first of several songs in a row the filters leave out, or of
+        // a set: how many, this one counted, and an arrow to open or fold
+        // them, in place of its number
+        if (song.run > 1 || isSet) {
 
-        dot.className = "rowDot" + (song.cached ? " " + song.cached : "");
+            fold = srFoldChip(isSet ? song.setCount : song.run, isSet ? song.setOpen === true : song.runOpen === true,
+                isSet ? song.setColor : "");
+            fold.dataset.kind = isSet ? "set" : "run";
+            fold.dataset.head = isSet ? song.setId : song.id;
+            fold.addEventListener("click", function (ev) {
 
-        if (song.cached === "caching") {
-            dot.style.setProperty("--p", "4");
+                ev.stopPropagation();
+                toggleFold(fold.dataset.head, fold.dataset.kind);
+            });
         }
 
-        row.appendChild(dot);
+        song.repeatOne = song.playing === true && !!state && state.repeat === "one";
 
-        num.className = "rowNum";
-        num.textContent = song.number ? String(song.number) : "";
+        // A heart to like or unlike, flipped at once, the phone sends the
+        // truth back with the next list
+        const r = srRow(song, {
+            fold: fold,
+            anyRated: !!rowMeta.anyRated,
+            byPlays: listSort === "playsUp" || listSort === "playsDown",
+            onLike: function (ev, heart) {
 
-        // Put in the queue by hand: its turn in place of its number, the
-        // row tinted gold
-        if (song.queued) {
+                song.liked = !song.liked;
+                srPaintHeart(heart, song.liked);
+                send("likeId", song.id);
+            }
+        });
 
-            num.textContent = "Q" + song.queued;
-            row.classList.add("queued");
-            row.title = "Queued, number " + song.queued + " of the songs put in by hand";
+        r.num.after(makeThumb(song.cover));
+
+        // The looks and the parts marked as the line's, so a fresh read can
+        // draw them again, see redrawLine
+        row.dataset.lineClasses = Array.from(r.el.classList).join(" ");
+        row.dataset.sig = rowSig(song);
+
+        for (const c of Array.from(r.el.classList)) {
+            row.classList.add(c);
         }
 
-        row.appendChild(num);
-        row.appendChild(makeThumb(song.cover));
+        row.title = row.title || r.el.title;
 
-        title.className = "rowTitle";
-        title.textContent = song.title;
+        while (r.el.firstChild) {
+
+            r.el.firstChild.dataset.line = "1";
+            row.insertBefore(r.el.firstChild, before || null);
+        }
 
         if (picking && picked.has(String(song.id))) {
             row.classList.add("picked");
         }
-
-        // An ignored song carries a small crossed circle before its title
-        if (song.ignored) {
-
-            title.classList.add("ignored");
-            title.prepend(ignoredMark());
-        }
-
-        // Zero stars shows grey, not rated shows nothing, as on the phone
-        rate.className = "rowRate" + (rated && !song.rating ? " zero" : "");
-        rate.textContent = rated ? song.rating + "\u2605" : "";
-
-        time.className = "rowTime";
-        time.textContent = fmt(song.duration);
-
-        // A heart to like or unlike, like the phone's list. Flipped at once,
-        // the phone sends the truth back with the next list
-        heart.type = "button";
-        heart.className = "rowHeart" + (song.liked ? " liked" : "");
-        heart.setAttribute("aria-label", song.liked ? "Unlike" : "Like");
-        heart.appendChild(icon("heart"));
-
-        heart.addEventListener("click", function (ev) {
-
-            ev.stopPropagation();
-            song.liked = !song.liked;
-            heart.classList.toggle("liked", song.liked);
-            heart.setAttribute("aria-label", song.liked ? "Unlike" : "Like");
-            send("likeId", song.id);
-        });
-
-        row.appendChild(title);
-
-        if (rowMeta.anyRated) {
-            row.appendChild(rate);
-        }
-
-        // The plays beside the rating while the list is sorted by them
-        if (listSort === "playsUp" || listSort === "playsDown") {
-
-            const plays = document.createElement("span");
-
-            paintPlays(plays, song);
-            row.appendChild(plays);
-            row.classList.add("byPlays");
-        }
-
-        row.appendChild(heart);
-        row.appendChild(time);
-
-        // The badge where it tells something, as on the phone. A row of the
-        // queue carries its place in it
-        const shown = badgeShown(song, typeof song.index === "number");
-
-        if (shown) {
-
-            const badge = document.createElement("span");
-
-            paintBadge(badge, song, false);
-            row.appendChild(badge);
-        } else {
-
-            // Without a badge, a trimmed song's T and a note's N sit on the
-            // heart's corners, so the row keeps the columns of the rows
-            // around it
-            if (song.trimmed) {
-                heart.appendChild(trimMark());
-            }
-
-            if (song.remixed) {
-                heart.appendChild(remixMark());
-            }
-
-            noteMarkOn(heart, song.note);
-            commentMarkOn(heart, song.comments);
-        }
     }
 
-    // A song's plays, exact up to 99999 so close counts can be told apart,
-    // shorter above that, a question mark while the phone has not read the
-    // count yet
-    function paintPlays(el, song) {
+    // What a line shows, to tell whether a fresh read changed it
+    function rowSig(item) {
 
-        const known = typeof song.plays === "number";
-        const n = known ? song.plays : 0;
-        let text = String(n);
+        return JSON.stringify([item.title, item.number, item.cached, item.queued, item.ignored, item.kept, item.setColor,
+            item.rating, item.plays, item.duration, item.badge, item.trimmed, item.remixed, item.note, item.comments,
+            item.liked, item.greyed, item.playing, item.cover, item.stub]);
+    }
 
-        if (n >= 1000000) {
-            text = (n / 1000000).toFixed(n < 10000000 ? 1 : 0).replace(/\.0$/, "") + "M";
-        } else if (n >= 100000) {
-            text = Math.round(n / 1000) + "k";
+    // A line drawn again in its row from a fresh read, the row's own
+    // parts and its taps kept, and its cover when the same
+    function redrawLine(row, item) {
+
+        const old = Array.from(row.children).filter(function (c) {
+            return c.dataset.line === "1";
+        });
+        const thumb = row.querySelector(".thumb");
+        const before = old.length > 0 ? old[old.length - 1].nextSibling : null;
+
+        for (const c of old) {
+            c.remove();
         }
 
-        el.className = "rowPlays" + (known ? "" : " unknown");
-        el.textContent = "\u25B6 " + (known ? text : "?");
-        el.title = known ? n + (n === 1 ? " play" : " plays") : "Plays not known yet, Read play counts under Sort or Update reads them";
+        for (const c of String(row.dataset.lineClasses || "").split(" ")) {
+
+            if (c) {
+                row.classList.remove(c);
+            }
+        }
+
+        songLine(item, row, before);
+
+        const fresh = row.querySelector(".thumb");
+
+        if (thumb && fresh && (thumb.dataset.src || "") === (fresh.dataset.src || "")) {
+            fresh.replaceWith(thumb);
+        }
     }
 
     // The small crossed circle before the title of an ignored song
-    function ignoredMark() {
-
-        const mark = icon("ignore");
-
-        mark.classList.add("rowIgnored");
-        mark.setAttribute("title", "Ignored, queues made from the list leave it out");
-
-        return mark;
-    }
 
     // Whether a row carries its badge, by the same rule as the phone: shared
     // always. In the list, while both published songs and drafts are
@@ -100918,81 +101047,10 @@
     // otherwise one the filter would not list, a draft among the published
     // songs say. A song made by trimming without its badge still gets its
     // T, on the heart's corner
-    function badgeShown(song, inQueue) {
-
-        // The filters do not choose the songs of the Sets view
-        if (song.shared || song.inSets) {
-            return true;
-        }
-
-        const f = rowMeta.pubFilter;
-
-        // The list, or a phone that does not say yet
-        if (!inQueue || !f) {
-            return !!rowMeta.badges;
-        }
-
-        if (f === "creator") {
-            return false;
-        }
-
-        if (song.isNew || f === "all") {
-            return true;
-        }
-
-        return (f === "published") !== !!song.published;
-    }
 
     // The badge at the end of a line: new for a song not played yet, else
     // public or draft, with a small T for a song made by trimming and a
     // small N for a song with a note, the note shown under the mouse
-    function paintBadge(badge, song, plain) {
-
-        // Only the T of a trimmed song and the N of a note, no word
-        if (plain) {
-
-            badge.className = "rowBadge plain";
-            badge.textContent = "";
-            badge.removeAttribute("title");
-
-            if (song.trimmed) {
-                badge.appendChild(trimMark());
-            }
-
-            if (song.remixed) {
-                badge.appendChild(remixMark());
-            }
-
-            noteMarkOn(badge, song.note);
-            commentMarkOn(badge, song.comments);
-            return;
-        }
-
-        if (song.shared) {
-
-            badge.className = "rowBadge shared";
-            badge.textContent = "shared";
-            badge.title = "Shared with you from another account, it may not be public";
-            noteMarkOn(badge, song.note);
-            commentMarkOn(badge, song.comments);
-            return;
-        }
-
-        badge.className = "rowBadge" + (song.isNew ? " new" : (song.published ? "" : " draft"));
-        badge.textContent = song.isNew ? "new" : (song.published ? "public" : "draft");
-        badge.removeAttribute("title");
-
-        if (song.trimmed) {
-            badge.appendChild(trimMark());
-        }
-
-        if (song.remixed) {
-            badge.appendChild(remixMark());
-        }
-
-        noteMarkOn(badge, song.note);
-        commentMarkOn(badge, song.comments);
-    }
 
     // A song with comments on Mureka: a small orange speech bubble with
     // their count on the badge's lower left corner
@@ -101460,39 +101518,25 @@
             row.classList.add("setSong");
         }
 
-        songLine(song, row);
+        // Drawn as the phone's list draws it, a car's with its cover, a
+        // question mark while there is none
+        const r = srPendingRow(song);
+        const thumb = makeThumb(song.cover);
 
-        const thumb = row.querySelector(".thumb");
-
-        if (thumb && !song.cover) {
+        if (!song.cover) {
 
             thumb.classList.add("unknown");
             thumb.textContent = "?";
         }
 
-        const time = row.querySelector(".rowTime");
-        const heart = row.querySelector(".rowHeart");
-        const num = row.querySelector(".rowNum");
+        row.classList.add("mp-sr");
+        row.title = r.el.title;
 
-        // A ring turning where the number goes, while the phone asks Mureka
-        if (num) {
-
-            const ring = document.createElement("span");
-
-            ring.className = "pendRing";
-            num.textContent = "";
-            num.appendChild(ring);
+        while (r.el.firstChild) {
+            row.appendChild(r.el.firstChild);
         }
 
-        if (time) {
-            time.textContent = song.sending ? "Asked of Mureka"
-                : song.playWhenReady ? (song.playAfter ? "Plays next when ready" : "Plays when ready") : "Generating";
-        }
-
-        // Nothing to like before it exists
-        if (heart) {
-            heart.remove();
-        }
+        row.querySelector(".mp-sr-num").after(thumb);
 
         const tap = function (ev) {
 
@@ -101637,49 +101681,7 @@
 
     // The chip of a fold of songs the filters leave out, or of a set, in the
     // set's color
-    function foldChip(song, row) {
 
-        const chip = document.createElement("button");
-        const isSet = song.setCount > 1;
-
-        chip.type = "button";
-        chip.className = "foldChip";
-        chip.dataset.kind = isSet ? "set" : "run";
-        chip.dataset.head = isSet ? song.setId : song.id;
-        chip.dataset.count = String(isSet ? song.setCount : song.run);
-
-        if (isSet) {
-            chip.style.setProperty("--chipColor", song.setColor);
-        }
-
-        paintFoldChip(chip, isSet ? song.setOpen === true : song.runOpen === true);
-
-        chip.addEventListener("click", function (ev) {
-
-            ev.stopPropagation();
-            toggleFold(chip.dataset.head, chip.dataset.kind);
-        });
-
-        return chip;
-    }
-
-    function paintFoldChip(chip, open) {
-
-        const n = chip.dataset.count;
-
-        const count = document.createElement("span");
-
-        // Drawn, not a character, some browsers' fonts have no such arrows
-        count.textContent = n;
-        chip.textContent = "";
-        chip.appendChild(icon(open ? "chevronDown" : "chevronRight"));
-        chip.appendChild(count);
-        chip.title = chip.dataset.kind === "set"
-            ? (open ? "Fold the set's " + n + " songs" : "A set of " + n + " songs, tap to show them")
-            : (open ? "Fold the " + n + " songs the filters leave out" : n + " songs the filters leave out, tap to show them");
-        chip.setAttribute("aria-label", chip.title);
-        chip.dataset.open = open ? "1" : "";
-    }
 
     // Opened, the fold's songs are read from the phone and put in under its
     // first, folded they are taken out again, in both lists where it shows,
@@ -101708,7 +101710,7 @@
 
         for (const f of foldBoxes()) {
 
-            const chip = Array.from(f.box.querySelectorAll(".foldChip")).find(function (c) {
+            const chip = Array.from(f.box.querySelectorAll(".mp-sr-fold")).find(function (c) {
                 return c.dataset.head === head && c.dataset.kind === (isSet ? "set" : "run");
             });
 
@@ -101718,7 +101720,7 @@
 
             const headRow = chip.closest(".row");
 
-            paintFoldChip(chip, open);
+            srPaintFold(chip, open);
 
             if (!open) {
 
@@ -101761,7 +101763,7 @@
             }
 
             opened.delete(head);
-            paintFoldChip(chip, false);
+            srPaintFold(chip, false);
             toast("The Android device did not send the songs, tap again", "bad");
         };
 
@@ -101783,7 +101785,7 @@
 
                 dbgLog("Fold", (isSet ? "set " : "run ") + head + " has no songs under it now, the list is read again");
                 opened.delete(head);
-                paintFoldChip(chip, false);
+                srPaintFold(chip, false);
 
                 if (f.box === $("miniRows")) {
                     refreshMini();
@@ -101899,16 +101901,6 @@
     }
 
     // The tick before a kept song's title, in its set's color
-    function keptMark() {
-
-        const tick = document.createElement("span");
-
-        tick.className = "keptMark";
-        tick.appendChild(icon("check"));
-        tick.title = "Kept";
-
-        return tick;
-    }
 
     function makeRow(song, place) {
 
@@ -101920,13 +101912,11 @@
         const row = document.createElement("div");
 
         if (song.stub && stubObserver) {
-
-            row.classList.add("stub");
             stubObserver.observe(row);
         }
 
         row.setAttribute("role", "button");
-        row.className = "row" + (song.playing ? " playing" : "") + (song.greyed ? " greyed" : "");
+        row.className = "row";
         row.dataset.id = song.id;
 
         if (song.runHead) {
@@ -101951,22 +101941,6 @@
 
         attachLongPress(row, song.id);
         songLine(song, row);
-
-        if (song.setKept && row.querySelector(".rowTitle")) {
-            row.querySelector(".rowTitle").prepend(keptMark());
-        }
-
-        // The first of several songs in a row the filters leave out: how
-        // many, this one counted, and an arrow to open or fold them, in
-        // place of its number
-        if (song.run > 1 || song.setCount > 1) {
-
-            const num = row.querySelector(".rowNum");
-
-            num.textContent = "";
-            num.classList.add("hasFold");
-            num.appendChild(foldChip(song, row));
-        }
 
         // Its place in the list as shown, sorted and searched, counting only
         // the songs the filters let through, as the phone numbered them. A
@@ -106324,7 +106298,7 @@
 
     function repaintDots() {
 
-        if ($("browse").style.display !== "flex" || !$("rows").querySelector(".rowDot")) {
+        if ($("browse").style.display !== "flex" || !$("rows").querySelector(".mp-sr-dot")) {
             return;
         }
 
@@ -106359,7 +106333,7 @@
     // The small list over the main page the same way, its rows being songs
     function repaintMini() {
 
-        if (!miniOpen || !$("miniRows").querySelector(".rowDot")) {
+        if (!miniOpen || !$("miniRows").querySelector(".mp-sr-dot")) {
             return;
         }
 
@@ -106538,100 +106512,38 @@
 
         for (const item of now) {
 
-            for (const dot of document.querySelectorAll(".row[data-id=\"" + item.id + "\"] .rowDot")) {
-
-                if (!dot.classList.contains("caching")) {
-                    dot.className = "rowDot caching";
-                }
-
-                dot.style.setProperty("--p", String(item.p >= 0 ? Math.max(4, item.p) : 100));
+            for (const dot of document.querySelectorAll(".row[data-id=\"" + item.id + "\"] .mp-sr-dot")) {
+                srPaintDot(dot, "caching", item.p);
             }
         }
     }
 
-    // The dots, titles and badges of the rows already drawn, from a fresh
-    // read of the same list
+    // The rows already drawn brought up to date from a fresh read of the
+    // same list: a row whose song changed is drawn again, a new cover
+    // watched by its list
     function refreshRows(box, found, queueView) {
 
         for (const row of box.querySelectorAll(".row")) {
 
             const key = queueView ? row.dataset.qi : row.dataset.id;
-            const dot = row.querySelector(".rowDot");
             const item = key !== undefined ? found.get(key) : undefined;
 
-            if (!dot || !item) {
+            if (!item || item.pending || row.dataset.sig === undefined) {
                 continue;
             }
 
-            dot.className = "rowDot" + (item.cached ? " " + item.cached : "");
+            item.faded = row.classList.contains("faded");
 
-            // A song renamed since the list was drawn
-            const title = row.querySelector(".rowTitle");
-
-            if (title && typeof item.title === "string" && item.title && title.textContent !== item.title) {
-
-                title.textContent = item.title;
-
-                // The mark of an ignored song goes with the old text, and
-                // a kept song's tick
-                if (item.ignored) {
-                    title.prepend(ignoredMark());
-                }
-
-                if (item.setKept) {
-                    title.prepend(keptMark());
-                }
+            if (row.dataset.sig === rowSig(item)) {
+                continue;
             }
 
-            // A cover changed since the list was drawn
-            const thumb = row.querySelector(".thumb");
+            const cover = row.querySelector(".thumb");
 
-            if (thumb && typeof item.cover === "string" && item.cover && (thumb.dataset.src || "") !== item.cover) {
+            redrawLine(row, item);
 
-                const fresh = makeThumb(item.cover);
-
-                thumb.replaceWith(fresh);
+            if (row.querySelector(".thumb") !== cover) {
                 thumbsFor(box, row);
-            }
-
-            // A heart liked or unliked since the list was drawn
-            const heartBtn = row.querySelector(".rowHeart");
-
-            if (heartBtn && typeof item.liked === "boolean") {
-                heartBtn.classList.toggle("liked", item.liked);
-            }
-
-            // Comments come or changed since, on the heart of a row with no
-            // badge, the badge's own painted below
-            if (heartBtn && !row.querySelector(".rowBadge")) {
-
-                const had = heartBtn.querySelector(".rowComments");
-                const n = Number(item.comments) || 0;
-                const want = n <= 0 ? "" : n > 9 ? "9+" : String(n);
-
-                if ((had ? had.textContent : "") !== want) {
-
-                    if (had) {
-                        had.remove();
-                    }
-
-                    commentMarkOn(heartBtn, n);
-                }
-            }
-
-            // New becomes public or draft once the phone has reported the
-            // song played
-            const badge = row.querySelector(".rowBadge");
-
-            if (badge) {
-                paintBadge(badge, item, !badgeShown(item, typeof item.index === "number"));
-            }
-
-            // A count fetched since the list was drawn
-            const plays = row.querySelector(".rowPlays");
-
-            if (plays) {
-                paintPlays(plays, item);
             }
         }
     }
@@ -106652,7 +106564,7 @@
             // Only at the very top, with one finger, and never from the handle
             // that drags a song in the queue
             pullArmed = !pullHeld && ev.touches.length === 1 && target.rows.scrollTop <= 0
-                && !(ev.target.closest && ev.target.closest(".rowGrip"));
+                && !(ev.target.closest && ev.target.closest(".mp-sr-grip"));
             pulling = false;
 
             if (pullArmed) {
@@ -106731,7 +106643,7 @@
                 return;
             }
 
-            if (target.rows.scrollTop > 0 || (ev.target.closest && ev.target.closest(".rowGrip"))) {
+            if (target.rows.scrollTop > 0 || (ev.target.closest && ev.target.closest(".mp-sr-grip"))) {
                 return;
             }
 
@@ -107483,11 +107395,8 @@
 
                 // A handle to drag the song to another place, in the
                 // queue's own order only, all of it shown
-                const grip = document.createElement("span");
                 const movable = !listSort && !miniQuery;
-
-                grip.className = "rowGrip" + (movable ? "" : " off");
-                grip.appendChild(icon("grip"));
+                const grip = srGrip(!movable);
 
                 if (movable) {
 
@@ -110721,7 +110630,7 @@
                     continue;
                 }
 
-                const rate = row.querySelector(".rowRate");
+                const rate = row.querySelector(".mp-sr-rate");
 
                 if (!rate) {
 
@@ -110729,7 +110638,7 @@
                     continue;
                 }
 
-                rate.className = "rowRate" + (rated && !rating ? " zero" : "");
+                rate.className = "mp-sr-rate" + (rating ? " rated" : "");
                 rate.textContent = rated ? rating + "\u2605" : "";
             }
         }
@@ -112400,7 +112309,7 @@
 
             const row = ev.target.closest ? ev.target.closest(".row[data-id]") : null;
 
-            if (!row || (ev.target.closest(".rowGrip"))) {
+            if (!row || (ev.target.closest(".mp-sr-grip"))) {
                 return;
             }
 
@@ -118667,7 +118576,7 @@
 
         while (el && el !== box.parentNode) {
 
-            if (el.matches && el.matches("textarea, select, .rowGrip, [data-noswipe]")) {
+            if (el.matches && el.matches("textarea, select, .mp-sr-grip, [data-noswipe]")) {
                 return true;
             }
 
@@ -118870,7 +118779,7 @@
             // that says so a drag on a song closes it too, only the handles
             // that move a song keep the press
             const blocked = p.mouseRows
-                ? !!ev.target.closest("textarea, select, .rowGrip, input[type=range]")
+                ? !!ev.target.closest("textarea, select, .mp-sr-grip, input[type=range]")
                 : swipeBlocked(ev.target, box) || ev.target.closest(".row");
 
             if (ev.pointerType !== "mouse" || ev.button !== 0 || blocked || (p.when && !p.when())) {
