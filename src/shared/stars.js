@@ -123,3 +123,22 @@
 
         return r >= n ? 1 : r - (n - 1);
     }
+
+    // What a tap on star n makes of the current rating, the phone's own
+    // cycle: a rating inside star n steps a quarter down and after n - 0.75
+    // it is full again, any other rating becomes n. The first star runs
+    // down to 0 and round again
+    function nextRating(current, n) {
+
+        const low = n === 1 ? 0 : n - 1;
+        const inside = current !== null && current !== undefined && current <= n
+            && (n === 1 ? current >= low : current > low);
+
+        if (!inside) {
+            return n;
+        }
+
+        const next = current - 0.25;
+
+        return next < low || (n > 1 && next === low) ? n : next;
+    }

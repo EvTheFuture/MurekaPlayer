@@ -39,6 +39,8 @@
         + ".mp-tr .trimRing,.trimCover .trimRing{width:28px;height:28px;box-sizing:border-box;border:3px solid rgba(" + ACCENT_RGB + ",0.25);"
         + "border-top-color:" + ACCENT + ";border-radius:50%;animation:mp-ui-turn 0.8s linear infinite;flex:0 0 auto}"
         + ".trimCover .trimRing.big{width:56px;height:56px;border-width:5px}"
+        + ".mp-tr .trimRing.small{width:14px;height:14px;border-width:2px;border-color:rgba(0,0,0,0.25);border-top-color:#000;"
+        + "display:inline-block;margin-right:8px;vertical-align:-2px}"
         + ".mp-tr .trimTime{display:flex;align-items:center;gap:4px}"
         + ".mp-tr .pField{flex:1 1 auto;min-width:0;box-sizing:border-box;margin:0;font:inherit;padding:5px 8px;border:1px solid #3a3a42;"
         + "border-radius:6px;background:#26262c;color:#fff;height:auto}"
@@ -645,4 +647,72 @@
             de.g.textBaseline = "top";
             de.g.fillText(trimGainText(), de.w - 4 * de.dpr, 3 * de.dpr);
         }
+    }
+
+    // Ask before trimming, with the choice to delete the original
+    function askTrim() {
+
+        if (!tr || !tr.buffer || tr.busy) {
+            return;
+        }
+
+        // The part to remix: within Mureka's limits, handed on as it is
+        if (tr.pick) {
+
+            const len = tr.end - tr.start;
+
+            if (len < tr.pick.min - 0.0005 || len > tr.pick.max + 0.0005) {
+
+                trimStatus("A remix takes a part of " + trimTimeText(tr.pick.min) + " to " + trimTimeText(tr.pick.max)
+                    + ", this is " + trimTimeText(len));
+                return;
+            }
+
+            const pick = tr.pick;
+            const range = { start: Math.round(tr.start * 1000), end: Math.round(tr.end * 1000) };
+
+            pick.chosen = true;
+            closeTrimmer();
+            pick.done(range);
+            return;
+        }
+
+        // Nothing cut off, nothing for Mureka to do
+        if (tr.start < 0.001 && tr.end > tr.duration - 0.001) {
+
+            trimStatus("Move the start or the end first");
+            return;
+        }
+
+        trimAskPaint();
+        trimUi.askDelete.checked = false;
+        trimUi.ask.style.display = "flex";
+    }
+
+    // The Trim button busy with a turning ring, and not to be pressed again
+    // while Mureka works
+    function trimBusy(on) {
+
+        if (!trimUi) {
+            return;
+        }
+
+        if (tr) {
+            tr.busy = on;
+        }
+
+        trimUi.trimBtn.textContent = "";
+
+        if (on) {
+
+            const ring = document.createElement("span");
+
+            ring.className = "trimRing small";
+            trimUi.trimBtn.appendChild(ring);
+            trimUi.trimBtn.appendChild(document.createTextNode("Trimming"));
+        } else {
+            trimUi.trimBtn.textContent = tr && tr.pick ? "Use this part" : "Trim";
+        }
+
+        trimUi.trimBtn.disabled = on || !tr || !tr.buffer;
     }

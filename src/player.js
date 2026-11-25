@@ -164,6 +164,25 @@
 
         return r >= n ? 1 : r - (n - 1);
     }
+
+    // What a tap on star n makes of the current rating, the phone's own
+    // cycle: a rating inside star n steps a quarter down and after n - 0.75
+    // it is full again, any other rating becomes n. The first star runs
+    // down to 0 and round again
+    function nextRating(current, n) {
+
+        const low = n === 1 ? 0 : n - 1;
+        const inside = current !== null && current !== undefined && current <= n
+            && (n === 1 ? current >= low : current > low);
+
+        if (!inside) {
+            return n;
+        }
+
+        const next = current - 0.25;
+
+        return next < low || (n > 1 && next === low) ? n : next;
+    }
     // END SHARED stars
 
     // Guard against the bookmarklet being tapped twice
@@ -202,7 +221,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.328";
+    const VERSION = "2.0.1.329";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -4410,19 +4429,6 @@
         return Math.round((low + Math.random() * (high - low)) * 1000);
     }
 
-    // A whole number from saved settings, kept inside its range, or the
-    // default when it is missing or not a number
-    function numberIn(v, min, max, fallback) {
-
-        const n = parseInt(v, 10);
-
-        if (!isFinite(n)) {
-            return fallback;
-        }
-
-        return Math.max(min, Math.min(max, n));
-    }
-
     // The pace once every count is up to date, the shortest wait of a range
     // in minutes: 1 to 3, 3 to 10 or 10 to 30, or 0 when it waits for counts
     // to grow old instead
@@ -6459,25 +6465,6 @@
                 reassertNowPlaying();
             }
         }
-    }
-
-    // What a tap on star n makes of the current rating. A rating inside
-    // star n, above n - 1 and up to n, steps a quarter down, and after
-    // n - 0.75 it is full again: 5, 4.75, 4.5, 4.25 and 5 again. Any other
-    // rating, 3.5 with a tap on star 5 say, becomes n. The first star runs
-    // 1, 0.75, 0.5, 0.25, 0 and round again, so zero stays reachable
-    function nextRating(current, n) {
-
-        const low = n === 1 ? 0 : n - 1;
-        const inside = current !== null && current <= n && (n === 1 ? current >= low : current > low);
-
-        if (!inside) {
-            return n;
-        }
-
-        const next = current - 0.25;
-
-        return next < low || (n > 1 && next === low) ? n : next;
     }
 
     // A row of five tappable stars for whichever song getSong returns. A tap
@@ -15841,6 +15828,25 @@
 
         return { at: at / rate, level: bestLevel, moved: at / rate - from };
     }
+
+    // A count as it is shown in small places: as it is under a thousand, then
+    // 1.0k, 1.3k, 12k, and 1.2M for millions
+    function compactCount(n) {
+
+        if (typeof n !== "number" || !isFinite(n)) {
+            return "";
+        }
+
+        if (n < 1000) {
+            return String(n);
+        }
+
+        if (n < 1000000) {
+            return (n < 10000 ? (Math.floor(n / 100) / 10).toFixed(1) : String(Math.floor(n / 1000))) + "k";
+        }
+
+        return (Math.floor(n / 100000) / 10).toFixed(1) + "M";
+    }
     // END SHARED misc
 
     // BEGIN SHARED songrow
@@ -21001,11 +21007,6 @@
             clearInterval(btPollTimer);
             btPollTimer = 0;
         }
-    }
-
-    // A funnel, the button opening all the filters
-    function iconFilter() {
-        return makeSvgIcon([["polygon", { points: "22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" }]]);
     }
 
     // Three sliders, the sound profile button
@@ -35299,25 +35300,6 @@
         }
 
         metaMarquee.setText(text);
-    }
-
-    // A count as it is shown in small places: as it is under a thousand, then
-    // 1.0k, 1.3k, 12k, and 1.2M for millions
-    function compactCount(n) {
-
-        if (typeof n !== "number" || !isFinite(n)) {
-            return "";
-        }
-
-        if (n < 1000) {
-            return String(n);
-        }
-
-        if (n < 1000000) {
-            return (n < 10000 ? (Math.floor(n / 100) / 10).toFixed(1) : String(Math.floor(n / 1000))) + "k";
-        }
-
-        return (Math.floor(n / 100000) / 10).toFixed(1) + "M";
     }
 
     // Build the plays and likes line for the current song, empty until known
@@ -68523,6 +68505,8 @@
         + ".mp-tr .trimRing,.trimCover .trimRing{width:28px;height:28px;box-sizing:border-box;border:3px solid rgba(" + ACCENT_RGB + ",0.25);"
         + "border-top-color:" + ACCENT + ";border-radius:50%;animation:mp-ui-turn 0.8s linear infinite;flex:0 0 auto}"
         + ".trimCover .trimRing.big{width:56px;height:56px;border-width:5px}"
+        + ".mp-tr .trimRing.small{width:14px;height:14px;border-width:2px;border-color:rgba(0,0,0,0.25);border-top-color:#000;"
+        + "display:inline-block;margin-right:8px;vertical-align:-2px}"
         + ".mp-tr .trimTime{display:flex;align-items:center;gap:4px}"
         + ".mp-tr .pField{flex:1 1 auto;min-width:0;box-sizing:border-box;margin:0;font:inherit;padding:5px 8px;border:1px solid #3a3a42;"
         + "border-radius:6px;background:#26262c;color:#fff;height:auto}"
@@ -69130,6 +69114,74 @@
             de.g.fillText(trimGainText(), de.w - 4 * de.dpr, 3 * de.dpr);
         }
     }
+
+    // Ask before trimming, with the choice to delete the original
+    function askTrim() {
+
+        if (!tr || !tr.buffer || tr.busy) {
+            return;
+        }
+
+        // The part to remix: within Mureka's limits, handed on as it is
+        if (tr.pick) {
+
+            const len = tr.end - tr.start;
+
+            if (len < tr.pick.min - 0.0005 || len > tr.pick.max + 0.0005) {
+
+                trimStatus("A remix takes a part of " + trimTimeText(tr.pick.min) + " to " + trimTimeText(tr.pick.max)
+                    + ", this is " + trimTimeText(len));
+                return;
+            }
+
+            const pick = tr.pick;
+            const range = { start: Math.round(tr.start * 1000), end: Math.round(tr.end * 1000) };
+
+            pick.chosen = true;
+            closeTrimmer();
+            pick.done(range);
+            return;
+        }
+
+        // Nothing cut off, nothing for Mureka to do
+        if (tr.start < 0.001 && tr.end > tr.duration - 0.001) {
+
+            trimStatus("Move the start or the end first");
+            return;
+        }
+
+        trimAskPaint();
+        trimUi.askDelete.checked = false;
+        trimUi.ask.style.display = "flex";
+    }
+
+    // The Trim button busy with a turning ring, and not to be pressed again
+    // while Mureka works
+    function trimBusy(on) {
+
+        if (!trimUi) {
+            return;
+        }
+
+        if (tr) {
+            tr.busy = on;
+        }
+
+        trimUi.trimBtn.textContent = "";
+
+        if (on) {
+
+            const ring = document.createElement("span");
+
+            ring.className = "trimRing small";
+            trimUi.trimBtn.appendChild(ring);
+            trimUi.trimBtn.appendChild(document.createTextNode("Trimming"));
+        } else {
+            trimUi.trimBtn.textContent = tr && tr.pick ? "Use this part" : "Trim";
+        }
+
+        trimUi.trimBtn.disabled = on || !tr || !tr.buffer;
+    }
     // END SHARED trimui
 
     let tr = null;
@@ -69220,72 +69272,6 @@
             + " kB in " + (Date.now() - t0) + " ms");
 
         return bytes;
-    }
-
-    // A small row of buttons where one is chosen
-    function trimSegments(choices, get, set) {
-
-        const row = document.createElement("div");
-        const buttons = [];
-
-        row.style.cssText = "display:flex;gap:6px";
-
-        const paint = function () {
-
-            for (const b of buttons) {
-
-                const on = b.value === get();
-
-                b.el.style.background = on ? ACCENT : "#333";
-                b.el.style.color = on ? "#000" : "#fff";
-            }
-        };
-
-        for (const c of choices) {
-
-            const el = makeButton(c.label, "#333", "#fff", function () {
-                set(c.value);
-                paint();
-            });
-
-            // The choice fades over, short but not at once
-            el.style.transition = "background-color 0.22s ease-in-out, color 0.22s ease-in-out";
-
-            buttons.push({ el: el, value: c.value });
-            row.appendChild(el);
-        }
-
-        paint();
-        row.paint = paint;
-
-        return row;
-    }
-
-    // A switch that belongs to the trimmer alone
-    function trimSwitch(label, get, set) {
-
-        const row = document.createElement("div");
-        const name = document.createElement("span");
-
-        row.classList.add("mp-between");
-        name.textContent = label;
-        name.classList.add("mp-grow");
-
-        const btn = makeButton("Off", "#333", "#fff", function () {
-
-            set(!get());
-            updateToggleButton(btn, get());
-        });
-
-        btn.style.flex = "0 0 auto";
-        btn.style.minWidth = "56px";
-        btn.style.padding = "6px 12px";
-        updateToggleButton(btn, get());
-
-        row.appendChild(name);
-        row.appendChild(btn);
-
-        return row;
     }
 
     // The preview is heard here, in the player, never elsewhere
@@ -69498,9 +69484,8 @@
 
         // Nothing to trim until the song is read
         trimUi.trimBtn.disabled = true;
-        trimUi.trimBtn.style.opacity = "0.5";
         trimUi.edgeRow.paint();
-        updateToggleButton(trimUi.loopRow.querySelector("button"), false);
+        trimUi.loopRow.paint();
         trimEl.style.display = "flex";
         trimEl.scrollTop = 0;
         trimLoading("Looking for the song");
@@ -69578,7 +69563,6 @@
 
             tr.viewC = tr.end;
             trimUi.trimBtn.disabled = false;
-            trimUi.trimBtn.style.opacity = "1";
             trimLoading("");
             trimStatus(short > 0.2
                 ? "The file reads " + short.toFixed(1) + " s shorter than Mureka says, " + trimTimeText(said)
@@ -69799,76 +69783,6 @@
         return Math.min(tr.playTo, tr.playFrom + Math.max(0, trimCtx.currentTime - tr.playAt));
     }
 
-
-    // The Trim button busy with a turning ring, and not to be pressed again
-    // while Mureka works
-    function trimBusy(on) {
-
-        if (!trimUi) {
-            return;
-        }
-
-        if (tr) {
-            tr.busy = on;
-        }
-
-        trimUi.trimBtn.textContent = "";
-
-        if (on) {
-
-            const ring = document.createElement("span");
-
-            ring.style.cssText = "width:14px;height:14px;border:2px solid rgba(0,0,0,0.25);border-top-color:#000;border-radius:50%;animation:mureka-spin 0.8s linear infinite;flex:0 0 auto";
-            trimUi.trimBtn.appendChild(ring);
-            trimUi.trimBtn.appendChild(document.createTextNode("Trimming"));
-        } else {
-            trimUi.trimBtn.textContent = tr && tr.pick ? "Use this part" : "Trim";
-        }
-
-        trimUi.trimBtn.disabled = on;
-        trimUi.trimBtn.style.opacity = on ? "0.7" : "1";
-        trimUi.trimBtn.style.cursor = on ? "default" : "pointer";
-    }
-
-    // Ask before trimming, with the choice to delete the original
-    function askTrim() {
-
-        if (!tr || !tr.buffer || tr.busy) {
-            return;
-        }
-
-        // The part to remix: within Mureka's limits, handed on as it is
-        if (tr.pick) {
-
-            const len = tr.end - tr.start;
-
-            if (len < tr.pick.min - 0.0005 || len > tr.pick.max + 0.0005) {
-
-                trimStatus("A remix takes a part of " + trimTimeText(tr.pick.min) + " to " + trimTimeText(tr.pick.max)
-                    + ", this is " + trimTimeText(len));
-                return;
-            }
-
-            const pick = tr.pick;
-            const range = { start: Math.round(tr.start * 1000), end: Math.round(tr.end * 1000) };
-
-            pick.chosen = true;
-            closeTrimmer();
-            pick.done(range);
-            return;
-        }
-
-        // Nothing cut off, nothing for Mureka to do
-        if (tr.start < 0.001 && tr.end > tr.duration - 0.001) {
-
-            trimStatus("Move the start or the end first");
-            return;
-        }
-
-        trimAskPaint();
-        trimUi.askDelete.set(false);
-        trimUi.ask.style.display = "flex";
-    }
 
     // Delete a song of the account's own on Mureka, the request Mureka's own site
     // sends. Answers whether it went and, when not, why
@@ -89573,6 +89487,25 @@
 
         return r >= n ? 1 : r - (n - 1);
     }
+
+    // What a tap on star n makes of the current rating, the phone's own
+    // cycle: a rating inside star n steps a quarter down and after n - 0.75
+    // it is full again, any other rating becomes n. The first star runs
+    // down to 0 and round again
+    function nextRating(current, n) {
+
+        const low = n === 1 ? 0 : n - 1;
+        const inside = current !== null && current !== undefined && current <= n
+            && (n === 1 ? current >= low : current > low);
+
+        if (!inside) {
+            return n;
+        }
+
+        const next = current - 0.25;
+
+        return next < low || (n > 1 && next === low) ? n : next;
+    }
     // END SHARED stars
 
     const $ = function (id) {
@@ -92730,21 +92663,6 @@
         return state.duration ? Math.min(p, state.duration) : p;
     }
 
-    // A count as it shows beside the heart: as it is under a thousand, then
-    // 1.0k, 1.3k, 12k, and 1.2M for millions
-    function compactCount(n) {
-
-        if (n < 1000) {
-            return String(n);
-        }
-
-        if (n < 1000000) {
-            return (n < 10000 ? (Math.floor(n / 100) / 10).toFixed(1) : String(Math.floor(n / 1000))) + "k";
-        }
-
-        return (Math.floor(n / 100000) / 10).toFixed(1) + "M";
-    }
-
     // A reading from the phone as JSON, given up after a while so a phone
     // that does not answer cannot leave a list or panel waiting for good
     function fetchJson(url, ms) {
@@ -93441,6 +93359,25 @@
         }
 
         return { at: at / rate, level: bestLevel, moved: at / rate - from };
+    }
+
+    // A count as it is shown in small places: as it is under a thousand, then
+    // 1.0k, 1.3k, 12k, and 1.2M for millions
+    function compactCount(n) {
+
+        if (typeof n !== "number" || !isFinite(n)) {
+            return "";
+        }
+
+        if (n < 1000) {
+            return String(n);
+        }
+
+        if (n < 1000000) {
+            return (n < 10000 ? (Math.floor(n / 100) / 10).toFixed(1) : String(Math.floor(n / 1000))) + "k";
+        }
+
+        return (Math.floor(n / 100000) / 10).toFixed(1) + "M";
     }
     // END SHARED misc
 
@@ -96944,25 +96881,6 @@
         dbgLog("Page", "opened " + location.href + " from " + (document.referrer || "no referrer")
             + ", " + dbgDisplayMode());
     })();
-
-    // What a tap on star n makes of the current rating, the phone's own
-    // cycle: a rating inside star n steps a quarter down and after n - 0.75
-    // it is full again, any other rating becomes n. The first star runs
-    // down to 0 and round again
-    function nextRating(current, n) {
-
-        const low = n === 1 ? 0 : n - 1;
-        const inside = current !== null && current !== undefined && current <= n
-            && (n === 1 ? current >= low : current > low);
-
-        if (!inside) {
-            return n;
-        }
-
-        const next = current - 0.25;
-
-        return next < low || (n > 1 && next === low) ? n : next;
-    }
 
     // A rating tapped here, shown until the phone's state has it too, so a
     // state sent before the phone heard of the tap does not take it back
@@ -122855,6 +122773,8 @@
         + ".mp-tr .trimRing,.trimCover .trimRing{width:28px;height:28px;box-sizing:border-box;border:3px solid rgba(" + ACCENT_RGB + ",0.25);"
         + "border-top-color:" + ACCENT + ";border-radius:50%;animation:mp-ui-turn 0.8s linear infinite;flex:0 0 auto}"
         + ".trimCover .trimRing.big{width:56px;height:56px;border-width:5px}"
+        + ".mp-tr .trimRing.small{width:14px;height:14px;border-width:2px;border-color:rgba(0,0,0,0.25);border-top-color:#000;"
+        + "display:inline-block;margin-right:8px;vertical-align:-2px}"
         + ".mp-tr .trimTime{display:flex;align-items:center;gap:4px}"
         + ".mp-tr .pField{flex:1 1 auto;min-width:0;box-sizing:border-box;margin:0;font:inherit;padding:5px 8px;border:1px solid #3a3a42;"
         + "border-radius:6px;background:#26262c;color:#fff;height:auto}"
@@ -123462,6 +123382,74 @@
             de.g.fillText(trimGainText(), de.w - 4 * de.dpr, 3 * de.dpr);
         }
     }
+
+    // Ask before trimming, with the choice to delete the original
+    function askTrim() {
+
+        if (!tr || !tr.buffer || tr.busy) {
+            return;
+        }
+
+        // The part to remix: within Mureka's limits, handed on as it is
+        if (tr.pick) {
+
+            const len = tr.end - tr.start;
+
+            if (len < tr.pick.min - 0.0005 || len > tr.pick.max + 0.0005) {
+
+                trimStatus("A remix takes a part of " + trimTimeText(tr.pick.min) + " to " + trimTimeText(tr.pick.max)
+                    + ", this is " + trimTimeText(len));
+                return;
+            }
+
+            const pick = tr.pick;
+            const range = { start: Math.round(tr.start * 1000), end: Math.round(tr.end * 1000) };
+
+            pick.chosen = true;
+            closeTrimmer();
+            pick.done(range);
+            return;
+        }
+
+        // Nothing cut off, nothing for Mureka to do
+        if (tr.start < 0.001 && tr.end > tr.duration - 0.001) {
+
+            trimStatus("Move the start or the end first");
+            return;
+        }
+
+        trimAskPaint();
+        trimUi.askDelete.checked = false;
+        trimUi.ask.style.display = "flex";
+    }
+
+    // The Trim button busy with a turning ring, and not to be pressed again
+    // while Mureka works
+    function trimBusy(on) {
+
+        if (!trimUi) {
+            return;
+        }
+
+        if (tr) {
+            tr.busy = on;
+        }
+
+        trimUi.trimBtn.textContent = "";
+
+        if (on) {
+
+            const ring = document.createElement("span");
+
+            ring.className = "trimRing small";
+            trimUi.trimBtn.appendChild(ring);
+            trimUi.trimBtn.appendChild(document.createTextNode("Trimming"));
+        } else {
+            trimUi.trimBtn.textContent = tr && tr.pick ? "Use this part" : "Trim";
+        }
+
+        trimUi.trimBtn.disabled = on || !tr || !tr.buffer;
+    }
     // END SHARED trimui
 
     let trimToken = 0;
@@ -123983,74 +123971,6 @@
         }
 
         return Math.min(tr.playTo, tr.playFrom + Math.max(0, trimCtx.currentTime - tr.playAt));
-    }
-
-    // The Trim button busy with a turning ring, and not to be pressed again
-    // while Mureka works
-    function trimBusy(on) {
-
-        if (!trimUi) {
-            return;
-        }
-
-        if (tr) {
-            tr.busy = on;
-        }
-
-        trimUi.trimBtn.textContent = "";
-
-        if (on) {
-
-            const ring = document.createElement("span");
-
-            ring.className = "trimRing small";
-            trimUi.trimBtn.appendChild(ring);
-            trimUi.trimBtn.appendChild(document.createTextNode("Trimming"));
-        } else {
-            trimUi.trimBtn.textContent = tr && tr.pick ? "Use this part" : "Trim";
-        }
-
-        trimUi.trimBtn.disabled = on || !tr || !tr.buffer;
-    }
-
-    // Ask before trimming, with the choice to delete the original
-    function askTrim() {
-
-        if (!tr || !tr.buffer || tr.busy) {
-            return;
-        }
-
-        // The part to remix: within Mureka's limits, handed on as it is
-        if (tr.pick) {
-
-            const len = tr.end - tr.start;
-
-            if (len < tr.pick.min - 0.0005 || len > tr.pick.max + 0.0005) {
-
-                trimStatus("A remix takes a part of " + trimTimeText(tr.pick.min) + " to " + trimTimeText(tr.pick.max)
-                    + ", this is " + trimTimeText(len));
-                return;
-            }
-
-            const pick = tr.pick;
-            const range = { start: Math.round(tr.start * 1000), end: Math.round(tr.end * 1000) };
-
-            pick.chosen = true;
-            closeTrimmer();
-            pick.done(range);
-            return;
-        }
-
-        // Nothing cut off, nothing for Mureka to do
-        if (tr.start < 0.001 && tr.end > tr.duration - 0.001) {
-
-            trimStatus("Move the start or the end first");
-            return;
-        }
-
-        trimAskPaint();
-        trimUi.askDelete.checked = false;
-        trimUi.ask.style.display = "flex";
     }
 
     // Hand the trim to the phone, which sends it to Mureka. How it goes

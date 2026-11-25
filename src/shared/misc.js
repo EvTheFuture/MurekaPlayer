@@ -608,3 +608,22 @@
 
         return { at: at / rate, level: bestLevel, moved: at / rate - from };
     }
+
+    // A count as it is shown in small places: as it is under a thousand, then
+    // 1.0k, 1.3k, 12k, and 1.2M for millions
+    function compactCount(n) {
+
+        if (typeof n !== "number" || !isFinite(n)) {
+            return "";
+        }
+
+        if (n < 1000) {
+            return String(n);
+        }
+
+        if (n < 1000000) {
+            return (n < 10000 ? (Math.floor(n / 100) / 10).toFixed(1) : String(Math.floor(n / 1000))) + "k";
+        }
+
+        return (Math.floor(n / 100000) / 10).toFixed(1) + "M";
+    }
