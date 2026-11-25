@@ -758,15 +758,13 @@ final class PlayerWeb {
                 MAIN.post(() -> WebViewSettings.applyDebugging(appContext));
             }
 
-            // What starts the power saving, the devices that count or the
-            // master switch: a countdown running stops
-            if (WebViewSettings.SAVE_TRIGGER.equals(key) || WebViewSettings.SAVE_BT.equals(key)
-                || WebViewSettings.CHARGE_SAVE.equals(key)) {
-                ChargeWatch.settingsChanged();
-            }
+            // The power saving's master switches, the devices that count and
+            // the background work's settings: a countdown or the quiet follows
+            ChargeWatch.settingsChanged(key);
 
             // Turning the hotspot off, or how: a wait for browsers follows it
-            if (WebViewSettings.UNPLUG_HOTSPOT.equals(key) || WebViewSettings.HOTSPOT_OFF_MODE.equals(key)) {
+            if (WebViewSettings.UNPLUG_HOTSPOT.equals(key) || WebViewSettings.BT_HOTSPOT.equals(key)
+                || WebViewSettings.HOTSPOT_OFF_MODE.equals(key)) {
                 ChargeWatch.hotspotSettingChanged();
             }
 
@@ -1083,6 +1081,7 @@ final class PlayerWeb {
                 o.put("countdown", ChargeWatch.left());
                 o.put("reason", ChargeWatch.reason());
                 o.put("quiet", ChargeWatch.quiet());
+                o.put("quietNow", PlayerService.quietNow());
                 o.put("start", Hotspot.startCommand(appContext));
                 o.put("paired", HelperStart.paired(appContext));
                 o.put("pairing", HelperStart.pairText());

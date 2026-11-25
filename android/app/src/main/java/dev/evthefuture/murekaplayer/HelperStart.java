@@ -122,8 +122,7 @@ final class HelperStart {
     // Whether the hotspot settings want the helper
     private static boolean wanted(Context c) {
 
-        return paired(c) && WebViewSettings.on(c, WebViewSettings.CHARGE_SAVE)
-            && (WebViewSettings.on(c, WebViewSettings.UNPLUG_HOTSPOT) || WebViewSettings.on(c, WebViewSettings.PLUG_HOTSPOT));
+        return paired(c) && WebViewSettings.hotspotWanted(c);
     }
 
     // Started on joining a Wi-Fi, when wanted and not running. The phone's

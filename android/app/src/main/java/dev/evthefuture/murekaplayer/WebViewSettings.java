@@ -85,13 +85,26 @@ final class WebViewSettings {
     static final int TABLET_DP = 600;
 
     // What happens when the charger is pulled out and plugged in again, a
-    // phone left somewhere warm stays cooler with less running
+    // phone left somewhere warm stays cooler with less running. Quiet idle
+    // stops the background work only once nothing is in use: the hotspot
+    // off, no browser connected and no music playing
     static final String CHARGE_SAVE = "chargeSave";
     static final String CHARGE_GRACE = "chargeGrace";
     static final String UNPLUG_PAUSE = "unplugPause";
     static final String UNPLUG_HOTSPOT = "unplugHotspot";
     static final String UNPLUG_QUIET = "unplugQuiet";
+    static final String UNPLUG_QUIET_IDLE = "unplugQuietIdle";
     static final String PLUG_HOTSPOT = "plugHotspot";
+
+    // The same for the chosen Bluetooth devices disconnecting and
+    // connecting again, set apart from the charger's
+    static final String BT_SAVE = "btSave";
+    static final String BT_GRACE = "btGrace";
+    static final String BT_PAUSE = "btPause";
+    static final String BT_HOTSPOT = "btHotspot";
+    static final String BT_QUIET = "btQuiet";
+    static final String BT_QUIET_IDLE = "btQuietIdle";
+    static final String BT_PLUG_HOTSPOT = "btPlugHotspot";
 
     // When the hotspot is to go off and browsers of the web view are on it:
     // off anyway, or once they have all gone
@@ -99,8 +112,9 @@ final class WebViewSettings {
     static final String HOTSPOT_OFF_FORCE = "force";
     static final String HOTSPOT_OFF_WAIT = "wait";
 
-    // What starts the power saving: the charger pulled out, or the chosen
-    // Bluetooth devices all gone, stored as their addresses with commas
+    // The chosen Bluetooth devices, stored as their addresses with commas.
+    // SAVE_TRIGGER is from when only one of the two could start the power
+    // saving, read once to carry its settings over
     static final String SAVE_TRIGGER = "saveTrigger";
     static final String SAVE_BT = "saveBtDevices";
     static final String TRIGGER_CHARGER = "charger";
@@ -229,6 +243,34 @@ final class WebViewSettings {
         SharedPreferences p = prefs(c);
         SharedPreferences.Editor edit = null;
 
+        // Power saving started by Bluetooth before it had settings of its
+        // own: the charger's settings were its settings, so they move over
+        // and the charger's master switch goes off, as it never counted
+        if (p.contains(SAVE_TRIGGER)) {
+
+            edit = p.edit();
+
+            if (TRIGGER_BLUETOOTH.equals(p.getString(SAVE_TRIGGER, TRIGGER_CHARGER))) {
+
+                String[][] moves = {
+                    {CHARGE_SAVE, BT_SAVE}, {CHARGE_GRACE, BT_GRACE}, {UNPLUG_PAUSE, BT_PAUSE},
+                    {UNPLUG_HOTSPOT, BT_HOTSPOT}, {UNPLUG_QUIET, BT_QUIET}, {PLUG_HOTSPOT, BT_PLUG_HOTSPOT}
+                };
+
+                for (String[] m : moves) {
+
+                    if (p.contains(m[0])) {
+                        edit.putString(m[1], p.getString(m[0], ""));
+                    }
+                }
+
+                edit.putString(CHARGE_SAVE, "0");
+                Hub.note("Power", "the Bluetooth power saving got settings of its own, the charger's are off");
+            }
+
+            edit.remove(SAVE_TRIGGER);
+        }
+
         for (String key : RETIRED) {
 
             if (p.contains(key)) {
@@ -243,16 +285,16 @@ final class WebViewSettings {
         }
     }
 
-    // What starts the power saving, the charger unless changed
     // Whether turning the hotspot off waits for the browsers on it
     static boolean hotspotWaits(Context c) {
         return HOTSPOT_OFF_WAIT.equals(prefs(c).getString(HOTSPOT_OFF_MODE, HOTSPOT_OFF_FORCE));
     }
 
-    static String trigger(Context c) {
+    // Whether any power saving may switch the hotspot, for the helper
+    static boolean hotspotWanted(Context c) {
 
-        return TRIGGER_BLUETOOTH.equals(prefs(c).getString(SAVE_TRIGGER, TRIGGER_CHARGER))
-            ? TRIGGER_BLUETOOTH : TRIGGER_CHARGER;
+        return on(c, CHARGE_SAVE) && (on(c, UNPLUG_HOTSPOT) || on(c, PLUG_HOTSPOT))
+            || on(c, BT_SAVE) && (on(c, BT_HOTSPOT) || on(c, BT_PLUG_HOTSPOT));
     }
 
     // The addresses of the Bluetooth devices chosen for the power saving
@@ -271,11 +313,12 @@ final class WebViewSettings {
         return out;
     }
 
-    // Seconds to wait after the charger is pulled out, 60 unless changed
-    static int chargeGrace(Context c) {
+    // Seconds to wait after the charger is pulled out, or the last device
+    // has gone, by the key of either, 60 unless changed
+    static int grace(Context c, String key) {
 
         try {
-            return Math.max(0, Math.min(3600, Integer.parseInt(prefs(c).getString(CHARGE_GRACE, "60"))));
+            return Math.max(0, Math.min(3600, Integer.parseInt(prefs(c).getString(key, "60"))));
         } catch (NumberFormatException e) {
             return 60;
         }
@@ -336,19 +379,18 @@ final class WebViewSettings {
         } else if (VPN.equals(key) || ALLOW_HOTSPOT.equals(key) || ALLOW_WIFI.equals(key)
             || ALLOW_VPN.equals(key) || VPN_HOTSPOT_ONLY.equals(key) || WG_AWAKE.equals(key) || VPN_EXTERNAL.equals(key)
             || FULLSCREEN.equals(key) || TABLET_VIEW.equals(key) || CHARGE_SAVE.equals(key) || UNPLUG_PAUSE.equals(key) || UNPLUG_HOTSPOT.equals(key)
-            || UNPLUG_QUIET.equals(key) || PLUG_HOTSPOT.equals(key) || WEB_DEBUGGING.equals(key)) {
+            || UNPLUG_QUIET.equals(key) || UNPLUG_QUIET_IDLE.equals(key) || PLUG_HOTSPOT.equals(key) || WEB_DEBUGGING.equals(key)
+            || BT_SAVE.equals(key) || BT_PAUSE.equals(key) || BT_HOTSPOT.equals(key) || BT_QUIET.equals(key)
+            || BT_QUIET_IDLE.equals(key) || BT_PLUG_HOTSPOT.equals(key)) {
 
             v = "1".equals(v) ? "1" : "0";
         } else if (WG_PING_AWAKE.equals(key)) {
 
             v = PING_AWAKE_ALWAYS.equals(v) || PING_AWAKE_NEVER.equals(v) ? v : PING_AWAKE_CHARGER;
-        } else if (SAVE_TRIGGER.equals(key)) {
-
-            v = TRIGGER_BLUETOOTH.equals(v) ? TRIGGER_BLUETOOTH : TRIGGER_CHARGER;
         } else if (HOTSPOT_OFF_MODE.equals(key)) {
 
             v = HOTSPOT_OFF_WAIT.equals(v) ? HOTSPOT_OFF_WAIT : HOTSPOT_OFF_FORCE;
-        } else if (CHARGE_GRACE.equals(key)) {
+        } else if (CHARGE_GRACE.equals(key) || BT_GRACE.equals(key)) {
 
             if (!v.matches("[0-9]{1,4}") || Integer.parseInt(v) > 3600) {
                 return false;

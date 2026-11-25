@@ -480,20 +480,31 @@ public class PlayerService extends Service implements Hub.Listener {
     // so a browser can still connect, at home on a computer say, and while
     // one is connected nothing is stopped. The music, playing or not, keeps
     // its own lock. quietWanted is what the power saving asks for, quiet
-    // what is in force
+    // what is in force. With quietIdle it waits until nothing is in use:
+    // no music playing and the hotspot off, looked at with the player's
+    // states and every few seconds
     private boolean quietWanted = false;
+    private boolean quietIdle = false;
     private boolean quiet = false;
+    private long quietLookAt = 0;
+    private static final long QUIET_LOOK_MS = 5000;
 
-    static void setQuiet(boolean on) {
+    static void setQuiet(boolean on, boolean idleOnly) {
 
         MAIN.post(() -> {
 
             if (instance != null) {
 
                 instance.quietWanted = on;
+                instance.quietIdle = on && idleOnly;
                 instance.applyQuiet();
             }
         });
+    }
+
+    // Whether the background work is stopped right now
+    static boolean quietNow() {
+        return instance != null && instance.quiet;
     }
 
     // A browser of the web view came or went
@@ -510,15 +521,29 @@ public class PlayerService extends Service implements Hub.Listener {
     private void applyQuiet() {
 
         int browsers = Hub.clients();
-        boolean on = quietWanted && browsers == 0;
+        boolean hotspotOn = false;
+
+        quietLookAt = System.currentTimeMillis();
+
+        // The hotspot only asked about when it matters, it is a broadcast
+        // looked up each time
+        if (quietWanted && quietIdle && browsers == 0 && !playing) {
+            hotspotOn = "on".equals(Hotspot.liveState(this));
+        }
+
+        boolean busy = quietIdle && (playing || hotspotOn);
+        boolean on = quietWanted && browsers == 0 && !busy;
 
         if (on == quiet) {
             return;
         }
 
         if (quietWanted) {
-            Hub.note("Power", on ? "no browser connected, the background work stops"
-                : "a browser connected, the background work goes on");
+
+            String why = browsers > 0 ? "a browser connected" : playing ? "the music plays" : "the hotspot is on";
+
+            Hub.note("Power", on ? (quietIdle ? "nothing in use" : "no browser connected") + ", the background work stops"
+                : why + ", the background work goes on");
         }
 
         quiet = on;
@@ -954,7 +979,17 @@ public class PlayerService extends Service implements Hub.Listener {
 
         title = s.optString("title", "");
         subtitle = s.optString("subtitle", "");
+        boolean playedBefore = playing;
+
         playing = s.optBoolean("playing", false);
+
+        // Waiting for nothing to be in use: the music starting or stopping
+        // at once, the hotspot every few seconds
+        if (quietWanted && quietIdle
+            && (playing != playedBefore || System.currentTimeMillis() - quietLookAt > QUIET_LOOK_MS)) {
+            applyQuiet();
+        }
+
         artOnResume = s.optBoolean("artOnResume", false);
         coverResend = s.optString("coverResend", "title");
         songId = s.optString("id", "");

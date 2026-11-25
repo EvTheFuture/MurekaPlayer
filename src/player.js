@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.317";
+    const VERSION = "2.0.1.318";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -41149,9 +41149,12 @@
     function hotspotWanted() {
 
         try {
-            return window.MurekaHost.getPref("chargeSave", "0") === "1"
-                && (window.MurekaHost.getPref("unplugHotspot", "0") === "1"
-                || window.MurekaHost.getPref("plugHotspot", "0") === "1");
+            const pref = function (key) {
+                return window.MurekaHost.getPref(key, "0") === "1";
+            };
+
+            return pref("chargeSave") && (pref("unplugHotspot") || pref("plugHotspot"))
+                || pref("btSave") && (pref("btHotspot") || pref("btPlugHotspot"));
         } catch (e) {
             return false;
         }
@@ -55826,64 +55829,41 @@
             }
         };
 
-        // Everything on the page but the master switch, shown with it on
-        const saveRows = [];
+        // Each power saving's rows, shown while its master switch is on, and
+        // the hotspot helper's, shown while either is
+        const groups = { charger: [], bluetooth: [], helper: [] };
 
-        // What starts the power saving: the charger, or the chosen
-        // Bluetooth devices all disconnecting
-        const byBluetooth = function () {
-            return host.getPref("saveTrigger", "charger") === "bluetooth";
-        };
-
-        // The words that follow what starts it, the name and the hint of
-        // each setting they belong to
-        const WORDS = {
+        // The settings' keys of each, the charger's and Bluetooth's
+        const KEYS = {
             charger: {
-                master: ["Save power when on battery", "Turns everything below on or off together. Off, nothing changes when the Android device goes on battery or back on the charger."],
-                away: "When the charger is pulled out",
-                grace: "How long the Android device may be on battery before anything is stopped. Back on the charger in time, nothing happens, so a short stop or a loose cable does not cut the music. A note counts down on the Android device and in the web view, with a button to skip the shutdown. 0 stops at once.",
-                quiet: "The play counts read in the background, Cache all, the covers fetched ahead and what keeps the Android device awake stop, so it can rest and cool down. The web view stays reachable, and while a browser is connected to it, from a computer at home say, nothing is stopped. A small Power saving mark shows in the player's header meanwhile. Starts again by itself when the Android device is back on the charger.",
-                hotspotOff: ["Turn off hotspot when on battery", "After the grace time on battery. The hotspot warms the Android device the most, and with nothing connected it does no good."],
-                hotspotOn: ["Turn on hotspot when charging", "As soon as the Android device is back on the charger, so devices that use its hotspot find it again without anyone touching the Android device."]
+                master: "chargeSave", grace: "chargeGrace", pause: "unplugPause", hotspotOff: "unplugHotspot",
+                quiet: "unplugQuiet", idle: "unplugQuietIdle", hotspotOn: "plugHotspot"
             },
             bluetooth: {
-                master: ["Save power when Bluetooth disconnects", "Turns everything below on or off together. Off, nothing changes when the chosen Bluetooth devices disconnect or connect again."],
-                away: "When the Bluetooth devices disconnect",
-                grace: "How long after the last chosen device disconnects before anything is stopped. Connected again in time, nothing happens, so a short drop does not cut the music. A note counts down on the Android device and in the web view, with a button to skip the shutdown. 0 stops at once.",
-                quiet: "The play counts read in the background, Cache all, the covers fetched ahead and what keeps the Android device awake stop, so it can rest and cool down. The web view stays reachable, and while a browser is connected to it, from a computer at home say, nothing is stopped. A small Power saving mark shows in the player's header meanwhile. Starts again by itself when one of the chosen devices connects again.",
-                hotspotOff: ["Turn off hotspot when disconnected", "After the grace time once the last chosen device has disconnected. The hotspot warms the Android device the most, and with nothing connected it does no good."],
-                hotspotOn: ["Turn on hotspot when connected", "As soon as one of the chosen devices connects, so devices that use the Android device's hotspot find it again without anyone touching the Android device."]
+                master: "btSave", grace: "btGrace", pause: "btPause", hotspotOff: "btHotspot",
+                quiet: "btQuiet", idle: "btQuietIdle", hotspotOn: "btPlugHotspot"
             }
         };
 
-        // A setting's name and hint changed in place, on a row that went
-        // through withHint
-        const setWords = function (row, label, hint) {
-
-            const col = row.firstElementChild;
-
-            col.querySelector(":scope > [data-host-label]").textContent = label;
-            col.lastElementChild.textContent = hint;
+        // The words of each, the name and the hint of each setting
+        const WORDS = {
+            charger: {
+                label: "On battery",
+                master: ["Save power when on battery", "Turns everything below on or off together. Off, nothing changes when the Android device goes on battery or back on the charger."],
+                grace: "How long the Android device may be on battery before anything is stopped. Back on the charger in time, nothing happens, so a short stop or a loose cable does not cut the music. A note counts down on the Android device and in the web view, with a button to skip the shutdown. 0 stops at once.",
+                quiet: "The play counts read in the background, Cache all, the covers fetched ahead and what keeps the Android device awake stop, so it can rest and cool down. The web view stays reachable, and while a browser is connected to it, from a computer at home say, nothing is stopped. A small Power saving mark shows in the player's header meanwhile. Starts again by itself when the Android device is back on the charger.",
+                hotspotOff: ["Turn off hotspot when on battery", "After the grace time on battery. The hotspot warms the Android device the most, and with nothing connected it does no good. Needs the hotspot helper below."],
+                hotspotOn: ["Turn on hotspot when charging", "As soon as the Android device is back on the charger, so devices that use its hotspot find it again without anyone touching the Android device. Needs the hotspot helper below."]
+            },
+            bluetooth: {
+                label: "When Bluetooth disconnects",
+                master: ["Save power when Bluetooth disconnects", "Turns everything below on or off together. Off, nothing changes when the chosen Bluetooth devices disconnect or connect again. Set apart from on battery, both can be on."],
+                grace: "How long after the last chosen device disconnects before anything is stopped. Connected again in time, nothing happens, so a short drop does not cut the music. A note counts down on the Android device and in the web view, with a button to skip the shutdown. 0 stops at once.",
+                quiet: "The play counts read in the background, Cache all, the covers fetched ahead and what keeps the Android device awake stop, so it can rest and cool down. The web view stays reachable, and while a browser is connected to it, from a computer at home say, nothing is stopped. A small Power saving mark shows in the player's header meanwhile. Starts again by itself when one of the chosen devices connects again.",
+                hotspotOff: ["Turn off hotspot when disconnected", "After the grace time once the last chosen device has disconnected. The hotspot warms the Android device the most, and with nothing connected it does no good. Needs the hotspot helper below."],
+                hotspotOn: ["Turn on hotspot when connected", "As soon as one of the chosen devices connects, so devices that use the Android device's hotspot find it again without anyone touching the Android device. Needs the hotspot helper below."]
+            }
         };
-
-        const masterRow = makeBoolRow("Save power when on battery",
-            function () { return on("chargeSave"); },
-            function (v) {
-
-                put("chargeSave", v);
-                hotspotWarnAt = 0;
-                paintSaveRows();
-                paintStatus();
-            });
-
-        const graceRow = makeStepperRow("Grace time in seconds",
-            function () { return parseInt(host.getPref("chargeGrace", "60"), 10) || 0; },
-            function (v) { host.setPref("chargeGrace", String(v)); },
-            0, 600, 10);
-
-        const pauseRow = makeBoolRow("Pause the music",
-            function () { return on("unplugPause"); },
-            function (v) { put("unplugPause", v); });
 
         // Switched on without the helper running: started at once, with a
         // note on how it went
@@ -55896,15 +55876,11 @@
                 startHotspotHelper(true);
             }
 
-            paintStatus();
+            paintSaveRows();
         };
 
-        const hotspotOffRow = makeBoolRow("Turn off hotspot when on battery",
-            function () { return on("unplugHotspot"); },
-            function (v) { wantHotspot("unplugHotspot", v); });
-
         // With browsers of the web view on the hotspot: off anyway, which cuts
-        // them off, or once they have all gone
+        // them off, or once they have all gone. For both power savings
         const hotspotWaitRow = makeDropRow("Browsers on the hotspot", [
             { label: "Turn off anyway", value: "force" },
             { label: "Wait for them", value: "wait" }
@@ -55913,14 +55889,6 @@
         }, function (v) {
             host.setPref("hotspotOffMode", v);
         });
-
-        const quietRow = makeBoolRow("Stop all background work",
-            function () { return on("unplugQuiet"); },
-            function (v) { put("unplugQuiet", v); });
-
-        const hotspotOnRow = makeBoolRow("Turn on hotspot when charging",
-            function () { return on("plugHotspot"); },
-            function (v) { wantHotspot("plugHotspot", v); });
 
         // The warning while a hotspot switch is on and the helper is not
         // running
@@ -56034,7 +56002,11 @@
                 return (info.reason === "bluetooth" ? "Bluetooth disconnected" : "On battery") + ", shutting down in " + info.countdown + " s";
             }
 
-            return info.quiet === true ? "All background work stopped" : "--";
+            if (info.quiet === true) {
+                return info.quietNow === false ? "Background work stops once nothing is in use" : "All background work stopped";
+            }
+
+            return "--";
         };
 
         const paintStatus = function () {
@@ -56069,7 +56041,8 @@
             // only while the helper is not running
             pairBtn.textContent = info.paired === true ? "Pair again" : "Pair with wireless debugging";
             forgetBtn.style.display = info.paired === true ? "" : "none";
-            startRow.style.display = info.paired === true && info.helper !== "running" ? "flex" : "none";
+            startRow.style.display = info.paired === true && info.helper !== "running"
+                && (on(KEYS.charger.master) || on(KEYS.bluetooth.master)) ? "flex" : "none";
             startBtn.disabled = info.starting === true;
             startBtn.style.opacity = info.starting === true ? "0.5" : "1";
 
@@ -56140,40 +56113,39 @@
             statusEl.lastChild.style.borderBottom = "none";
         };
 
-        const add = function (el) {
+        // An element of a group, laid out as it is when shown, a row of
+        // buttons stays a row
+        const add = function (group, el) {
 
-            // The way it is laid out when shown, a row of buttons stays a row
             el.dataset.shownAs = el.style.display || "";
-            saveRows.push(el);
+            groups[group].push(el);
             page.appendChild(el);
+
+            return el;
         };
 
         const paintSaveRows = function () {
 
-            const shown = on("chargeSave");
-            const bt = byBluetooth();
+            const any = on(KEYS.charger.master) || on(KEYS.bluetooth.master);
 
-            for (const el of saveRows) {
+            for (const group of Object.keys(groups)) {
 
-                const visible = shown && (el.dataset.btOnly !== "1" || bt);
+                const shown = group === "helper" ? any : on(KEYS[group].master);
 
-                el.style.display = visible ? el.dataset.shownAs : "none";
+                for (const el of groups[group]) {
+
+                    // A row that only means something with another setting on
+                    const needs = !el.dataset.needs || on(el.dataset.needs);
+
+                    el.style.display = shown && needs ? el.dataset.shownAs : "none";
+                }
             }
-        };
 
-        // What starts it, the charger or Bluetooth
-        const triggerRow = makeDropRow("Starts when", [
-            { label: "On battery", value: "charger" },
-            { label: "Bluetooth disconnects", value: "bluetooth" }
-        ], function () {
-            return byBluetooth() ? "bluetooth" : "charger";
-        }, function (v) {
-
-            host.setPref("saveTrigger", v);
-            paintWords();
-            paintSaveRows();
+            // The rows that show by what they hold, the permission button
+            // and the helper's start, set by their own painters again
             paintDevices();
-        });
+            paintStatus();
+        };
 
         // The paired Bluetooth devices to tick, the button that asks for
         // the permission to see them, and a line when there is nothing
@@ -56255,7 +56227,7 @@
 
         const paintDevices = function () {
 
-            if (!byBluetooth()) {
+            if (!on(KEYS.bluetooth.master)) {
                 return;
             }
 
@@ -56292,30 +56264,6 @@
             }
         };
 
-        const masterLabelRow = withHint(masterRow, WORDS.charger.master[1]);
-        const awayLabel = makeLabel(WORDS.charger.away);
-
-        // Names and hints follow what starts it
-        const paintWords = function () {
-
-            const w = byBluetooth() ? WORDS.bluetooth : WORDS.charger;
-
-            setWords(masterRow, w.master[0], w.master[1]);
-            awayLabel.textContent = w.away;
-            setWords(graceRow, "Grace time in seconds", w.grace);
-            setWords(quietRow, "Stop all background work", w.quiet);
-            setWords(hotspotOffRow, w.hotspotOff[0], w.hotspotOff[1]);
-            setWords(hotspotOnRow, w.hotspotOn[0], w.hotspotOn[1]);
-        };
-
-        // Marked to show only while Bluetooth starts it
-        const btOnly = function (el) {
-
-            el.dataset.btOnly = "1";
-
-            return el;
-        };
-
         // A numbered list of steps, each a hint of its own with its number
         // in the text, so the web view's copy of the settings keeps the
         // numbers. Wrapped lines start under the text, not the number
@@ -56338,33 +56286,79 @@
             return list;
         };
 
-        page.appendChild(masterLabelRow);
-        add(makeLabel("What starts it"));
-        add(withHint(triggerRow, "On battery follows the charger. Bluetooth disconnects follows the devices ticked below, for an Android device that stays on a charger."));
-        add(btOnly(makeSubLabel("Bluetooth devices")));
-        add(btOnly(devAskRow));
-        add(btOnly(devList));
-        add(btOnly(devNote));
-        add(awayLabel);
-        add(withHint(graceRow, WORDS.charger.grace));
-        add(withHint(pauseRow, "The music stops, so it does not carry on from the Android device's speaker after you have gone."));
-        add(withHint(quietRow, WORDS.charger.quiet));
+        // One power saving's rows, the charger's or Bluetooth's. The two are
+        // set apart, so each can do something of its own: Bluetooth turning
+        // the hotspot off but keeping the work running, say, and on battery
+        // stopping the work once nothing is in use
+        const makeSection = function (kind) {
 
-        // The hotspot after the basic options, marked as experimental
-        add(makeLabel("Hotspot (experimental, advanced)"));
-        add(makeHint("Android lets only the system turn the hotspot on and off, so the player has a small helper of its own that runs with the rights of the Android device's debugging shell. It turns the Android device's own hotspot on and off, with its own name and password, the way the quick settings tile does. Nothing is sent to any other app."));
-        add(warnEl);
-        add(withHint(hotspotOffRow, WORDS.charger.hotspotOff[1]));
-        add(withHint(hotspotWaitRow, "When the hotspot is to go off and browsers of the web view are connected over it. Turn off anyway cuts them off at the end of the grace time. Wait for them leaves the hotspot on until the last of them has gone, about 20 seconds after its last word, and then turns it off. Browsers on the Android device's Wi-Fi never count."));
-        add(withHint(hotspotOnRow, WORDS.charger.hotspotOn[1]));
-        add(statusEl);
-        add(tryRow);
-        add(makeHint("Turn on hotspot and Turn off hotspot try it straight away. The last command says what happened."));
-        add(makeSubLabel("Pairing with wireless debugging"));
-        add(pairRow);
-        add(startRow);
-        add(makeHint("This is experimental and may not work on every Android device. The player is paired with wireless debugging once:"));
-        add(makeSteps([
+            const k = KEYS[kind];
+            const w = WORDS[kind];
+
+            page.appendChild(makeLabel(w.label));
+            page.appendChild(withHint(makeBoolRow(w.master[0],
+                function () { return on(k.master); },
+                function (v) {
+
+                    put(k.master, v);
+                    hotspotWarnAt = 0;
+                    paintSaveRows();
+                }), w.master[1]));
+
+            if (kind === "bluetooth") {
+
+                add(kind, makeSubLabel("Bluetooth devices"));
+                add(kind, devAskRow);
+                add(kind, devList);
+                add(kind, devNote);
+            }
+
+            add(kind, withHint(makeStepperRow("Grace time in seconds",
+                function () { return parseInt(host.getPref(k.grace, "60"), 10) || 0; },
+                function (v) { host.setPref(k.grace, String(v)); },
+                0, 600, 10), w.grace));
+            add(kind, withHint(makeBoolRow("Pause the music",
+                function () { return on(k.pause); },
+                function (v) { put(k.pause, v); }),
+                "The music stops, so it does not carry on from the Android device's speaker after you have gone."));
+            add(kind, withHint(makeBoolRow("Stop all background work",
+                function () { return on(k.quiet); },
+                function (v) {
+
+                    put(k.quiet, v);
+                    paintSaveRows();
+                }), w.quiet));
+
+            const idle = add(kind, withHint(makeBoolRow("Only when nothing is in use",
+                function () { return on(k.idle); },
+                function (v) { put(k.idle, v); }),
+                "The background work stops only once the hotspot is off, no browser of the web view is connected and no music plays, and goes on again as soon as one of them is. Off, it stops at the end of the grace time, though never while a browser is connected."));
+
+            idle.dataset.needs = k.quiet;
+
+            add(kind, withHint(makeBoolRow(w.hotspotOff[0],
+                function () { return on(k.hotspotOff); },
+                function (v) { wantHotspot(k.hotspotOff, v); }), w.hotspotOff[1]));
+            add(kind, withHint(makeBoolRow(w.hotspotOn[0],
+                function () { return on(k.hotspotOn); },
+                function (v) { wantHotspot(k.hotspotOn, v); }), w.hotspotOn[1]));
+        };
+
+        makeSection("charger");
+        makeSection("bluetooth");
+
+        add("helper", makeLabel("Hotspot (experimental, advanced)"));
+        add("helper", makeHint("Android lets only the system turn the hotspot on and off, so the player has a small helper of its own that runs with the rights of the Android device's debugging shell. It turns the Android device's own hotspot on and off, with its own name and password, the way the quick settings tile does. Nothing is sent to any other app."));
+        add("helper", warnEl);
+        add("helper", withHint(hotspotWaitRow, "When either power saving turns the hotspot off and browsers of the web view are connected over it. Turn off anyway cuts them off at the end of the grace time. Wait for them leaves the hotspot on until the last of them has gone, about 20 seconds after its last word, and then turns it off. Browsers on the Android device's Wi-Fi never count."));
+        add("helper", statusEl);
+        add("helper", tryRow);
+        add("helper", makeHint("Turn on hotspot and Turn off hotspot try it straight away. The last command says what happened."));
+        add("helper", makeSubLabel("Pairing with wireless debugging"));
+        add("helper", pairRow);
+        add("helper", startRow);
+        add("helper", makeHint("This is experimental and may not work on every Android device. The player is paired with wireless debugging once:"));
+        add("helper", makeSteps([
             "Switch Developer options on: tap Build number in About phone, About tablet on a tablet, seven times.",
             "Tap Pair with wireless debugging above.",
             "Switch Wireless debugging on in the screen that opens.",
@@ -56372,14 +56366,11 @@
             "Keep that dialog open.",
             "Pull down the player's notification, type the six digit code there and send it."
         ]));
-        add(makeHint("Afterwards the player starts the helper by itself through wireless debugging, which needs the Android device on Wi-Fi once, and wireless debugging is turned on for it and off again. The helper then keeps running until the Android device restarts, and the hotspot is turned on and off through it with no Wi-Fi needed, out in town too. USB debugging is switched on for that, since with it off Android ends the helper as soon as wireless debugging goes off. Without a running helper, each switch goes through wireless debugging and needs Wi-Fi."));
-        add(makeSubLabel("From a computer instead"));
-        add(commandEl);
-        add(copyRow);
-        add(makeHint("For an Android device that is not on Wi-Fi: run the command on a computer with adb connected to the Android device. It starts the helper to keep running."));
-
-        paintWords();
-        settingsRefreshers.push(paintWords);
+        add("helper", makeHint("Afterwards the player starts the helper by itself through wireless debugging, which needs the Android device on Wi-Fi once, and wireless debugging is turned on for it and off again. The helper then keeps running until the Android device restarts, and the hotspot is turned on and off through it with no Wi-Fi needed, out in town too. USB debugging is switched on for that, since with it off Android ends the helper as soon as wireless debugging goes off. Without a running helper, each switch goes through wireless debugging and needs Wi-Fi."));
+        add("helper", makeSubLabel("From a computer instead"));
+        add("helper", commandEl);
+        add("helper", copyRow);
+        add("helper", makeHint("For an Android device that is not on Wi-Fi: run the command on a computer with adb connected to the Android device. It starts the helper to keep running."));
 
         paintSaveRows();
         settingsRefreshers.push(paintSaveRows);
@@ -61286,8 +61277,15 @@
         unplugHotspot: "0",
         hotspotOffMode: "force",
         unplugQuiet: "0",
+        unplugQuietIdle: "0",
         plugHotspot: "0",
-        saveTrigger: "charger",
+        btSave: "0",
+        btGrace: "60",
+        btPause: "0",
+        btHotspot: "0",
+        btQuiet: "0",
+        btQuietIdle: "0",
+        btPlugHotspot: "0",
         saveBtDevices: ""
     };
 
