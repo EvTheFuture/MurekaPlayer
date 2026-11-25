@@ -716,3 +716,64 @@
 
         trimUi.trimBtn.disabled = on || !tr || !tr.buffer;
     }
+
+    // The preview stopped, here or where it plays elsewhere
+    function trimStop() {
+
+        if (!tr || !tr.src) {
+            return;
+        }
+
+        // A piece on the phone stops there
+        if (tr.src.phone) {
+
+            tr.src = null;
+            tr.pieces = [];
+            tr.phone = null;
+            trimPhoneStop();
+            trimPaint();
+            return;
+        }
+
+        const pieces = tr.pieces || [tr.src];
+
+        tr.src = null;
+        tr.pieces = [];
+
+        for (const piece of pieces) {
+
+            try {
+                piece.stop();
+            } catch (e) {
+                // Already stopped
+            }
+
+            piece.disconnect();
+        }
+
+        trimPaint();
+    }
+
+    // Where the preview is, or null when it is not playing
+    function trimPlayhead() {
+
+        if (tr && !tr.src && tr.paused) {
+            return tr.paused.at;
+        }
+
+        // On the phone, from when it is heard there, at the start until then
+        if (tr && tr.src && tr.src.phone && tr.phone) {
+
+            if (!tr.phone.startWall) {
+                return tr.playFrom;
+            }
+
+            return Math.min(tr.playTo, tr.playFrom + Math.max(0, performance.now() - tr.phone.startWall) / 1000);
+        }
+
+        if (!tr || !tr.src || !trimCtx) {
+            return null;
+        }
+
+        return Math.min(tr.playTo, tr.playFrom + Math.max(0, trimCtx.currentTime - tr.playAt));
+    }

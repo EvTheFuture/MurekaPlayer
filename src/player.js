@@ -221,7 +221,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.329";
+    const VERSION = "2.0.1.330";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -69182,6 +69182,67 @@
 
         trimUi.trimBtn.disabled = on || !tr || !tr.buffer;
     }
+
+    // The preview stopped, here or where it plays elsewhere
+    function trimStop() {
+
+        if (!tr || !tr.src) {
+            return;
+        }
+
+        // A piece on the phone stops there
+        if (tr.src.phone) {
+
+            tr.src = null;
+            tr.pieces = [];
+            tr.phone = null;
+            trimPhoneStop();
+            trimPaint();
+            return;
+        }
+
+        const pieces = tr.pieces || [tr.src];
+
+        tr.src = null;
+        tr.pieces = [];
+
+        for (const piece of pieces) {
+
+            try {
+                piece.stop();
+            } catch (e) {
+                // Already stopped
+            }
+
+            piece.disconnect();
+        }
+
+        trimPaint();
+    }
+
+    // Where the preview is, or null when it is not playing
+    function trimPlayhead() {
+
+        if (tr && !tr.src && tr.paused) {
+            return tr.paused.at;
+        }
+
+        // On the phone, from when it is heard there, at the start until then
+        if (tr && tr.src && tr.src.phone && tr.phone) {
+
+            if (!tr.phone.startWall) {
+                return tr.playFrom;
+            }
+
+            return Math.min(tr.playTo, tr.playFrom + Math.max(0, performance.now() - tr.phone.startWall) / 1000);
+        }
+
+        if (!tr || !tr.src || !trimCtx) {
+            return null;
+        }
+
+        return Math.min(tr.playTo, tr.playFrom + Math.max(0, trimCtx.currentTime - tr.playAt));
+    }
     // END SHARED trimui
 
     let tr = null;
@@ -69276,6 +69337,10 @@
 
     // The preview is heard here, in the player, never elsewhere
     function trimPlayElsewhere() {
+        return false;
+    }
+
+    function trimPhoneStop() {
         return false;
     }
 
@@ -69742,45 +69807,6 @@
     // to its real ending
     function trimFades() {
         return settings.trimFade !== false && tr !== null && !tr.pick && tr.end < tr.duration - 0.05;
-    }
-
-    function trimStop() {
-
-        if (!tr || !tr.src) {
-            return;
-        }
-
-        const pieces = tr.pieces || [tr.src];
-
-        tr.src = null;
-        tr.pieces = [];
-
-        for (const piece of pieces) {
-
-            try {
-                piece.stop();
-            } catch (e) {
-                // Already stopped
-            }
-
-            piece.disconnect();
-        }
-
-        trimPaint();
-    }
-
-    // Where the preview is, or null when it is not playing
-    function trimPlayhead() {
-
-        if (tr && !tr.src && tr.paused) {
-            return tr.paused.at;
-        }
-
-        if (!tr || !tr.src || !trimCtx) {
-            return null;
-        }
-
-        return Math.min(tr.playTo, tr.playFrom + Math.max(0, trimCtx.currentTime - tr.playAt));
     }
 
 
@@ -123450,6 +123476,67 @@
 
         trimUi.trimBtn.disabled = on || !tr || !tr.buffer;
     }
+
+    // The preview stopped, here or where it plays elsewhere
+    function trimStop() {
+
+        if (!tr || !tr.src) {
+            return;
+        }
+
+        // A piece on the phone stops there
+        if (tr.src.phone) {
+
+            tr.src = null;
+            tr.pieces = [];
+            tr.phone = null;
+            trimPhoneStop();
+            trimPaint();
+            return;
+        }
+
+        const pieces = tr.pieces || [tr.src];
+
+        tr.src = null;
+        tr.pieces = [];
+
+        for (const piece of pieces) {
+
+            try {
+                piece.stop();
+            } catch (e) {
+                // Already stopped
+            }
+
+            piece.disconnect();
+        }
+
+        trimPaint();
+    }
+
+    // Where the preview is, or null when it is not playing
+    function trimPlayhead() {
+
+        if (tr && !tr.src && tr.paused) {
+            return tr.paused.at;
+        }
+
+        // On the phone, from when it is heard there, at the start until then
+        if (tr && tr.src && tr.src.phone && tr.phone) {
+
+            if (!tr.phone.startWall) {
+                return tr.playFrom;
+            }
+
+            return Math.min(tr.playTo, tr.playFrom + Math.max(0, performance.now() - tr.phone.startWall) / 1000);
+        }
+
+        if (!tr || !tr.src || !trimCtx) {
+            return null;
+        }
+
+        return Math.min(tr.playTo, tr.playFrom + Math.max(0, trimCtx.currentTime - tr.playAt));
+    }
     // END SHARED trimui
 
     let trimToken = 0;
@@ -123506,6 +123593,11 @@
                 trimPaint();
             }
         });
+    }
+
+    // A preview on the phone stopped there
+    function trimPhoneStop() {
+        send("trimPreviewStop");
     }
 
     // The songs play on the phone: the preview is heard there as well
@@ -123911,66 +124003,6 @@
     // the end actually cut
     function trimFades() {
         return trimFadeOn && tr !== null && !tr.pick && tr.end < tr.duration - 0.05;
-    }
-
-    function trimStop() {
-
-        if (!tr || !tr.src) {
-            return;
-        }
-
-        // A piece on the phone stops there
-        if (tr.src.phone) {
-
-            tr.src = null;
-            tr.pieces = [];
-            tr.phone = null;
-            send("trimPreviewStop");
-            trimPaint();
-            return;
-        }
-
-        const pieces = tr.pieces || [tr.src];
-
-        tr.src = null;
-        tr.pieces = [];
-
-        for (const piece of pieces) {
-
-            try {
-                piece.stop();
-            } catch (e) {
-                // Already stopped
-            }
-
-            piece.disconnect();
-        }
-
-        trimPaint();
-    }
-
-    // Where the preview is, or null when it is not playing
-    function trimPlayhead() {
-
-        if (tr && !tr.src && tr.paused) {
-            return tr.paused.at;
-        }
-
-        // On the phone, from when it is heard there, at the start until then
-        if (tr && tr.src && tr.src.phone && tr.phone) {
-
-            if (!tr.phone.startWall) {
-                return tr.playFrom;
-            }
-
-            return Math.min(tr.playTo, tr.playFrom + Math.max(0, performance.now() - tr.phone.startWall) / 1000);
-        }
-
-        if (!tr || !tr.src || !trimCtx) {
-            return null;
-        }
-
-        return Math.min(tr.playTo, tr.playFrom + Math.max(0, trimCtx.currentTime - tr.playAt));
     }
 
     // Hand the trim to the phone, which sends it to Mureka. How it goes
