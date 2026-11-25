@@ -22,7 +22,15 @@
         + ".mp-ui-title{font-weight:600;min-width:0}"
         + ".mp-ui-gap{flex:1 1 auto}"
         + ".mp-ui-note{font-size:12px;color:#888;line-height:1.5;padding:4px 2px}"
-        + ".mp-ui-loading{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:12px;color:#888}";
+        + ".mp-ui-loading{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:12px;color:#888}"
+        + ".mp-ui-ask{background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;max-width:340px;"
+        + "box-sizing:border-box;display:flex;flex-direction:column;gap:10px;color:#fff;font-size:13px;text-align:left}"
+        + ".mp-ui-ask-title{font-weight:600}"
+        + ".mp-ui-ask-text{color:#ccc;font-size:13px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-height:60vh;overflow-y:auto}"
+        + ".mp-ui-ask-row{display:flex;gap:8px}"
+        + ".mp-ui-ask-row .mp-ui-btn{flex:1}"
+        + ".mp-ui-btn.yes{background:" + ACCENT + ";color:#000}"
+        + ".mp-ui-btn.yes.danger{background:" + DANGER + ";color:#000}";
 
     // The style sheet, once in a page
     function uiStyle() {
@@ -134,4 +142,43 @@
         }
 
         return { el: head, title: name, spin: spin };
+    }
+
+    // A question in a card: its title, what it is about, anything else
+    // to show, and Cancel and the answer side by side, the answer red for
+    // something that cannot be undone. card: the card to fill. o: title,
+    // text, extra (an element), no and yes (the buttons' names), danger,
+    // onNo and onYes. Answers the buttons and the text
+    function uiAsk(card, o) {
+
+        const head = document.createElement("div");
+        const text = document.createElement("div");
+        const row = document.createElement("div");
+        const no = uiBtn(o.no || "Cancel", o.onNo || function () {}, true);
+        const yes = uiBtn(o.yes || "Yes", o.onYes || function () {});
+
+        card.classList.add("mp-ui-ask");
+        head.className = "mp-ui-ask-title";
+        head.textContent = o.title || "";
+        text.className = "mp-ui-ask-text";
+        text.textContent = o.text || "";
+        row.className = "mp-ui-ask-row";
+        yes.classList.add("yes");
+        yes.classList.toggle("danger", o.danger === true);
+        row.appendChild(no);
+        row.appendChild(yes);
+
+        if (o.title) {
+            card.appendChild(head);
+        }
+
+        card.appendChild(text);
+
+        if (o.extra) {
+            card.appendChild(o.extra);
+        }
+
+        card.appendChild(row);
+
+        return { yes: yes, no: no, text: text };
     }

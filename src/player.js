@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.323";
+    const VERSION = "2.0.1.324";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -16330,7 +16330,15 @@
         + ".mp-ui-title{font-weight:600;min-width:0}"
         + ".mp-ui-gap{flex:1 1 auto}"
         + ".mp-ui-note{font-size:12px;color:#888;line-height:1.5;padding:4px 2px}"
-        + ".mp-ui-loading{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:12px;color:#888}";
+        + ".mp-ui-loading{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:12px;color:#888}"
+        + ".mp-ui-ask{background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;max-width:340px;"
+        + "box-sizing:border-box;display:flex;flex-direction:column;gap:10px;color:#fff;font-size:13px;text-align:left}"
+        + ".mp-ui-ask-title{font-weight:600}"
+        + ".mp-ui-ask-text{color:#ccc;font-size:13px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-height:60vh;overflow-y:auto}"
+        + ".mp-ui-ask-row{display:flex;gap:8px}"
+        + ".mp-ui-ask-row .mp-ui-btn{flex:1}"
+        + ".mp-ui-btn.yes{background:" + ACCENT + ";color:#000}"
+        + ".mp-ui-btn.yes.danger{background:" + DANGER + ";color:#000}";
 
     // The style sheet, once in a page
     function uiStyle() {
@@ -16442,6 +16450,45 @@
         }
 
         return { el: head, title: name, spin: spin };
+    }
+
+    // A question in a card: its title, what it is about, anything else
+    // to show, and Cancel and the answer side by side, the answer red for
+    // something that cannot be undone. card: the card to fill. o: title,
+    // text, extra (an element), no and yes (the buttons' names), danger,
+    // onNo and onYes. Answers the buttons and the text
+    function uiAsk(card, o) {
+
+        const head = document.createElement("div");
+        const text = document.createElement("div");
+        const row = document.createElement("div");
+        const no = uiBtn(o.no || "Cancel", o.onNo || function () {}, true);
+        const yes = uiBtn(o.yes || "Yes", o.onYes || function () {});
+
+        card.classList.add("mp-ui-ask");
+        head.className = "mp-ui-ask-title";
+        head.textContent = o.title || "";
+        text.className = "mp-ui-ask-text";
+        text.textContent = o.text || "";
+        row.className = "mp-ui-ask-row";
+        yes.classList.add("yes");
+        yes.classList.toggle("danger", o.danger === true);
+        row.appendChild(no);
+        row.appendChild(yes);
+
+        if (o.title) {
+            card.appendChild(head);
+        }
+
+        card.appendChild(text);
+
+        if (o.extra) {
+            card.appendChild(o.extra);
+        }
+
+        card.appendChild(row);
+
+        return { yes: yes, no: no, text: text };
     }
     // END SHARED ui
 
@@ -31120,46 +31167,24 @@
         const dialog = makeDialog({
             className: "mureka-ask",
             notice: false,
-            onCancel: onNo,
-            cardCss: "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;max-width:340px;"
-                + "display:flex;flex-direction:column;gap:10px"
+            onCancel: onNo
         });
         const back = dialog.back;
-        const card = dialog.card;
 
-        const head = document.createElement("div");
-        head.textContent = title;
-        head.style.cssText = "font-weight:600";
-
-        const text = document.createElement("div");
-        text.textContent = body;
-        text.style.cssText = "color:#ccc;font-size:13px;line-height:1.5";
-
-        const row = document.createElement("div");
-        row.classList.add("mp-row8");
-
-        const close = dialog.close;
-
-        const no = makeButton(noLabel || "Cancel", "#444", "#fff", function () {
-            close(onNo);
+        uiAsk(dialog.card, {
+            title: title,
+            text: body,
+            extra: extra,
+            no: noLabel,
+            yes: yesLabel,
+            danger: danger === true,
+            onNo: function () {
+                dialog.close(onNo);
+            },
+            onYes: function () {
+                dialog.close(onYes);
+            }
         });
-
-        const yes = makeButton(yesLabel, danger ? DANGER : ACCENT, "#000", function () {
-            close(onYes);
-        });
-
-        no.style.flex = "1";
-        yes.style.flex = "1";
-        row.appendChild(no);
-        row.appendChild(yes);
-        card.appendChild(head);
-        card.appendChild(text);
-
-        if (extra) {
-            card.appendChild(extra);
-        }
-
-        card.appendChild(row);
         panelEl.appendChild(back);
 
         return back;
@@ -86189,13 +86214,6 @@
         justify-content: center;
     }
 
-    /* A question's lines as written, a long one scrolled */
-    #confirmText {
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-        max-height: 60vh;
-        overflow-y: auto;
-    }
 
     /* A field in the question, shown when something is to be typed */
     #confirmField {
@@ -86205,7 +86223,10 @@
         font-size: 0.8em;
     }
 
-    #confirmBox {
+    /* A car's question large, a phone's as the mobile player's, from the
+       shared mp-ui-ask look */
+    html:not(.phone) #confirmBox {
+        max-width: none;
         background: var(--card);
         border: 1px solid var(--line);
         border-radius: 18px;
@@ -86217,20 +86238,24 @@
         font-size: clamp(18px, 1.9vw, 26px);
     }
 
-    #confirmBtns {
-        display: flex;
+    html:not(.phone) #confirmBtns {
         gap: 2vw;
     }
 
-    #confirmBtns .chip {
-        flex: 1;
-        justify-content: center;
+    html:not(.phone) #confirmBtns .mp-ui-btn {
+        min-height: 2.4em;
+        border-radius: 12px;
+        font-size: 0.85em;
     }
 
-    #confirmYes.danger {
-        background: #5a1f2b;
-        border-color: #5a1f2b;
-        color: #fff;
+    /* A phone's question as the mobile player's, Cancel being its way out */
+    html.phone #confirmBox > .popX {
+        display: none;
+    }
+
+    html:not(.phone) #confirmText {
+        color: var(--text);
+        font-size: 1em;
     }
 
     .sheetBody {
@@ -89213,12 +89238,12 @@
 </div>
 <div id="blackout"><div id="blackMark">&#9835;</div></div>
 <div id="confirmPop">
-    <div id="confirmBox">
-        <div id="confirmText"></div>
+    <div id="confirmBox" class="mp-ui-ask">
+        <div id="confirmText" class="mp-ui-ask-text"></div>
         <input class="pField" id="confirmField" type="text" autocomplete="off" spellcheck="false">
-        <div id="confirmBtns">
-            <button class="chip" id="confirmNo" type="button">Cancel</button>
-            <button class="chip" id="confirmYes" type="button">Yes</button>
+        <div id="confirmBtns" class="mp-ui-ask-row">
+            <button class="mp-ui-btn dim" id="confirmNo" type="button">Cancel</button>
+            <button class="mp-ui-btn yes" id="confirmYes" type="button">Yes</button>
         </div>
     </div>
 </div>
@@ -93621,7 +93646,15 @@
         + ".mp-ui-title{font-weight:600;min-width:0}"
         + ".mp-ui-gap{flex:1 1 auto}"
         + ".mp-ui-note{font-size:12px;color:#888;line-height:1.5;padding:4px 2px}"
-        + ".mp-ui-loading{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:12px;color:#888}";
+        + ".mp-ui-loading{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:12px;color:#888}"
+        + ".mp-ui-ask{background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;max-width:340px;"
+        + "box-sizing:border-box;display:flex;flex-direction:column;gap:10px;color:#fff;font-size:13px;text-align:left}"
+        + ".mp-ui-ask-title{font-weight:600}"
+        + ".mp-ui-ask-text{color:#ccc;font-size:13px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-height:60vh;overflow-y:auto}"
+        + ".mp-ui-ask-row{display:flex;gap:8px}"
+        + ".mp-ui-ask-row .mp-ui-btn{flex:1}"
+        + ".mp-ui-btn.yes{background:" + ACCENT + ";color:#000}"
+        + ".mp-ui-btn.yes.danger{background:" + DANGER + ";color:#000}";
 
     // The style sheet, once in a page
     function uiStyle() {
@@ -93733,6 +93766,45 @@
         }
 
         return { el: head, title: name, spin: spin };
+    }
+
+    // A question in a card: its title, what it is about, anything else
+    // to show, and Cancel and the answer side by side, the answer red for
+    // something that cannot be undone. card: the card to fill. o: title,
+    // text, extra (an element), no and yes (the buttons' names), danger,
+    // onNo and onYes. Answers the buttons and the text
+    function uiAsk(card, o) {
+
+        const head = document.createElement("div");
+        const text = document.createElement("div");
+        const row = document.createElement("div");
+        const no = uiBtn(o.no || "Cancel", o.onNo || function () {}, true);
+        const yes = uiBtn(o.yes || "Yes", o.onYes || function () {});
+
+        card.classList.add("mp-ui-ask");
+        head.className = "mp-ui-ask-title";
+        head.textContent = o.title || "";
+        text.className = "mp-ui-ask-text";
+        text.textContent = o.text || "";
+        row.className = "mp-ui-ask-row";
+        yes.classList.add("yes");
+        yes.classList.toggle("danger", o.danger === true);
+        row.appendChild(no);
+        row.appendChild(yes);
+
+        if (o.title) {
+            card.appendChild(head);
+        }
+
+        card.appendChild(text);
+
+        if (o.extra) {
+            card.appendChild(o.extra);
+        }
+
+        card.appendChild(row);
+
+        return { yes: yes, no: no, text: text };
     }
     // END SHARED ui
 
@@ -120564,7 +120636,10 @@
         }
     }
 
-    // A question before something that cannot be undone
+    // A question before something that cannot be undone, in the shared
+    // look of src/shared/ui.js
+    uiStyle();
+
     let confirmAction = null;
     let confirmNoAction = null;
 
