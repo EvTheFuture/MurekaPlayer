@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.320";
+    const VERSION = "2.0.1.321";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -87776,81 +87776,6 @@
         position: relative;
     }
 
-    /* A song with comments on Mureka, a small orange speech bubble with
-       their count on the badge's lower left corner */
-    .rowComments {
-        position: absolute;
-        bottom: -0.4em;
-        left: -0.3em;
-        min-width: 1.05em;
-        height: 1.05em;
-        padding: 0 0.15em;
-        box-sizing: border-box;
-        border-radius: 0.45em 0.45em 0.45em 0;
-        background: #ffb454;
-        color: var(--bg);
-        font-size: 0.75em;
-        line-height: 1.05em;
-        font-weight: 700;
-        text-align: center;
-        opacity: 0.95;
-        pointer-events: none;
-    }
-
-    /* A song with a note of its own, a small blue N on the badge's lower
-       corner. Its note shows on the badge under the mouse */
-    .rowNote {
-        position: absolute;
-        bottom: -0.4em;
-        right: -0.3em;
-        width: 1.05em;
-        height: 1.05em;
-        border-radius: 50%;
-        background: #6f9cff;
-        color: var(--bg);
-        font-size: 0.75em;
-        line-height: 1.05em;
-        font-weight: 700;
-        text-align: center;
-        opacity: 0.9;
-        pointer-events: none;
-    }
-
-    /* A song made by remixing, a small purple R on the top left corner */
-    .rowRemix {
-        position: absolute;
-        top: -0.4em;
-        left: -0.3em;
-        width: 1.05em;
-        height: 1.05em;
-        border-radius: 50%;
-        background: #9b7be0;
-        color: var(--bg);
-        font-size: 0.75em;
-        line-height: 1.05em;
-        font-weight: 700;
-        text-align: center;
-        opacity: 0.9;
-        pointer-events: none;
-    }
-
-    .rowTrim {
-        position: absolute;
-        top: -0.4em;
-        right: -0.3em;
-        width: 1.05em;
-        height: 1.05em;
-        border-radius: 50%;
-        background: #c9a83a;
-        color: var(--bg);
-        font-size: 0.75em;
-        line-height: 1.05em;
-        font-weight: 700;
-        text-align: center;
-        opacity: 0.85;
-        pointer-events: none;
-    }
-
     .ceLabel {
         color: var(--muted);
         font-size: 0.85em;
@@ -88095,6 +88020,43 @@
         margin-right: 0;
     }
 
+    /* The account and where the songs come from, under the title on a
+       phone, as the mobile player shows them */
+    #phoneSource {
+        display: none;
+    }
+
+    html.phone #phoneSource {
+        display: inline;
+        flex: 0 1 auto;
+        min-width: 0;
+        margin-right: 6px;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        font-size: 11px;
+        color: #888;
+    }
+
+    html.phone #phoneSelf {
+        color: var(--accent);
+    }
+
+    html.phone #phoneSub #whoName {
+        display: none !important;
+    }
+
+    /* Signed out on the phone, the mobile player's note */
+    html.phone #signin {
+        padding: 7px 9px;
+        border-radius: 6px;
+        background: #5a1f22;
+        border: 1px solid #b3464b;
+        color: #ffd9db;
+        font-size: 12px;
+        line-height: 1.35;
+    }
+
     #phoneVer {
         margin-left: 6px;
         font-size: 11px;
@@ -88276,11 +88238,8 @@
     }
 
     html.phone #status {
-        position: absolute;
-        left: 10px;
-        right: 10px;
-        top: 7px;
-        z-index: 2;
+        flex: 1;
+        min-width: 0;
         font-size: 12px;
         color: #eaeaec;
         text-align: left;
@@ -88313,9 +88272,51 @@
         color: #dcdce0;
     }
 
+    /* The stars and the heart at the top of the covers under the status,
+       the plays and likes at the top right, as in the mobile player */
     html.phone #rateRow {
+        position: absolute;
+        left: 5px;
+        top: 24px;
+        z-index: 2;
         gap: 0;
-        margin-left: -5px;
+        filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.9));
+    }
+
+    #nowTop {
+        display: none;
+    }
+
+    html.phone #nowTop {
+        position: absolute;
+        left: 10px;
+        right: 10px;
+        top: 7px;
+        z-index: 2;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+        pointer-events: none;
+    }
+
+    html.phone #nowCounts {
+        flex: 0 0 auto;
+        font-size: 12px;
+        white-space: nowrap;
+        color: #eaeaec;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+        pointer-events: none;
+    }
+
+    html.phone #likeCount,
+    html.phone #playCount,
+    html.phone #pubBadge {
+        display: none !important;
+    }
+
+    #pubBadge .mp-sr-mark {
+        font-size: 0.6em;
     }
 
     html.phone .star,
@@ -88862,6 +88863,7 @@
             <div class="tile" id="cover"><div id="coverShade"></div><div id="upNext"><span id="nowMark" class="nowMark" data-icon="play" role="img" aria-label="Playing"></span><span id="playTitle" class="marquee"></span><span class="nowSep"></span><span class="nowMark nextRow" data-icon="next" role="img" aria-label="Up next"></span><span id="upTitle" class="marquee nextRow"></span></div><div id="lyricsOver"><div class="lyricRoll"></div></div></div>
         </div>
         <div id="coverSpace"></div>
+        <div id="nowTop"><div id="nowCounts"></div></div>
         <div id="info">
             <div id="title" class="marquee">Connecting to the phone</div>
             <div id="subtitle" class="marquee"></div>
@@ -88941,7 +88943,7 @@
     <div id="bottom">
         <div id="phoneHead">
             <div id="phoneTitle">Mureka Player<span id="phoneVer"></span></div>
-            <div id="phoneSub"></div>
+            <div id="phoneSub"><span id="phoneSource"><span id="phoneSelf"></span><span id="phoneSep"> - </span><span id="phoneFrom"></span></span></div>
         </div>
         <button class="soundIco" id="volBtn" type="button" data-icon="speaker" aria-label="Volume" title="Volume"></button>
         <div id="sound">
@@ -89803,6 +89805,11 @@
         ],
         star: [
             ["path", { d: "M12 2.6l2.83 5.9 6.47.78-4.77 4.47 1.24 6.43L12 17.02l-5.77 3.16 1.24-6.43L2.7 9.28l6.47-.78z" }]
+        ],
+        bars: [
+            ["line", { x1: "4", y1: "6", x2: "20", y2: "6" }],
+            ["line", { x1: "4", y1: "12", x2: "20", y2: "12" }],
+            ["line", { x1: "4", y1: "18", x2: "20", y2: "18" }]
         ],
         menu: [
             ["circle", { cx: "12", cy: "5", r: "1.6", fill: "currentColor" }],
@@ -97498,6 +97505,14 @@
 
         el.title = name ? "Signed in to Mureka on the Android device as " + name : "";
         el.style.display = name ? "inline-block" : "none";
+
+        // On a phone the line under the title as in the mobile player: the
+        // account, then the songs it plays from, an artist's or the library's
+        const from = s && s.playFrom ? (s.playFrom.creator || pubName(s.playFrom.published, false)) : "";
+
+        $("phoneSelf").textContent = name;
+        $("phoneFrom").textContent = from;
+        $("phoneSep").style.display = name && from ? "" : "none";
     }
 
     function paintNetBadge(s) {
@@ -97883,27 +97898,38 @@
         $("pubBadge").classList.toggle("shared", shared);
         $("pubBadge").textContent = pub === null ? "" : (shared ? "Shared" : (fresh ? "New" : (pub ? "Public" : "Draft")));
 
-        // The same small T as in the list for a song made by trimming, and
-        // the N of its note
-        if (pub !== null && s.songTrimmed === true) {
-            $("pubBadge").appendChild(trimMark());
-        }
-
-        if (pub !== null && s.songRemixed === true) {
-            $("pubBadge").appendChild(remixMark());
-        }
-
         $("pubBadge").removeAttribute("title");
 
+        // The same small marks as in the list: T for a song made by
+        // trimming, R for a remix, N for its note and its comments
         if (pub !== null) {
-            noteMarkOn($("pubBadge"), s.songNote);
-            commentMarkOn($("pubBadge"), s.songComments);
+
+            srMarks($("pubBadge"), {
+                trimmed: s.songTrimmed === true,
+                remixed: s.songRemixed === true,
+                note: String(s.songNote || "").trim(),
+                comments: Number(s.songComments) || 0
+            });
         }
 
         // And how many times it has been played
         const plays = s && typeof s.plays === "number" ? s.plays : null;
 
         $("playCount").textContent = plays === null ? "" : "\u25B6 " + compactCount(plays);
+
+        // On a phone the plays and likes at the top right of the covers, as
+        // the mobile player has them
+        const counts = [];
+
+        if (plays !== null) {
+            counts.push("\u25B6 " + compactCount(plays) + " plays");
+        }
+
+        if (likes !== null) {
+            counts.push("\u2665 " + compactCount(likes) + " likes");
+        }
+
+        $("nowCounts").textContent = counts.join("  \u00B7  ");
 
         const rated = s && s.rating !== null && s.rating !== undefined;
 
@@ -101979,65 +102005,6 @@
     // The badge at the end of a line: new for a song not played yet, else
     // public or draft, with a small T for a song made by trimming and a
     // small N for a song with a note, the note shown under the mouse
-
-    // A song with comments on Mureka: a small orange speech bubble with
-    // their count on the badge's lower left corner
-    function commentMarkOn(badge, n) {
-
-        const count = Number(n) || 0;
-
-        if (count <= 0) {
-            return;
-        }
-
-        const mark = document.createElement("span");
-
-        mark.className = "rowComments";
-        mark.textContent = count > 9 ? "9+" : String(count);
-        badge.appendChild(mark);
-        badge.title = (badge.title ? badge.title + "\n\n" : "") + count + (count === 1 ? " comment" : " comments") + " on Mureka";
-    }
-
-    // A song's note on its badge: the N, and the note itself under the mouse
-    function noteMarkOn(badge, note) {
-
-        const text = String(note || "").trim();
-
-        if (!text) {
-            return;
-        }
-
-        const mark = document.createElement("span");
-
-        mark.className = "rowNote";
-        mark.textContent = "N";
-        badge.appendChild(mark);
-        badge.title = (badge.title ? badge.title + "\n\n" : "") + "Note: " + text;
-    }
-
-    // The small yellow T on the corner of a badge, for a song made by
-    // trimming
-    function remixMark() {
-
-        const mark = document.createElement("span");
-
-        mark.className = "rowRemix";
-        mark.textContent = "R";
-        mark.title = "Remix";
-
-        return mark;
-    }
-
-    function trimMark() {
-
-        const mark = document.createElement("span");
-
-        mark.className = "rowTrim";
-        mark.textContent = "T";
-        mark.title = "Trimmed";
-
-        return mark;
-    }
 
     // A small button at the end of a line, which must not also tap the line
     function lineButton(label, iconName, action) {
@@ -119307,7 +119274,8 @@
     // sideways. The status goes onto the covers, as in the mobile player,
     // and the playing from line over the song list as its filter button
     const PHONE_MOVES = [
-        { id: "status", parent: "main", before: null },
+        { id: "status", parent: "nowTop", first: true },
+        { id: "rateRow", parent: "main", before: null },
         { id: "fromLine", parent: "fromDock", first: true },
         { id: "counts", parent: "browseTop", before: null }
     ];
@@ -119350,6 +119318,7 @@
         }
 
         $("sound").classList.remove("open");
+        setIcon($("actionsBtn"), on ? "bars" : "menu");
         sizeCountRoom();
 
         // The list is open under the player on a phone, and closes with the
