@@ -36,6 +36,136 @@
     const DANGER = "#ff6b6b";
     // END SHARED palette
 
+    // BEGIN SHARED stars
+    // Written by embed-webview.sh from src/shared/stars.js. Change that
+    // file and run make embed, never the lines up to END SHARED stars
+    // A star of a rating as both the player and the web view draw it, an
+    // outline with a gold copy over it clipped to how much of the star is
+    // lit, in quarters, and its colours. Shared by the player and the web
+    // view's page, src/shared/stars.js, inlined into both by
+    // embed-webview.sh
+
+    // Star colors, lit and unlit. An unrated song shows grey outlines, a
+    // rated one gold outlines, so zero stars and not rated look different
+    const STAR_GOLD = "#f5c518";
+    const STAR_EMPTY = "#6a6a74";
+
+    // The outline of unlit stars on a rated song and of a partly lit star,
+    // a dark gold so the lit ones stand out
+    const STAR_DIM = "#7d6516";
+
+    // Each star needs its own clip id for the partial fill
+    let starClipCount = 0;
+
+    const STAR_D = "M12 2.6l2.83 5.9 6.47.78-4.77 4.47 1.24 6.43L12 17.02"
+        + "l-5.77 3.16 1.24-6.43L2.7 9.28l6.47-.78z";
+
+    // One star as an SVG, painted later by paintStar. Over the outline
+    // sits a gold copy, fill and stroke, clipped from the left to how much of
+    // the star is lit. It covers the dark outline there, so a partly lit
+    // star shows that only on its right
+    function makeStarSvg(size) {
+
+        const ns = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(ns, "svg");
+
+        svg.setAttribute("width", String(size));
+        svg.setAttribute("height", String(size));
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.style.display = "block";
+
+        starClipCount += 1;
+
+        const clipId = "mureka-star-half-" + starClipCount;
+        const defs = document.createElementNS(ns, "defs");
+        const clip = document.createElementNS(ns, "clipPath");
+        const rect = document.createElementNS(ns, "rect");
+
+        clip.setAttribute("id", clipId);
+        rect.setAttribute("x", "-2");
+        rect.setAttribute("y", "-2");
+        rect.setAttribute("width", "14");
+        rect.setAttribute("height", "28");
+
+        clip.appendChild(rect);
+        defs.appendChild(clip);
+
+        const half = document.createElementNS(ns, "path");
+
+        half.setAttribute("d", STAR_D);
+        half.setAttribute("fill", STAR_GOLD);
+        half.setAttribute("stroke", STAR_GOLD);
+        half.setAttribute("stroke-width", "1.6");
+        half.setAttribute("stroke-linejoin", "round");
+        half.setAttribute("clip-path", "url(#" + clipId + ")");
+        half.style.display = "none";
+
+        const path = document.createElementNS(ns, "path");
+
+        path.setAttribute("d", STAR_D);
+        path.setAttribute("stroke-width", "1.6");
+        path.setAttribute("stroke-linejoin", "round");
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", "currentColor");
+
+        svg.appendChild(defs);
+        svg.appendChild(path);
+        svg.appendChild(half);
+        svg.starPath = path;
+        svg.starHalf = half;
+        svg.starClip = rect;
+
+        return svg;
+    }
+
+    // Where the star's points are across the 24 wide view, so a quarter,
+    // a half and three quarters are cut at that share of its width
+    const STAR_LEFT = 2.7;
+    const STAR_WIDTH = 18.6;
+
+    // The right edge of the gold copy for a part of a star lit
+    function starClipWidth(level) {
+
+        // The clip starts 2 left of the view, past the outline's stroke
+        return (2 + STAR_LEFT + level * STAR_WIDTH).toFixed(2);
+    }
+
+    // How much of a star is lit, 1 full, 0.25, 0.5 or 0.75 that much of it
+    // from the left, 0 none. Full stars are filled and outlined gold. A
+    // partly lit star and the unlit stars of a rated song get a dark gold
+    // outline, the stars of a song never rated a grey one
+    function paintStar(svg, lit, rated) {
+
+        const level = lit === true ? 1 : (lit === false ? 0 : lit);
+        const part = level > 0 && level < 1;
+
+        svg.starPath.setAttribute("fill", level >= 1 ? STAR_GOLD : "none");
+        svg.starHalf.style.display = part ? "" : "none";
+
+        if (part) {
+            svg.starClip.setAttribute("width", starClipWidth(level));
+        }
+
+        if (level >= 1) {
+            svg.starPath.setAttribute("stroke", STAR_GOLD);
+        } else if (rated || part) {
+            svg.starPath.setAttribute("stroke", STAR_DIM);
+        } else {
+            svg.starPath.setAttribute("stroke", STAR_EMPTY);
+        }
+    }
+
+    // How much of star n, counted from 1, a rating lights, in quarters
+    function starLevel(r, n) {
+
+        if (r === null || r <= n - 1) {
+            return 0;
+        }
+
+        return r >= n ? 1 : r - (n - 1);
+    }
+    // END SHARED stars
+
     // Guard against the bookmarklet being tapped twice
     // If the player is already on the page, toggle it instead of building another
     if (window.__murekaPlayerLoaded) {
@@ -72,7 +202,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.324";
+    const VERSION = "2.0.1.325";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -231,15 +361,6 @@
     // localStorage key for star ratings, song_id to 0 to 5. A song missing
     // from it has never been rated, which is kept apart from zero stars
     const RATING_KEY = "mureka_rating_v1";
-
-    // Star colors, lit and unlit. An unrated song shows grey outlines, a
-    // rated one gold outlines, so zero stars and not rated look different
-    const STAR_GOLD = "#f5c518";
-    const STAR_EMPTY = "#6a6a74";
-
-    // The outline of unlit stars on a rated song and of a partly lit star,
-    // a dark gold so the lit ones stand out
-    const STAR_DIM = "#7d6516";
 
     // Cache API bucket for the per song detail payload, the play and like
     // counts plus the timed lyrics. Counts change over time, so every entry
@@ -6351,117 +6472,6 @@
                 reassertNowPlaying();
             }
         }
-    }
-
-    // Each star needs its own clip id for the partial fill
-    let starClipCount = 0;
-
-    const STAR_D = "M12 2.6l2.83 5.9 6.47.78-4.77 4.47 1.24 6.43L12 17.02"
-        + "l-5.77 3.16 1.24-6.43L2.7 9.28l6.47-.78z";
-
-    // One star as an SVG, painted later by paintStar. Over the outline
-    // sits a gold copy, fill and stroke, clipped from the left to how much of
-    // the star is lit. It covers the dark outline there, so a partly lit
-    // star shows that only on its right
-    function makeStarSvg(size) {
-
-        const ns = "http://www.w3.org/2000/svg";
-        const svg = document.createElementNS(ns, "svg");
-
-        svg.setAttribute("width", String(size));
-        svg.setAttribute("height", String(size));
-        svg.setAttribute("viewBox", "0 0 24 24");
-        svg.style.display = "block";
-
-        starClipCount += 1;
-
-        const clipId = "mureka-star-half-" + starClipCount;
-        const defs = document.createElementNS(ns, "defs");
-        const clip = document.createElementNS(ns, "clipPath");
-        const rect = document.createElementNS(ns, "rect");
-
-        clip.setAttribute("id", clipId);
-        rect.setAttribute("x", "-2");
-        rect.setAttribute("y", "-2");
-        rect.setAttribute("width", "14");
-        rect.setAttribute("height", "28");
-
-        clip.appendChild(rect);
-        defs.appendChild(clip);
-
-        const half = document.createElementNS(ns, "path");
-
-        half.setAttribute("d", STAR_D);
-        half.setAttribute("fill", STAR_GOLD);
-        half.setAttribute("stroke", STAR_GOLD);
-        half.setAttribute("stroke-width", "1.6");
-        half.setAttribute("stroke-linejoin", "round");
-        half.setAttribute("clip-path", "url(#" + clipId + ")");
-        half.style.display = "none";
-
-        const path = document.createElementNS(ns, "path");
-
-        path.setAttribute("d", STAR_D);
-        path.setAttribute("stroke-width", "1.6");
-        path.setAttribute("stroke-linejoin", "round");
-        path.setAttribute("fill", "none");
-        path.setAttribute("stroke", "currentColor");
-
-        svg.appendChild(defs);
-        svg.appendChild(path);
-        svg.appendChild(half);
-        svg.starPath = path;
-        svg.starHalf = half;
-        svg.starClip = rect;
-
-        return svg;
-    }
-
-    // Where the star's points are across the 24 wide view, so a quarter,
-    // a half and three quarters are cut at that share of its width
-    const STAR_LEFT = 2.7;
-    const STAR_WIDTH = 18.6;
-
-    // The right edge of the gold copy for a part of a star lit
-    function starClipWidth(level) {
-
-        // The clip starts 2 left of the view, past the outline's stroke
-        return (2 + STAR_LEFT + level * STAR_WIDTH).toFixed(2);
-    }
-
-    // How much of a star is lit, 1 full, 0.25, 0.5 or 0.75 that much of it
-    // from the left, 0 none. Full stars are filled and outlined gold. A
-    // partly lit star and the unlit stars of a rated song get a dark gold
-    // outline, the stars of a song never rated a grey one
-    function paintStar(svg, lit, rated) {
-
-        const level = lit === true ? 1 : (lit === false ? 0 : lit);
-        const part = level > 0 && level < 1;
-
-        svg.starPath.setAttribute("fill", level >= 1 ? STAR_GOLD : "none");
-        svg.starHalf.style.display = part ? "" : "none";
-
-        if (part) {
-            svg.starClip.setAttribute("width", starClipWidth(level));
-        }
-
-        if (level >= 1) {
-            svg.starPath.setAttribute("stroke", STAR_GOLD);
-        } else if (rated || part) {
-            svg.starPath.setAttribute("stroke", STAR_DIM);
-        } else {
-            svg.starPath.setAttribute("stroke", STAR_EMPTY);
-        }
-    }
-
-    // How much of star n, counted from 1, a rating lights, in quarters
-    function starLevel(r, n) {
-
-        if (r === null || r <= n - 1) {
-            return 0;
-        }
-
-        return r >= n ? 1 : r - (n - 1);
     }
 
     // What a tap on star n makes of the current rating. A rating inside
@@ -89291,6 +89301,136 @@
     const DANGER = "#ff6b6b";
     // END SHARED palette
 
+    // BEGIN SHARED stars
+    // Written by embed-webview.sh from src/shared/stars.js. Change that
+    // file and run make embed, never the lines up to END SHARED stars
+    // A star of a rating as both the player and the web view draw it, an
+    // outline with a gold copy over it clipped to how much of the star is
+    // lit, in quarters, and its colours. Shared by the player and the web
+    // view's page, src/shared/stars.js, inlined into both by
+    // embed-webview.sh
+
+    // Star colors, lit and unlit. An unrated song shows grey outlines, a
+    // rated one gold outlines, so zero stars and not rated look different
+    const STAR_GOLD = "#f5c518";
+    const STAR_EMPTY = "#6a6a74";
+
+    // The outline of unlit stars on a rated song and of a partly lit star,
+    // a dark gold so the lit ones stand out
+    const STAR_DIM = "#7d6516";
+
+    // Each star needs its own clip id for the partial fill
+    let starClipCount = 0;
+
+    const STAR_D = "M12 2.6l2.83 5.9 6.47.78-4.77 4.47 1.24 6.43L12 17.02"
+        + "l-5.77 3.16 1.24-6.43L2.7 9.28l6.47-.78z";
+
+    // One star as an SVG, painted later by paintStar. Over the outline
+    // sits a gold copy, fill and stroke, clipped from the left to how much of
+    // the star is lit. It covers the dark outline there, so a partly lit
+    // star shows that only on its right
+    function makeStarSvg(size) {
+
+        const ns = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(ns, "svg");
+
+        svg.setAttribute("width", String(size));
+        svg.setAttribute("height", String(size));
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.style.display = "block";
+
+        starClipCount += 1;
+
+        const clipId = "mureka-star-half-" + starClipCount;
+        const defs = document.createElementNS(ns, "defs");
+        const clip = document.createElementNS(ns, "clipPath");
+        const rect = document.createElementNS(ns, "rect");
+
+        clip.setAttribute("id", clipId);
+        rect.setAttribute("x", "-2");
+        rect.setAttribute("y", "-2");
+        rect.setAttribute("width", "14");
+        rect.setAttribute("height", "28");
+
+        clip.appendChild(rect);
+        defs.appendChild(clip);
+
+        const half = document.createElementNS(ns, "path");
+
+        half.setAttribute("d", STAR_D);
+        half.setAttribute("fill", STAR_GOLD);
+        half.setAttribute("stroke", STAR_GOLD);
+        half.setAttribute("stroke-width", "1.6");
+        half.setAttribute("stroke-linejoin", "round");
+        half.setAttribute("clip-path", "url(#" + clipId + ")");
+        half.style.display = "none";
+
+        const path = document.createElementNS(ns, "path");
+
+        path.setAttribute("d", STAR_D);
+        path.setAttribute("stroke-width", "1.6");
+        path.setAttribute("stroke-linejoin", "round");
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", "currentColor");
+
+        svg.appendChild(defs);
+        svg.appendChild(path);
+        svg.appendChild(half);
+        svg.starPath = path;
+        svg.starHalf = half;
+        svg.starClip = rect;
+
+        return svg;
+    }
+
+    // Where the star's points are across the 24 wide view, so a quarter,
+    // a half and three quarters are cut at that share of its width
+    const STAR_LEFT = 2.7;
+    const STAR_WIDTH = 18.6;
+
+    // The right edge of the gold copy for a part of a star lit
+    function starClipWidth(level) {
+
+        // The clip starts 2 left of the view, past the outline's stroke
+        return (2 + STAR_LEFT + level * STAR_WIDTH).toFixed(2);
+    }
+
+    // How much of a star is lit, 1 full, 0.25, 0.5 or 0.75 that much of it
+    // from the left, 0 none. Full stars are filled and outlined gold. A
+    // partly lit star and the unlit stars of a rated song get a dark gold
+    // outline, the stars of a song never rated a grey one
+    function paintStar(svg, lit, rated) {
+
+        const level = lit === true ? 1 : (lit === false ? 0 : lit);
+        const part = level > 0 && level < 1;
+
+        svg.starPath.setAttribute("fill", level >= 1 ? STAR_GOLD : "none");
+        svg.starHalf.style.display = part ? "" : "none";
+
+        if (part) {
+            svg.starClip.setAttribute("width", starClipWidth(level));
+        }
+
+        if (level >= 1) {
+            svg.starPath.setAttribute("stroke", STAR_GOLD);
+        } else if (rated || part) {
+            svg.starPath.setAttribute("stroke", STAR_DIM);
+        } else {
+            svg.starPath.setAttribute("stroke", STAR_EMPTY);
+        }
+    }
+
+    // How much of star n, counted from 1, a rating lights, in quarters
+    function starLevel(r, n) {
+
+        if (r === null || r <= n - 1) {
+            return 0;
+        }
+
+        return r >= n ? 1 : r - (n - 1);
+    }
+    // END SHARED stars
+
     const $ = function (id) {
         return document.getElementById(id);
     };
@@ -90156,8 +90296,6 @@
         lbl.textContent = el.dataset.label;
         el.appendChild(lbl);
     }
-    const STAR_D = "M12 2.6l2.83 5.9 6.47.78-4.77 4.47 1.24 6.43L12 17.02"
-        + "l-5.77 3.16 1.24-6.43L2.7 9.28l6.47-.78z";
 
     // The last state from the phone and when it arrived here. The position
     // moves on between polls, worked out from the local clock, since this
@@ -96233,42 +96371,11 @@
         for (let n = 1; n <= 5; n++) {
 
             const btn = document.createElement("button");
-            const svg = document.createElementNS(NS, "svg");
-            const defs = document.createElementNS(NS, "defs");
-            const clip = document.createElementNS(NS, "clipPath");
-            const rect = document.createElementNS(NS, "rect");
-            const outline = document.createElementNS(NS, "path");
-            const half = document.createElementNS(NS, "path");
+            const svg = makeStarSvg(24);
 
             btn.className = "star";
             btn.type = "button";
             btn.setAttribute("aria-label", n + (n === 1 ? " star" : " stars"));
-
-            svg.setAttribute("viewBox", "0 0 24 24");
-            clip.setAttribute("id", prefix + n);
-            rect.setAttribute("x", "-2");
-            rect.setAttribute("y", "-2");
-            rect.setAttribute("width", "14");
-            rect.setAttribute("height", "28");
-            clip.appendChild(rect);
-            defs.appendChild(clip);
-
-            outline.setAttribute("d", STAR_D);
-            outline.setAttribute("stroke-width", "1.6");
-            outline.setAttribute("stroke-linejoin", "round");
-
-            half.setAttribute("d", STAR_D);
-
-            // Colors go through style, attributes do not understand var()
-            half.style.fill = "var(--gold)";
-            half.style.stroke = "var(--gold)";
-            half.setAttribute("stroke-width", "1.6");
-            half.setAttribute("stroke-linejoin", "round");
-            half.setAttribute("clip-path", "url(#" + prefix + n + ")");
-
-            svg.appendChild(defs);
-            svg.appendChild(outline);
-            svg.appendChild(half);
             btn.appendChild(svg);
 
             btn.addEventListener("click", function (ev) {
@@ -96295,35 +96402,15 @@
             });
 
             box.appendChild(btn);
-            bar.push({ outline: outline, half: half, clip: rect });
+            bar.push(svg);
         }
 
         return function paint(r) {
 
             shown = r === undefined ? null : r;
 
-            bar.forEach(function (st, i) {
-
-                const n = i + 1;
-                const rated = r !== null && r !== undefined;
-                let level = 0;
-
-                if (rated && r > n - 1) {
-                    level = r >= n ? 1 : r - (n - 1);
-                }
-
-                const part = level > 0 && level < 1;
-
-                st.outline.style.fill = level === 1 ? "var(--gold)" : "none";
-                st.outline.style.stroke = level === 1 ? "var(--gold)" : (rated ? "var(--dim)" : "var(--empty)");
-                st.half.style.display = part ? "" : "none";
-
-                // Cut where that share of the star's points ends, as on the
-                // phone: they span 2.7 to 21.3 of the 24 wide view, and the
-                // clip starts 2 left of it, past the outline's stroke
-                if (part) {
-                    st.clip.setAttribute("width", (4.7 + level * 18.6).toFixed(2));
-                }
+            bar.forEach(function (svg, i) {
+                paintStar(svg, starLevel(r === undefined ? null : r, i + 1), r !== null && r !== undefined);
             });
         };
     }
@@ -102213,19 +102300,6 @@
         }
     }
 
-    // The small crossed circle before the title of an ignored song
-
-    // Whether a row carries its badge, by the same rule as the phone: shared
-    // always. In the list, while both published songs and drafts are
-    // listed. In the queue, a new one, every song when all are listed, and
-    // otherwise one the filter would not list, a draft among the published
-    // songs say. A song made by trimming without its badge still gets its
-    // T, on the heart's corner
-
-    // The badge at the end of a line: new for a song not played yet, else
-    // public or draft, with a small T for a song made by trimming and a
-    // small N for a song with a note, the note shown under the mouse
-
     // A small button at the end of a line, which must not also tap the line
     function lineButton(label, iconName, action) {
 
@@ -102794,10 +102868,6 @@
         ];
     }
 
-    // The chip of a fold of songs the filters leave out, or of a set, in the
-    // set's color
-
-
     // Opened, the fold's songs are read from the phone and put in under its
     // first, folded they are taken out again, in both lists where it shows,
     // each list's count moving with them so its next page follows on
@@ -103014,8 +103084,6 @@
 
         openChoice("\"" + song.title + "\" is left out by the filters", choices);
     }
-
-    // The tick before a kept song's title, in its set's color
 
     function makeRow(song, place) {
 
