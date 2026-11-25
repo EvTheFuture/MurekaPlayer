@@ -13004,6 +13004,203 @@
     }
     // END SHARED stats
 
+    // BEGIN SHARED marquee
+    // Written by embed-webview.sh from src/shared/marquee.js. Change that
+    // file and run make embed, never the lines up to END SHARED marquee
+    // A one line box turned into a marquee, as the player and the web view
+    // both walk a line too long for its box. The text waits at the start,
+    // eases into a steady walk to the left until it and a gap have passed,
+    // a second copy following on, eases to a stop exactly where it began
+    // and waits again, so the beginning is always readable. A line that
+    // fits just sits still, a line cut off fades out at the right edge.
+    // Shared by the player and the web view's page, src/shared/marquee.js,
+    // inlined into both by embed-webview.sh
+    //
+    // opts: speed in pixels a second, gap the least clear space after the
+    // text (at least half the line's width too), delay the rest at the
+    // start in ms, fade the fading edge's width as CSS, note(text) told
+    // what it decides, list an array the marquee is added to. Answers
+    // { setText(text), check() }, check after the box may have changed
+    // width. The box keeps its own styling, only its contents are taken
+    // over, the text it holds kept
+    function makeMarquee(box, opts) {
+
+        const o = opts || {};
+        const speed = o.speed || 40;
+        const least = o.gap || 72;
+        const delay = o.delay || 3000;
+        const fade = o.fade || "28px";
+        const note = typeof o.note === "function" ? o.note : function () {};
+
+        // One track holds both copies and is the thing that moves, so the
+        // two can never drift apart. Kept on a layer of its own all the
+        // time, so whatever is drawn near the line is never put on one and
+        // taken off again as the line changes, which flickered on a phone
+        const track = document.createElement("span");
+        const first = document.createElement("span");
+        const second = document.createElement("span");
+        const align = getComputedStyle(box).textAlign;
+
+        // Both inline-block, a plain inline span reports no width at all
+        track.style.cssText = "display:inline-block;white-space:nowrap;will-change:transform";
+        first.style.cssText = "display:inline-block;white-space:nowrap";
+        second.style.cssText = "display:none;white-space:nowrap";
+        first.textContent = box.textContent;
+        box.classList.toggle("blank", !first.textContent);
+        track.appendChild(first);
+        track.appendChild(second);
+        box.textContent = "";
+        box.appendChild(track);
+
+        let anim = null;
+        let timer = null;
+        let width = 0;
+
+        const edgeFade = function () {
+
+            const over = first.textContent
+                && Math.ceil(first.getBoundingClientRect().width) - box.clientWidth > 2;
+            const mask = over ? "linear-gradient(to right, #000 calc(100% - " + fade + "), transparent)" : "";
+
+            box.style.webkitMaskImage = mask;
+            box.style.maskImage = mask;
+        };
+
+        const stop = function () {
+
+            if (timer) {
+
+                clearTimeout(timer);
+                timer = null;
+            }
+
+            if (anim) {
+
+                anim.cancel();
+                anim = null;
+            }
+
+            track.style.transform = "none";
+            first.style.marginRight = "0px";
+            second.style.display = "none";
+            box.style.textAlign = align;
+        };
+
+        const start = function () {
+
+            edgeFade();
+
+            if (!track.animate || !first.textContent) {
+                return;
+            }
+
+            const textWidth = Math.ceil(first.getBoundingClientRect().width);
+
+            width = box.clientWidth;
+
+            if (width < 40) {
+
+                note("waits for its width, " + width + " px now");
+                return;
+            }
+
+            if (textWidth - width <= 2) {
+
+                note("fits, " + textWidth + " of " + width + " px");
+                stop();
+                return;
+            }
+
+            note("walks, " + textWidth + " px in " + width + " px");
+
+            // A walking line starts at the left, whatever its alignment
+            box.style.textAlign = "left";
+
+            const gap = Math.max(least, Math.round(width * 0.5));
+            const distance = textWidth + gap;
+
+            first.style.marginRight = gap + "px";
+            second.style.display = "inline-block";
+            anim = track.animate([
+                { transform: "translateX(0)", offset: 0, easing: "ease-in" },
+                { transform: "translateX(" + (-distance * 0.05) + "px)", offset: 0.09, easing: "linear" },
+                { transform: "translateX(" + (-distance * 0.95) + "px)", offset: 0.91, easing: "ease-out" },
+                { transform: "translateX(" + (-distance) + "px)", offset: 1 }
+            ], { duration: distance / speed * 1000 });
+
+            anim.onfinish = function () {
+
+                anim = null;
+                track.style.transform = "none";
+                timer = setTimeout(function () {
+
+                    timer = null;
+                    start();
+                }, delay);
+            };
+        };
+
+        const restart = function (wait) {
+
+            stop();
+            requestAnimationFrame(edgeFade);
+            timer = setTimeout(function () {
+
+                timer = null;
+                start();
+            }, wait);
+        };
+
+        const m = {
+            setText: function (text) {
+
+                const value = text || "";
+
+                if (first.textContent === value) {
+                    return;
+                }
+
+                first.textContent = value;
+                second.textContent = value;
+                note("new text, " + value.length + " characters");
+
+                // Marked when empty, so a line that has a row of its own on
+                // a phone can give its room back
+                box.classList.toggle("blank", !value);
+                restart(delay);
+            },
+
+            // After a resize, a line that now fits stops and one that no
+            // longer fits starts walking
+            check: function () {
+
+                if (box.clientWidth !== width && box.offsetParent && first.textContent) {
+
+                    width = box.clientWidth;
+                    restart(600);
+                }
+            }
+        };
+
+        // The box's own changes of width followed where the browser tells
+        if (typeof ResizeObserver === "function") {
+
+            new ResizeObserver(function () {
+
+                if (Math.abs(box.clientWidth - width) >= 2 && box.clientWidth >= 40) {
+                    m.check();
+                }
+            }).observe(box);
+        }
+
+        if (Array.isArray(o.list)) {
+            o.list.push(m);
+        }
+
+        return m;
+    }
+    // END SHARED marquee
+
     // BEGIN SHARED chat
     // Written by embed-webview.sh from src/shared/chat.js. Change that
     // file and run make embed, never the lines up to END SHARED chat
@@ -14668,17 +14865,9 @@
 
     // Everything that follows the state, drawn when a new one arrives
 
-    // Turn a one line box into a marquee, the phone's makeMarquee. The text
-    // waits at the start, eases into a steady walk to the left until it and
-    // a gap have passed, a second copy following on, eases to a stop exactly
-    // where it began and waits again, so the beginning is always readable.
-    // A line that fits just sits still
-    const MARQUEE_DELAY = 3000;
-    const MARQUEE_SPEED = 60;
-    const MARQUEE_GAP = 90;
-
-    // The gap is at least half the line's width as well, as on the phone
-    const MARQUEE_GAP_SHARE = 0.5;
+    // The lines that walk when too long, drawn by the shared makeMarquee,
+    // faster and with more room than the phone's for a car's large text
+    const MARQUEE = { speed: 60, gap: 90, delay: 3000, fade: "2em" };
     const marquees = [];
 
     // A function run once on the next frame, however often it is asked for
@@ -14737,169 +14926,12 @@
         setInterval(check, SAFETY_CHECK_MS);
     }
 
-    function makeMarquee(box) {
-
-        const track = document.createElement("span");
-        const first = document.createElement("span");
-        const second = document.createElement("span");
-        const align = getComputedStyle(box).textAlign;
-
-        track.style.cssText = "display:inline-block;white-space:nowrap;will-change:transform";
-        first.style.cssText = "display:inline-block;white-space:nowrap";
-        second.style.cssText = "display:none;white-space:nowrap";
-        first.textContent = box.textContent;
-        box.classList.toggle("blank", !first.textContent);
-        track.appendChild(first);
-        track.appendChild(second);
-        box.textContent = "";
-        box.appendChild(track);
-
-        let anim = null;
-        let timer = null;
-        let width = 0;
-
-        // A line too long for its box fades out at the right edge, so the
-        // end cut off there reads as cut off, not as the next copy coming in
-        const edgeFade = function () {
-
-            const over = first.textContent
-                && Math.ceil(first.getBoundingClientRect().width) - box.clientWidth > 2;
-            const mask = over ? "linear-gradient(to right, #000 calc(100% - 2em), transparent)" : "";
-
-            box.style.webkitMaskImage = mask;
-            box.style.maskImage = mask;
-        };
-
-        const stop = function () {
-
-            if (timer) {
-
-                clearTimeout(timer);
-                timer = null;
-            }
-
-            if (anim) {
-
-                anim.cancel();
-                anim = null;
-            }
-
-            track.style.transform = "none";
-            first.style.marginRight = "0px";
-            second.style.display = "none";
-            box.style.textAlign = align;
-        };
-
-        const start = function () {
-
-            edgeFade();
-
-            if (!track.animate || !first.textContent) {
-                return;
-            }
-
-            const textWidth = Math.ceil(first.getBoundingClientRect().width);
-
-            width = box.clientWidth;
-
-            // Not laid out yet, a hidden or still narrow box would take nearly
-            // any text as too long. The check after a resize starts it later
-            if (width < 40) {
-                return;
-            }
-
-            // It fits, so it stands still with the trailing copy and its gap
-            // taken away again, not left waiting at the right edge after a
-            // walk that began while the box was narrower
-            if (textWidth - width <= 2) {
-
-                stop();
-                return;
-            }
-
-            // A right aligned line walks from its start like any other
-            box.style.textAlign = "left";
-
-            const gap = Math.max(MARQUEE_GAP, Math.round(width * MARQUEE_GAP_SHARE));
-
-            first.style.marginRight = gap + "px";
-            second.style.display = "inline-block";
-
-            const distance = textWidth + gap;
-
-            anim = track.animate([
-                { transform: "translateX(0)", offset: 0, easing: "ease-in" },
-                { transform: "translateX(" + (-distance * 0.05) + "px)", offset: 0.09, easing: "linear" },
-                { transform: "translateX(" + (-distance * 0.95) + "px)", offset: 0.91, easing: "ease-out" },
-                { transform: "translateX(" + (-distance) + "px)", offset: 1 }
-            ], { duration: distance / MARQUEE_SPEED * 1000 });
-
-            anim.onfinish = function () {
-
-                anim = null;
-                track.style.transform = "none";
-                timer = setTimeout(function () {
-
-                    timer = null;
-                    start();
-                }, MARQUEE_DELAY);
-            };
-        };
-
-        // Measure again later, the text or the box changed
-        const restart = function (wait) {
-
-            stop();
-            requestAnimationFrame(edgeFade);
-            timer = setTimeout(function () {
-
-                timer = null;
-                start();
-            }, wait);
-        };
-
-        const m = {
-            setText: function (text) {
-
-                const value = text || "";
-
-                // The same line again lets a walk under way carry on
-                if (first.textContent === value) {
-                    return;
-                }
-
-                first.textContent = value;
-                second.textContent = value;
-
-                // Marked when empty, so a line that has a row of its own on
-                // a phone can give its room back
-                box.classList.toggle("blank", !value);
-                restart(MARQUEE_DELAY);
-            },
-
-            // After a resize, a line that now fits stops and one that no
-            // longer fits starts walking
-            check: function () {
-
-                if (box.clientWidth !== width && box.offsetParent) {
-
-                    width = box.clientWidth;
-                    restart(600);
-                }
-            }
-        };
-
-        marquees.push(m);
-
-        return m;
-    }
-
-    const titleLine = makeMarquee($("title"));
-    const subtitleLine = makeMarquee($("subtitle"));
-    const upLine = makeMarquee($("upTitle"));
-    const playLine = makeMarquee($("playTitle"));
-    const statusLine = makeMarquee($("status"));
-    const fromLine = makeMarquee($("fromText"));
+    const titleLine = makeMarquee($("title"), Object.assign({ list: marquees }, MARQUEE));
+    const subtitleLine = makeMarquee($("subtitle"), Object.assign({ list: marquees }, MARQUEE));
+    const upLine = makeMarquee($("upTitle"), Object.assign({ list: marquees }, MARQUEE));
+    const playLine = makeMarquee($("playTitle"), Object.assign({ list: marquees }, MARQUEE));
+    const statusLine = makeMarquee($("status"), Object.assign({ list: marquees }, MARQUEE));
+    const fromLine = makeMarquee($("fromText"), Object.assign({ list: marquees }, MARQUEE));
 
     window.addEventListener("resize", function () {
 

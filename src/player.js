@@ -202,7 +202,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.325";
+    const VERSION = "2.0.1.326";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -3534,19 +3534,6 @@
     // The last status text, kept so the line can be put back after its
     // marquee is built, which happens after the first status is set
     let statusText = "";
-
-    // How long the text rests at the left before it starts, and again each time
-    // it comes back around
-    const META_SCROLL_DELAY = 3000;
-
-    // Pixels per second, slow enough to read
-    const META_SCROLL_SPEED = 40;
-
-    // The clear space that follows the text before the next copy of it, at
-    // least this, and at least half the line's width, so the next copy is
-    // well apart and never seen coming in while the text rests
-    const META_SCROLL_GAP = 72;
-    const META_SCROLL_GAP_SHARE = 0.5;
 
     let playerCountsEl = null;
 
@@ -17318,6 +17305,203 @@
         };
     }
     // END SHARED stats
+
+    // BEGIN SHARED marquee
+    // Written by embed-webview.sh from src/shared/marquee.js. Change that
+    // file and run make embed, never the lines up to END SHARED marquee
+    // A one line box turned into a marquee, as the player and the web view
+    // both walk a line too long for its box. The text waits at the start,
+    // eases into a steady walk to the left until it and a gap have passed,
+    // a second copy following on, eases to a stop exactly where it began
+    // and waits again, so the beginning is always readable. A line that
+    // fits just sits still, a line cut off fades out at the right edge.
+    // Shared by the player and the web view's page, src/shared/marquee.js,
+    // inlined into both by embed-webview.sh
+    //
+    // opts: speed in pixels a second, gap the least clear space after the
+    // text (at least half the line's width too), delay the rest at the
+    // start in ms, fade the fading edge's width as CSS, note(text) told
+    // what it decides, list an array the marquee is added to. Answers
+    // { setText(text), check() }, check after the box may have changed
+    // width. The box keeps its own styling, only its contents are taken
+    // over, the text it holds kept
+    function makeMarquee(box, opts) {
+
+        const o = opts || {};
+        const speed = o.speed || 40;
+        const least = o.gap || 72;
+        const delay = o.delay || 3000;
+        const fade = o.fade || "28px";
+        const note = typeof o.note === "function" ? o.note : function () {};
+
+        // One track holds both copies and is the thing that moves, so the
+        // two can never drift apart. Kept on a layer of its own all the
+        // time, so whatever is drawn near the line is never put on one and
+        // taken off again as the line changes, which flickered on a phone
+        const track = document.createElement("span");
+        const first = document.createElement("span");
+        const second = document.createElement("span");
+        const align = getComputedStyle(box).textAlign;
+
+        // Both inline-block, a plain inline span reports no width at all
+        track.style.cssText = "display:inline-block;white-space:nowrap;will-change:transform";
+        first.style.cssText = "display:inline-block;white-space:nowrap";
+        second.style.cssText = "display:none;white-space:nowrap";
+        first.textContent = box.textContent;
+        box.classList.toggle("blank", !first.textContent);
+        track.appendChild(first);
+        track.appendChild(second);
+        box.textContent = "";
+        box.appendChild(track);
+
+        let anim = null;
+        let timer = null;
+        let width = 0;
+
+        const edgeFade = function () {
+
+            const over = first.textContent
+                && Math.ceil(first.getBoundingClientRect().width) - box.clientWidth > 2;
+            const mask = over ? "linear-gradient(to right, #000 calc(100% - " + fade + "), transparent)" : "";
+
+            box.style.webkitMaskImage = mask;
+            box.style.maskImage = mask;
+        };
+
+        const stop = function () {
+
+            if (timer) {
+
+                clearTimeout(timer);
+                timer = null;
+            }
+
+            if (anim) {
+
+                anim.cancel();
+                anim = null;
+            }
+
+            track.style.transform = "none";
+            first.style.marginRight = "0px";
+            second.style.display = "none";
+            box.style.textAlign = align;
+        };
+
+        const start = function () {
+
+            edgeFade();
+
+            if (!track.animate || !first.textContent) {
+                return;
+            }
+
+            const textWidth = Math.ceil(first.getBoundingClientRect().width);
+
+            width = box.clientWidth;
+
+            if (width < 40) {
+
+                note("waits for its width, " + width + " px now");
+                return;
+            }
+
+            if (textWidth - width <= 2) {
+
+                note("fits, " + textWidth + " of " + width + " px");
+                stop();
+                return;
+            }
+
+            note("walks, " + textWidth + " px in " + width + " px");
+
+            // A walking line starts at the left, whatever its alignment
+            box.style.textAlign = "left";
+
+            const gap = Math.max(least, Math.round(width * 0.5));
+            const distance = textWidth + gap;
+
+            first.style.marginRight = gap + "px";
+            second.style.display = "inline-block";
+            anim = track.animate([
+                { transform: "translateX(0)", offset: 0, easing: "ease-in" },
+                { transform: "translateX(" + (-distance * 0.05) + "px)", offset: 0.09, easing: "linear" },
+                { transform: "translateX(" + (-distance * 0.95) + "px)", offset: 0.91, easing: "ease-out" },
+                { transform: "translateX(" + (-distance) + "px)", offset: 1 }
+            ], { duration: distance / speed * 1000 });
+
+            anim.onfinish = function () {
+
+                anim = null;
+                track.style.transform = "none";
+                timer = setTimeout(function () {
+
+                    timer = null;
+                    start();
+                }, delay);
+            };
+        };
+
+        const restart = function (wait) {
+
+            stop();
+            requestAnimationFrame(edgeFade);
+            timer = setTimeout(function () {
+
+                timer = null;
+                start();
+            }, wait);
+        };
+
+        const m = {
+            setText: function (text) {
+
+                const value = text || "";
+
+                if (first.textContent === value) {
+                    return;
+                }
+
+                first.textContent = value;
+                second.textContent = value;
+                note("new text, " + value.length + " characters");
+
+                // Marked when empty, so a line that has a row of its own on
+                // a phone can give its room back
+                box.classList.toggle("blank", !value);
+                restart(delay);
+            },
+
+            // After a resize, a line that now fits stops and one that no
+            // longer fits starts walking
+            check: function () {
+
+                if (box.clientWidth !== width && box.offsetParent && first.textContent) {
+
+                    width = box.clientWidth;
+                    restart(600);
+                }
+            }
+        };
+
+        // The box's own changes of width followed where the browser tells
+        if (typeof ResizeObserver === "function") {
+
+            new ResizeObserver(function () {
+
+                if (Math.abs(box.clientWidth - width) >= 2 && box.clientWidth >= 40) {
+                    m.check();
+                }
+            }).observe(box);
+        }
+
+        if (Array.isArray(o.list)) {
+            o.list.push(m);
+        }
+
+        return m;
+    }
+    // END SHARED marquee
 
     // BEGIN SHARED chat
     // Written by embed-webview.sh from src/shared/chat.js. Change that
@@ -34821,234 +35005,6 @@
         metaMarquee.setText(text);
     }
 
-    // Turn a one line box into a marquee. The text waits at the left, slides
-    // itself plus a gap fully out to the left, then comes straight back in
-    // from the right and waits again, so the beginning is always readable.
-    // The box keeps its own styling, only its contents are taken over
-    function makeMarquee(box, name) {
-
-        // What it decides, for the debug log, only for a line given a name
-        const note = function (text) {
-
-            if (name) {
-                dbgLog("Marquee", name + ": " + text);
-            }
-        };
-
-        // One track holds both copies and is the thing that moves, so the two
-        // can never drift apart. It only gets a layer of its own while it
-        // moves. Kept on one all the time, whatever is drawn over it near
-        // the line, the cover stars under the status, was put on a layer of
-        // its own too because it touches it, and every new status text made
-        // the browser build that layer again, which on a phone flickered and
-        // left the stars away
-        const track = document.createElement("span");
-        track.style.cssText = "display:inline-block;white-space:nowrap";
-
-        // Both are inline-block, a plain inline span reports no width at all
-        // and the overflow test would never fire
-        const first = document.createElement("span");
-        first.style.cssText = "display:inline-block;white-space:nowrap";
-
-        // A second copy trails the first, so as the end of the line leaves on
-        // the left the beginning is already arriving on the right
-        const second = document.createElement("span");
-        second.style.cssText = "display:none;white-space:nowrap";
-
-        track.appendChild(first);
-        track.appendChild(second);
-
-        box.textContent = "";
-        box.appendChild(track);
-
-        let anim = null;
-        let timer = null;
-
-        // A line too long for the box fades out at the right edge, so the
-        // end cut off there reads as cut off, not as the next copy coming in
-        const edgeFade = function () {
-
-            const over = Math.ceil(first.getBoundingClientRect().width) - box.clientWidth > 2;
-            const mask = over ? "linear-gradient(to right, #000 calc(100% - 28px), transparent)" : "";
-
-            box.style.webkitMaskImage = mask;
-            box.style.maskImage = mask;
-        };
-
-        // Back to the plain line: one copy, no gap, where it began
-        const settle = function () {
-
-            track.style.transform = "none";
-            track.style.willChange = "auto";
-            first.style.marginRight = "0px";
-            second.style.display = "none";
-        };
-
-        // The box's width when last measured, so a change can be caught
-        let measured = 0;
-
-        const start = function () {
-
-            edgeFade();
-
-            if (!track.animate) {
-
-                note("this browser cannot animate");
-                return;
-            }
-
-            // Not laid out yet, a hidden or still narrow box would measure
-            // nearly any text as too long and walk it with a tiny gap. The
-            // size watch below starts it once the box has its width
-            if (box.clientWidth < 40) {
-
-                note("waits for its width, " + box.clientWidth + " px now");
-                return;
-            }
-
-            // Measured from the box, which is accurate for a fractional width
-            const textWidth = Math.ceil(first.getBoundingClientRect().width);
-            const overflow = textWidth - box.clientWidth;
-
-            measured = box.clientWidth;
-
-            // It fits, so it stands still, with the trailing copy and its gap
-            // taken away again. Left in place after a walk, when the box had
-            // grown meanwhile, that copy stood waiting at the right edge
-            if (overflow <= 2) {
-
-                note("fits, " + textWidth + " of " + box.clientWidth + " px");
-                settle();
-                return;
-            }
-
-            note("walks, " + textWidth + " px in " + box.clientWidth + " px");
-
-            // Show the trailing copy and space it off the first
-            const gap = Math.max(META_SCROLL_GAP, Math.round(box.clientWidth * META_SCROLL_GAP_SHARE));
-
-            first.style.marginRight = gap + "px";
-            second.style.display = "inline-block";
-
-            // Travel exactly one line plus the gap. At the end the second copy
-            // sits where the first began, so resetting to zero is invisible
-            // and the line is on screen throughout
-            const distance = textWidth + gap;
-            const duration = (distance / META_SCROLL_SPEED) * 1000;
-
-            // Ease away from the rest position and ease back into the next
-            // one, holding a steady readable speed in between
-            const frames = [
-                { transform: "translateX(0)", offset: 0, easing: "ease-in" },
-                { transform: "translateX(" + (-distance * 0.05) + "px)", offset: 0.09, easing: "linear" },
-                { transform: "translateX(" + (-distance * 0.95) + "px)", offset: 0.91, easing: "ease-out" },
-                { transform: "translateX(" + (-distance) + "px)", offset: 1 }
-            ];
-
-            track.style.willChange = "transform";
-            anim = track.animate(frames, { duration: duration });
-
-            anim.onfinish = function () {
-
-                anim = null;
-                track.style.transform = "none";
-                track.style.willChange = "auto";
-
-                // Back at the left edge, so rest here exactly as at the start
-                timer = setTimeout(function () {
-
-                    timer = null;
-                    start();
-                }, META_SCROLL_DELAY);
-            };
-        };
-
-        const setText = function (text) {
-
-            const value = text || "";
-
-            // The same line again, so let a walk already under way carry on
-            // rather than snapping it back to the left. Both the status and
-            // the meta line are rewritten far more often than they change
-            if (first.textContent === value) {
-                return;
-            }
-
-            if (timer) {
-
-                clearTimeout(timer);
-                timer = null;
-            }
-
-            if (anim) {
-
-                anim.cancel();
-                anim = null;
-            }
-
-            settle();
-            first.textContent = value;
-            note("new text, " + value.length + " characters");
-
-            // The trailing copy is only needed while scrolling
-            second.textContent = value;
-
-            // The fade at once, the walk after the rest
-            requestAnimationFrame(edgeFade);
-
-            if (!value) {
-                return;
-            }
-
-            // Measured after the text is in place, and only worth doing when
-            // the line is actually too long for the box
-            timer = setTimeout(function () {
-
-                timer = null;
-                start();
-            }, META_SCROLL_DELAY);
-        };
-
-        // The box changing width, laid out at last or the screen turned,
-        // measures the line again: one that now fits stops and settles, one
-        // that no longer fits starts walking after the usual rest
-        if (typeof ResizeObserver === "function") {
-
-            new ResizeObserver(function () {
-
-                const w = box.clientWidth;
-
-                if (w < 40 || Math.abs(w - measured) < 2 || !first.textContent) {
-                    return;
-                }
-
-                measured = w;
-
-                if (timer) {
-
-                    clearTimeout(timer);
-                    timer = null;
-                }
-
-                if (anim) {
-
-                    anim.cancel();
-                    anim = null;
-                }
-
-                settle();
-                requestAnimationFrame(edgeFade);
-                timer = setTimeout(function () {
-
-                    timer = null;
-                    start();
-                }, META_SCROLL_DELAY);
-            }).observe(box);
-        }
-
-        return { setText: setText };
-    }
-
     // A count as it is shown in small places: as it is under a thousand, then
     // 1.0k, 1.3k, 12k, and 1.2M for millions
     function compactCount(n) {
@@ -50529,7 +50485,11 @@
         playerMetaEl.style.cssText = "color:#dcdce0;font-size:12px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-shadow:0 1px 3px rgba(0,0,0,0.9)";
 
         // The text is moved without moving the box, see makeMarquee
-        metaMarquee = makeMarquee(playerMetaEl, "Second line");
+        metaMarquee = makeMarquee(playerMetaEl, {
+            note: function (text) {
+                dbgLog("Marquee", "Second line: " + text);
+            }
+        });
 
         // Plays and likes for the current song, shown at the top of the art
         playerCountsEl = document.createElement("div");
@@ -94763,6 +94723,203 @@
     }
     // END SHARED stats
 
+    // BEGIN SHARED marquee
+    // Written by embed-webview.sh from src/shared/marquee.js. Change that
+    // file and run make embed, never the lines up to END SHARED marquee
+    // A one line box turned into a marquee, as the player and the web view
+    // both walk a line too long for its box. The text waits at the start,
+    // eases into a steady walk to the left until it and a gap have passed,
+    // a second copy following on, eases to a stop exactly where it began
+    // and waits again, so the beginning is always readable. A line that
+    // fits just sits still, a line cut off fades out at the right edge.
+    // Shared by the player and the web view's page, src/shared/marquee.js,
+    // inlined into both by embed-webview.sh
+    //
+    // opts: speed in pixels a second, gap the least clear space after the
+    // text (at least half the line's width too), delay the rest at the
+    // start in ms, fade the fading edge's width as CSS, note(text) told
+    // what it decides, list an array the marquee is added to. Answers
+    // { setText(text), check() }, check after the box may have changed
+    // width. The box keeps its own styling, only its contents are taken
+    // over, the text it holds kept
+    function makeMarquee(box, opts) {
+
+        const o = opts || {};
+        const speed = o.speed || 40;
+        const least = o.gap || 72;
+        const delay = o.delay || 3000;
+        const fade = o.fade || "28px";
+        const note = typeof o.note === "function" ? o.note : function () {};
+
+        // One track holds both copies and is the thing that moves, so the
+        // two can never drift apart. Kept on a layer of its own all the
+        // time, so whatever is drawn near the line is never put on one and
+        // taken off again as the line changes, which flickered on a phone
+        const track = document.createElement("span");
+        const first = document.createElement("span");
+        const second = document.createElement("span");
+        const align = getComputedStyle(box).textAlign;
+
+        // Both inline-block, a plain inline span reports no width at all
+        track.style.cssText = "display:inline-block;white-space:nowrap;will-change:transform";
+        first.style.cssText = "display:inline-block;white-space:nowrap";
+        second.style.cssText = "display:none;white-space:nowrap";
+        first.textContent = box.textContent;
+        box.classList.toggle("blank", !first.textContent);
+        track.appendChild(first);
+        track.appendChild(second);
+        box.textContent = "";
+        box.appendChild(track);
+
+        let anim = null;
+        let timer = null;
+        let width = 0;
+
+        const edgeFade = function () {
+
+            const over = first.textContent
+                && Math.ceil(first.getBoundingClientRect().width) - box.clientWidth > 2;
+            const mask = over ? "linear-gradient(to right, #000 calc(100% - " + fade + "), transparent)" : "";
+
+            box.style.webkitMaskImage = mask;
+            box.style.maskImage = mask;
+        };
+
+        const stop = function () {
+
+            if (timer) {
+
+                clearTimeout(timer);
+                timer = null;
+            }
+
+            if (anim) {
+
+                anim.cancel();
+                anim = null;
+            }
+
+            track.style.transform = "none";
+            first.style.marginRight = "0px";
+            second.style.display = "none";
+            box.style.textAlign = align;
+        };
+
+        const start = function () {
+
+            edgeFade();
+
+            if (!track.animate || !first.textContent) {
+                return;
+            }
+
+            const textWidth = Math.ceil(first.getBoundingClientRect().width);
+
+            width = box.clientWidth;
+
+            if (width < 40) {
+
+                note("waits for its width, " + width + " px now");
+                return;
+            }
+
+            if (textWidth - width <= 2) {
+
+                note("fits, " + textWidth + " of " + width + " px");
+                stop();
+                return;
+            }
+
+            note("walks, " + textWidth + " px in " + width + " px");
+
+            // A walking line starts at the left, whatever its alignment
+            box.style.textAlign = "left";
+
+            const gap = Math.max(least, Math.round(width * 0.5));
+            const distance = textWidth + gap;
+
+            first.style.marginRight = gap + "px";
+            second.style.display = "inline-block";
+            anim = track.animate([
+                { transform: "translateX(0)", offset: 0, easing: "ease-in" },
+                { transform: "translateX(" + (-distance * 0.05) + "px)", offset: 0.09, easing: "linear" },
+                { transform: "translateX(" + (-distance * 0.95) + "px)", offset: 0.91, easing: "ease-out" },
+                { transform: "translateX(" + (-distance) + "px)", offset: 1 }
+            ], { duration: distance / speed * 1000 });
+
+            anim.onfinish = function () {
+
+                anim = null;
+                track.style.transform = "none";
+                timer = setTimeout(function () {
+
+                    timer = null;
+                    start();
+                }, delay);
+            };
+        };
+
+        const restart = function (wait) {
+
+            stop();
+            requestAnimationFrame(edgeFade);
+            timer = setTimeout(function () {
+
+                timer = null;
+                start();
+            }, wait);
+        };
+
+        const m = {
+            setText: function (text) {
+
+                const value = text || "";
+
+                if (first.textContent === value) {
+                    return;
+                }
+
+                first.textContent = value;
+                second.textContent = value;
+                note("new text, " + value.length + " characters");
+
+                // Marked when empty, so a line that has a row of its own on
+                // a phone can give its room back
+                box.classList.toggle("blank", !value);
+                restart(delay);
+            },
+
+            // After a resize, a line that now fits stops and one that no
+            // longer fits starts walking
+            check: function () {
+
+                if (box.clientWidth !== width && box.offsetParent && first.textContent) {
+
+                    width = box.clientWidth;
+                    restart(600);
+                }
+            }
+        };
+
+        // The box's own changes of width followed where the browser tells
+        if (typeof ResizeObserver === "function") {
+
+            new ResizeObserver(function () {
+
+                if (Math.abs(box.clientWidth - width) >= 2 && box.clientWidth >= 40) {
+                    m.check();
+                }
+            }).observe(box);
+        }
+
+        if (Array.isArray(o.list)) {
+            o.list.push(m);
+        }
+
+        return m;
+    }
+    // END SHARED marquee
+
     // BEGIN SHARED chat
     // Written by embed-webview.sh from src/shared/chat.js. Change that
     // file and run make embed, never the lines up to END SHARED chat
@@ -96427,17 +96584,9 @@
 
     // Everything that follows the state, drawn when a new one arrives
 
-    // Turn a one line box into a marquee, the phone's makeMarquee. The text
-    // waits at the start, eases into a steady walk to the left until it and
-    // a gap have passed, a second copy following on, eases to a stop exactly
-    // where it began and waits again, so the beginning is always readable.
-    // A line that fits just sits still
-    const MARQUEE_DELAY = 3000;
-    const MARQUEE_SPEED = 60;
-    const MARQUEE_GAP = 90;
-
-    // The gap is at least half the line's width as well, as on the phone
-    const MARQUEE_GAP_SHARE = 0.5;
+    // The lines that walk when too long, drawn by the shared makeMarquee,
+    // faster and with more room than the phone's for a car's large text
+    const MARQUEE = { speed: 60, gap: 90, delay: 3000, fade: "2em" };
     const marquees = [];
 
     // A function run once on the next frame, however often it is asked for
@@ -96496,169 +96645,12 @@
         setInterval(check, SAFETY_CHECK_MS);
     }
 
-    function makeMarquee(box) {
-
-        const track = document.createElement("span");
-        const first = document.createElement("span");
-        const second = document.createElement("span");
-        const align = getComputedStyle(box).textAlign;
-
-        track.style.cssText = "display:inline-block;white-space:nowrap;will-change:transform";
-        first.style.cssText = "display:inline-block;white-space:nowrap";
-        second.style.cssText = "display:none;white-space:nowrap";
-        first.textContent = box.textContent;
-        box.classList.toggle("blank", !first.textContent);
-        track.appendChild(first);
-        track.appendChild(second);
-        box.textContent = "";
-        box.appendChild(track);
-
-        let anim = null;
-        let timer = null;
-        let width = 0;
-
-        // A line too long for its box fades out at the right edge, so the
-        // end cut off there reads as cut off, not as the next copy coming in
-        const edgeFade = function () {
-
-            const over = first.textContent
-                && Math.ceil(first.getBoundingClientRect().width) - box.clientWidth > 2;
-            const mask = over ? "linear-gradient(to right, #000 calc(100% - 2em), transparent)" : "";
-
-            box.style.webkitMaskImage = mask;
-            box.style.maskImage = mask;
-        };
-
-        const stop = function () {
-
-            if (timer) {
-
-                clearTimeout(timer);
-                timer = null;
-            }
-
-            if (anim) {
-
-                anim.cancel();
-                anim = null;
-            }
-
-            track.style.transform = "none";
-            first.style.marginRight = "0px";
-            second.style.display = "none";
-            box.style.textAlign = align;
-        };
-
-        const start = function () {
-
-            edgeFade();
-
-            if (!track.animate || !first.textContent) {
-                return;
-            }
-
-            const textWidth = Math.ceil(first.getBoundingClientRect().width);
-
-            width = box.clientWidth;
-
-            // Not laid out yet, a hidden or still narrow box would take nearly
-            // any text as too long. The check after a resize starts it later
-            if (width < 40) {
-                return;
-            }
-
-            // It fits, so it stands still with the trailing copy and its gap
-            // taken away again, not left waiting at the right edge after a
-            // walk that began while the box was narrower
-            if (textWidth - width <= 2) {
-
-                stop();
-                return;
-            }
-
-            // A right aligned line walks from its start like any other
-            box.style.textAlign = "left";
-
-            const gap = Math.max(MARQUEE_GAP, Math.round(width * MARQUEE_GAP_SHARE));
-
-            first.style.marginRight = gap + "px";
-            second.style.display = "inline-block";
-
-            const distance = textWidth + gap;
-
-            anim = track.animate([
-                { transform: "translateX(0)", offset: 0, easing: "ease-in" },
-                { transform: "translateX(" + (-distance * 0.05) + "px)", offset: 0.09, easing: "linear" },
-                { transform: "translateX(" + (-distance * 0.95) + "px)", offset: 0.91, easing: "ease-out" },
-                { transform: "translateX(" + (-distance) + "px)", offset: 1 }
-            ], { duration: distance / MARQUEE_SPEED * 1000 });
-
-            anim.onfinish = function () {
-
-                anim = null;
-                track.style.transform = "none";
-                timer = setTimeout(function () {
-
-                    timer = null;
-                    start();
-                }, MARQUEE_DELAY);
-            };
-        };
-
-        // Measure again later, the text or the box changed
-        const restart = function (wait) {
-
-            stop();
-            requestAnimationFrame(edgeFade);
-            timer = setTimeout(function () {
-
-                timer = null;
-                start();
-            }, wait);
-        };
-
-        const m = {
-            setText: function (text) {
-
-                const value = text || "";
-
-                // The same line again lets a walk under way carry on
-                if (first.textContent === value) {
-                    return;
-                }
-
-                first.textContent = value;
-                second.textContent = value;
-
-                // Marked when empty, so a line that has a row of its own on
-                // a phone can give its room back
-                box.classList.toggle("blank", !value);
-                restart(MARQUEE_DELAY);
-            },
-
-            // After a resize, a line that now fits stops and one that no
-            // longer fits starts walking
-            check: function () {
-
-                if (box.clientWidth !== width && box.offsetParent) {
-
-                    width = box.clientWidth;
-                    restart(600);
-                }
-            }
-        };
-
-        marquees.push(m);
-
-        return m;
-    }
-
-    const titleLine = makeMarquee($("title"));
-    const subtitleLine = makeMarquee($("subtitle"));
-    const upLine = makeMarquee($("upTitle"));
-    const playLine = makeMarquee($("playTitle"));
-    const statusLine = makeMarquee($("status"));
-    const fromLine = makeMarquee($("fromText"));
+    const titleLine = makeMarquee($("title"), Object.assign({ list: marquees }, MARQUEE));
+    const subtitleLine = makeMarquee($("subtitle"), Object.assign({ list: marquees }, MARQUEE));
+    const upLine = makeMarquee($("upTitle"), Object.assign({ list: marquees }, MARQUEE));
+    const playLine = makeMarquee($("playTitle"), Object.assign({ list: marquees }, MARQUEE));
+    const statusLine = makeMarquee($("status"), Object.assign({ list: marquees }, MARQUEE));
+    const fromLine = makeMarquee($("fromText"), Object.assign({ list: marquees }, MARQUEE));
 
     window.addEventListener("resize", function () {
 
