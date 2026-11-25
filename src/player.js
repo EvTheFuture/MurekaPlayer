@@ -72,7 +72,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.319";
+    const VERSION = "2.0.1.320";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -16302,6 +16302,883 @@
         return { el: row, title: title };
     }
     // END SHARED songrow
+
+    // BEGIN SHARED ui
+    // Written by embed-webview.sh from src/shared/ui.js. Change that
+    // file and run make embed, never the lines up to END SHARED ui
+    // Small parts both the player and the web view draw the same way: an
+    // icon from its shapes, a turning ring, a plain button and the card of
+    // a dialog. Each kind of part has its look in one style sheet, put in
+    // the page once. Shared by the player and the web view's page,
+    // src/shared/ui.js, inlined into both by embed-webview.sh
+    const UI_CSS = ""
+        + ".mp-ui-spin{flex:0 0 auto;display:inline-block;box-sizing:border-box;border:2px solid rgba(" + ACCENT_RGB + ",0.3);"
+        + "border-top-color:" + ACCENT + ";border-radius:50%;animation:mp-ui-turn 0.8s linear infinite}"
+        + "@keyframes mp-ui-turn{to{transform:rotate(360deg)}}"
+        + ".mp-ui-btn{flex:0 0 auto;min-height:30px;box-sizing:border-box;padding:7px 10px;border:none;border-radius:6px;"
+        + "background:#333;color:#fff;font:inherit;font-size:13px;font-weight:600;cursor:pointer}"
+        + ".mp-ui-btn.dim{background:#444}"
+        + ".mp-ui-btn.on{background:" + ACCENT + ";color:#000}"
+        + ".mp-ui-btn:disabled{opacity:0.5;cursor:default}"
+        + ".mp-ui-btn{transition:filter 0.08s ease,transform 0.08s ease}"
+        + ".mp-ui-btn:not(:disabled):active{filter:brightness(1.45);transform:scale(0.96)}"
+        + "@media (pointer:coarse){.mp-ui-btn{min-height:44px}}"
+        + ".mp-ui-card{background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:12px;width:100%;max-width:420px;"
+        + "max-height:86%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;color:#fff;font-size:13px;line-height:1.4;"
+        + "text-align:left}"
+        + ".mp-ui-head{display:flex;gap:8px;align-items:center}"
+        + ".mp-ui-title{font-weight:600;min-width:0}"
+        + ".mp-ui-gap{flex:1 1 auto}"
+        + ".mp-ui-note{font-size:12px;color:#888;line-height:1.5;padding:4px 2px}"
+        + ".mp-ui-loading{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:12px;color:#888}";
+
+    // The style sheet, once in a page
+    function uiStyle() {
+
+        if (document.getElementById("mp-ui-style")) {
+            return;
+        }
+
+        const style = document.createElement("style");
+
+        style.id = "mp-ui-style";
+        style.textContent = UI_CSS;
+        (document.head || document.documentElement).appendChild(style);
+    }
+
+    // An icon from its shapes, 24 units square with round strokes in the
+    // colour of the text around it
+    function uiSvg(shapes, size) {
+
+        const ns = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(ns, "svg");
+        const s = String(size || 18);
+
+        svg.setAttribute("width", s);
+        svg.setAttribute("height", s);
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("fill", "none");
+        svg.setAttribute("stroke", "currentColor");
+        svg.setAttribute("stroke-width", "2");
+        svg.setAttribute("stroke-linecap", "round");
+        svg.setAttribute("stroke-linejoin", "round");
+
+        for (const shape of shapes) {
+
+            const el = document.createElementNS(ns, shape[0]);
+
+            for (const key of Object.keys(shape[1])) {
+                el.setAttribute(key, shape[1][key]);
+            }
+
+            svg.appendChild(el);
+        }
+
+        return svg;
+    }
+
+    // A ring turning while something is read
+    function uiSpin(size) {
+
+        const ring = document.createElement("span");
+
+        uiStyle();
+        ring.className = "mp-ui-spin";
+        ring.style.width = size + "px";
+        ring.style.height = size + "px";
+
+        return ring;
+    }
+
+    // A plain button, dim for one that closes
+    function uiBtn(label, fn, dim) {
+
+        const b = document.createElement("button");
+
+        uiStyle();
+        b.type = "button";
+        b.className = "mp-ui-btn" + (dim ? " dim" : "");
+        b.textContent = label;
+        b.addEventListener("click", fn);
+
+        return b;
+    }
+
+    // A line saying something is being read, with its ring
+    function uiLoading(text) {
+
+        const box = document.createElement("div");
+        const word = document.createElement("span");
+
+        box.className = "mp-ui-loading";
+        word.textContent = text;
+        box.appendChild(uiSpin(14));
+        box.appendChild(word);
+
+        return box;
+    }
+
+    // A dialog's head: its title, a ring while reading, then the buttons
+    // at the right
+    function uiHead(title, buttons) {
+
+        const head = document.createElement("div");
+        const name = document.createElement("div");
+        const spin = uiSpin(12);
+        const gap = document.createElement("div");
+
+        uiStyle();
+        head.className = "mp-ui-head";
+        name.className = "mp-ui-title";
+        name.textContent = title;
+        spin.style.display = "none";
+        gap.className = "mp-ui-gap";
+        head.appendChild(name);
+        head.appendChild(spin);
+        head.appendChild(gap);
+
+        for (const b of buttons) {
+            head.appendChild(b);
+        }
+
+        return { el: head, title: name, spin: spin };
+    }
+    // END SHARED ui
+
+    // BEGIN SHARED notify
+    // Written by embed-webview.sh from src/shared/notify.js. Change that
+    // file and run make embed, never the lines up to END SHARED notify
+    // Mureka's notifications, newest first, as the player and the web view
+    // both show them: a disc in the kind's colour, who, what and when, the
+    // comment of a comment and the song's cover. A tap marks one read and
+    // opens what it is about, the song's title and cover play the song.
+    // Older ones load on their own near the end. Shared by the player and
+    // the web view's page, src/shared/notify.js, inlined into both by
+    // embed-webview.sh
+    //
+    // card: the dialog's card to fill. host: list(after), a promise of
+    // { ok, list, last, why }, the first page with after empty; readAll(),
+    // a promise of { ok, why }; open(m) and play(m), what a tap does;
+    // counted(), whether Mureka counts unread ones this list may not hold;
+    // cover(url), the address to show a cover by; toast(text, ok); close().
+    // Answers { show(list, last) }, for a first page read elsewhere
+    const NF_CSS = ""
+        + ".mp-nf-list{flex:1 1 auto;min-height:80px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"
+        + "-webkit-overflow-scrolling:touch;overscroll-behavior:contain}"
+        + ".mp-nf-item{flex:0 0 auto;display:flex;gap:10px;align-items:flex-start;padding:9px 10px 9px 8px;border-radius:8px;"
+        + "cursor:pointer;border-left:3px solid transparent;background:#1c1c21}"
+        + ".mp-nf-item.unread{border-left-color:" + ACCENT + ";background:#2c3238}"
+        + ".mp-nf-disc{flex:0 0 auto;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;opacity:0.75}"
+        + ".mp-nf-item.unread .mp-nf-disc{opacity:1}"
+        + ".mp-nf-mid{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:3px}"
+        + ".mp-nf-top{display:flex;gap:8px;align-items:baseline;font-size:13px}"
+        + ".mp-nf-who{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#ccc}"
+        + ".mp-nf-item.unread .mp-nf-who{color:#fff}"
+        + ".mp-nf-new{flex:0 0 auto;padding:0 6px;border-radius:7px;background:" + ACCENT + ";color:#000;font-size:10px;font-weight:700;line-height:15px}"
+        + ".mp-nf-when{flex:0 0 auto;margin-left:auto;font-size:11px;color:#888}"
+        + ".mp-nf-what{font-size:13px;line-height:1.4;overflow-wrap:anywhere;color:#999}"
+        + ".mp-nf-item.unread .mp-nf-what{color:#ccc}"
+        + ".mp-nf-song{color:" + ACCENT + ";font-weight:600;cursor:pointer}"
+        + ".mp-nf-said{font-size:13px;line-height:1.4;padding:2px 0 2px 8px;border-left:2px solid;white-space:pre-wrap;"
+        + "overflow-wrap:anywhere;color:#aaa}"
+        + ".mp-nf-item.unread .mp-nf-said{color:#eee}"
+        + ".mp-nf-pic{flex:0 0 auto;width:44px;height:44px;border-radius:6px;object-fit:cover;background:#333}";
+
+    // When something was written, as a short time ago
+    function commentAge(at) {
+
+        const s = Math.max(0, (Date.now() - at) / 1000);
+
+        if (s < 60) {
+            return "now";
+        }
+
+        if (s < 3600) {
+            return Math.floor(s / 60) + " min";
+        }
+
+        if (s < 86400) {
+            return Math.floor(s / 3600) + " h";
+        }
+
+        if (s < 86400 * 30) {
+            return Math.floor(s / 86400) + " d";
+        }
+
+        return new Date(at).toLocaleDateString();
+    }
+
+    function nfView(card, host) {
+
+        let firstItems = [];
+        let extra = [];
+        let items = [];
+        let last = "";
+        let busy = false;
+        let first = true;
+
+        if (!document.getElementById("mp-nf-style")) {
+
+            const style = document.createElement("style");
+
+            style.id = "mp-nf-style";
+            style.textContent = NF_CSS;
+            (document.head || document.documentElement).appendChild(style);
+        }
+
+        const all = uiBtn("Mark all read", function () {
+
+            all.disabled = true;
+            host.readAll().then(function (r) {
+
+                all.disabled = false;
+
+                for (const m of items) {
+
+                    m.read = true;
+                    m.unreadThere = false;
+                }
+
+                paint();
+
+                if (!r || !r.ok) {
+                    host.toast("Marked read here, Mureka did not take it" + (r && r.why ? ": " + r.why : ""), false);
+                }
+            });
+        });
+        const head = uiHead("Notifications", [all, uiBtn("Close", host.close, true)]);
+        const listBox = document.createElement("div");
+
+        card.classList.add("mp-ui-card");
+        listBox.className = "mp-nf-list";
+        listBox.addEventListener("scroll", nearEnd, { passive: true });
+        card.appendChild(head.el);
+        card.appendChild(listBox);
+
+        function row(m) {
+
+            const kind = msgKind(m.code);
+            const box = document.createElement("div");
+            const disc = document.createElement("span");
+            const mid = document.createElement("div");
+            const top = document.createElement("div");
+            const who = document.createElement("span");
+            const when = document.createElement("span");
+            const what = document.createElement("div");
+
+            box.className = "mp-nf-item" + (m.read ? "" : " unread");
+            box.setAttribute("role", "button");
+            box.tabIndex = 0;
+            box.title = m.song ? (/^(1002|2003|2004)$/.test(m.code) ? "Open the comments" : "Play the song")
+                : m.video ? "Watch the video" : m.on ? "Open the comments" : m.link ? "Open it on Mureka" : "Mark read";
+            disc.className = "mp-nf-disc";
+            disc.title = kind.name;
+            disc.style.color = kind.color;
+            disc.style.background = kind.color + "2e";
+            disc.appendChild(uiSvg(kind.shapes, 16));
+            mid.className = "mp-nf-mid";
+            top.className = "mp-nf-top";
+            who.className = "mp-nf-who";
+            who.textContent = m.who;
+            when.className = "mp-nf-when";
+            when.textContent = m.at ? commentAge(m.at) : "";
+            what.className = "mp-nf-what";
+            top.appendChild(who);
+
+            // A new one says so beside the name, not by its colours alone
+            if (!m.read) {
+
+                const tag = document.createElement("span");
+
+                tag.className = "mp-nf-new";
+                tag.textContent = "New";
+                top.appendChild(tag);
+            }
+
+            top.appendChild(when);
+            mid.appendChild(top);
+
+            // What happened, the song's title a link that plays it
+            const at = m.title && m.song ? String(m.what).indexOf("\"" + m.title + "\"") : -1;
+
+            if (at >= 0) {
+
+                const link = document.createElement("span");
+
+                link.className = "mp-nf-song";
+                link.textContent = m.title;
+                link.title = "Play the song";
+                link.addEventListener("click", function (ev) {
+
+                    ev.stopPropagation();
+                    play(m);
+                });
+                what.appendChild(document.createTextNode(m.what.slice(0, at)));
+                what.appendChild(link);
+                what.appendChild(document.createTextNode(m.what.slice(at + m.title.length + 2)));
+            } else {
+                what.textContent = m.what;
+            }
+
+            mid.appendChild(what);
+
+            if (m.text) {
+
+                const said = document.createElement("div");
+
+                said.className = "mp-nf-said";
+                said.style.borderLeftColor = kind.color;
+                said.textContent = m.text;
+                mid.appendChild(said);
+            }
+
+            box.appendChild(disc);
+            box.appendChild(mid);
+
+            if (m.cover) {
+
+                const pic = document.createElement("img");
+
+                pic.className = "mp-nf-pic";
+                pic.src = host.cover(m.cover);
+                pic.alt = "";
+                pic.loading = "lazy";
+                pic.addEventListener("error", function () {
+                    pic.remove();
+                });
+
+                if (m.song) {
+
+                    pic.title = "Play the song";
+                    pic.addEventListener("click", function (ev) {
+
+                        ev.stopPropagation();
+                        play(m);
+                    });
+                }
+
+                box.appendChild(pic);
+            }
+
+            box.addEventListener("click", function () {
+                open(m);
+            });
+            box.addEventListener("keydown", function (ev) {
+
+                if (ev.key === "Enter" || ev.key === " ") {
+
+                    ev.preventDefault();
+                    open(m);
+                }
+            });
+
+            return box;
+        }
+
+        function open(m) {
+
+            m.read = true;
+            paint();
+            host.open(m);
+        }
+
+        function play(m) {
+
+            m.read = true;
+            paint();
+            host.play(m);
+        }
+
+        function paint() {
+
+            const keep = listBox.scrollTop;
+
+            listBox.textContent = "";
+
+            for (const m of items) {
+                listBox.appendChild(row(m));
+            }
+
+            if (!items.length && busy) {
+                listBox.appendChild(uiLoading("Reading Mureka's notifications"));
+            } else if (!items.length) {
+
+                const note = document.createElement("div");
+
+                note.className = "mp-ui-note";
+                note.textContent = "No notifications";
+                listBox.appendChild(note);
+            } else if (busy && !first) {
+                listBox.appendChild(uiLoading("Loading older notifications"));
+            }
+
+            listBox.scrollTop = keep;
+            head.spin.style.display = busy && first && items.length ? "" : "none";
+
+            // Also for the unread ones Mureka counts, which this list may
+            // give as read
+            all.style.display = host.counted() || items.some(function (m) {
+                return !m.read || m.unreadThere;
+            }) ? "" : "none";
+        }
+
+        // Older ones loaded once the list is scrolled near its end, or
+        // when it does not fill the box
+        function nearEnd() {
+
+            if (!busy && last && listBox.scrollTop + listBox.clientHeight >= listBox.scrollHeight - 240) {
+                load(false);
+            }
+        }
+
+        function load(firstPage) {
+
+            if (busy) {
+                return;
+            }
+
+            busy = true;
+            paint();
+            host.list(firstPage ? "" : last).then(function (r) {
+
+                busy = false;
+
+                if (!r || !r.ok) {
+
+                    last = "";
+
+                    if (!firstPage) {
+                        host.toast("Could not read more notifications" + (r && r.why ? ": " + r.why : ""), false);
+                    }
+
+                    paint();
+
+                    if (firstPage) {
+
+                        const note = document.createElement("div");
+
+                        note.className = "mp-ui-note";
+                        note.textContent = "Could not read the notifications" + (r && r.why ? ": " + r.why : "");
+                        listBox.appendChild(note);
+                    }
+
+                    first = false;
+                    return;
+                }
+
+                const list = Array.isArray(r.list) ? r.list : [];
+
+                if (firstPage) {
+                    firstItems = list;
+                } else {
+                    extra = extra.concat(list);
+                }
+
+                items = firstItems.concat(extra);
+                last = String(r.last || "");
+                first = false;
+                paint();
+                nearEnd();
+            });
+        }
+
+        load(true);
+
+        return {
+
+            // The first page read again elsewhere, the older ones kept
+            show: function (list, lastAfter) {
+
+                firstItems = list;
+                items = firstItems.concat(extra);
+
+                if (!extra.length) {
+                    last = lastAfter || "";
+                }
+
+                paint();
+            }
+        };
+    }
+    // END SHARED notify
+
+    // BEGIN SHARED comments
+    // Written by embed-webview.sh from src/shared/comments.js. Change that
+    // file and run make embed, never the lines up to END SHARED comments
+    // A song's comments on Mureka, as the player and the web view both show
+    // them: each comment with its replies under it, a like and Reply, a
+    // place in the song to play from, Delete on your own, more comments on
+    // asking, and a field to comment or reply at the foot. Shared by the
+    // player and the web view's page, src/shared/comments.js, inlined into
+    // both by embed-webview.sh
+    //
+    // card: the dialog's card to fill. song: id, title and cover. host,
+    // each answer a promise of { ok, why } with more: list(after) with
+    // list, last and more; like(c) with liked and likes; del(c);
+    // add(text, parent) with comment; then seek(at), play the song from a
+    // place; play(); cover(url); confirm(title, text, yes, go); toast(text,
+    // ok); close()
+    const CM_CSS = ""
+        + ".mp-cm-pic{flex:0 0 auto;width:44px;height:44px;border-radius:6px;object-fit:cover;background:#333;cursor:pointer}"
+        + ".mp-cm-title{font-weight:600;overflow-wrap:anywhere;flex:1 1 auto;min-width:0}"
+        + ".mp-cm-list{flex:1 1 auto;min-height:80px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"
+        + "-webkit-overflow-scrolling:touch;overscroll-behavior:contain}"
+        + ".mp-cm-item{display:flex;flex-direction:column;gap:3px;padding:6px 8px;border-radius:8px;background:#1d1d22}"
+        + ".mp-cm-item.reply{background:#202026;margin-left:18px}"
+        + ".mp-cm-top{display:flex;gap:8px;align-items:baseline;font-size:12px}"
+        + ".mp-cm-who{font-weight:600;color:#ddd}"
+        + ".mp-cm-who.mine{color:" + ACCENT + "}"
+        + ".mp-cm-when{color:#888}"
+        + ".mp-cm-text{font-size:14px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}"
+        + ".mp-cm-acts{display:flex;gap:14px;font-size:12px}"
+        + ".mp-cm-link{border:none;background:none;padding:0;cursor:pointer;font:inherit;color:#999}"
+        + ".mp-ui-card .mp-cm-link{min-height:0}"
+        + ".mp-cm-link.liked{color:#ff6b8a}"
+        + ".mp-cm-link.at{color:" + ACCENT + "}"
+        + ".mp-cm-link.del{color:#e57373}"
+        + ".mp-cm-more{font-size:11px;color:#888;margin-left:26px}"
+        + ".mp-cm-replying{display:none;align-items:center;gap:8px;font-size:12px;color:#bbb}"
+        + ".mp-cm-replying span{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+        + ".mp-cm-x{border:none;background:none;color:#bbb;font-size:18px;line-height:1;cursor:pointer;padding:0 4px}"
+        + ".mp-cm-foot{display:flex;gap:8px}"
+        + ".mp-cm-field{flex:1 1 auto;min-width:0;box-sizing:border-box;padding:8px 10px;border:1px solid #4a4a52;border-radius:6px;"
+        + "background:#1b1b20;color:#fff;font:inherit;font-size:16px;resize:none;outline:none}";
+
+    // A place in a song as Mureka's page shows it, 01:15
+    function cmTime(sec) {
+
+        const s = Math.max(0, Math.round(sec));
+
+        return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+    }
+
+    function cmView(card, song, host) {
+
+        let last = "";
+        let replyTo = null;
+        let busy = false;
+
+        if (!document.getElementById("mp-cm-style")) {
+
+            const style = document.createElement("style");
+
+            style.id = "mp-cm-style";
+            style.textContent = CM_CSS;
+            (document.head || document.documentElement).appendChild(style);
+        }
+
+        const head = uiHead("Comments on \"" + ((song.title || "").trim() || "Untitled") + "\"", [uiBtn("Close", host.close, true)]);
+        const listBox = document.createElement("div");
+        const note = document.createElement("div");
+        const moreBtn = uiBtn("More comments", function () {
+            load(false);
+        });
+        const replying = document.createElement("div");
+        const replyText = document.createElement("span");
+        const replyCancel = document.createElement("button");
+        const foot = document.createElement("div");
+        const field = document.createElement("textarea");
+        const send = uiBtn("Send", function () {
+            post();
+        });
+
+        card.classList.add("mp-ui-card");
+        head.title.className = "mp-cm-title";
+
+        // The song's cover beside the title, a tap plays the song
+        if (song.cover) {
+
+            const pic = document.createElement("img");
+
+            pic.className = "mp-cm-pic";
+            pic.src = host.cover(song.cover);
+            pic.alt = "";
+            pic.title = "Play the song";
+            pic.addEventListener("error", function () {
+                pic.remove();
+            });
+            pic.addEventListener("click", host.play);
+            head.el.style.gap = "10px";
+            head.el.insertBefore(pic, head.el.firstChild);
+        }
+
+        listBox.className = "mp-cm-list";
+        note.className = "mp-ui-note";
+        moreBtn.style.display = "none";
+        moreBtn.style.alignSelf = "stretch";
+        replying.className = "mp-cm-replying";
+        replyCancel.type = "button";
+        replyCancel.className = "mp-cm-x";
+        replyCancel.textContent = "\u00D7";
+        replyCancel.setAttribute("aria-label", "Do not reply");
+        replyCancel.addEventListener("click", function () {
+            setReply(null);
+        });
+        replying.appendChild(replyText);
+        replying.appendChild(replyCancel);
+        foot.className = "mp-cm-foot";
+        field.className = "mp-cm-field";
+        field.rows = 2;
+        field.placeholder = "Write a comment";
+        send.classList.add("on");
+        foot.appendChild(field);
+        foot.appendChild(send);
+        listBox.appendChild(note);
+        card.appendChild(head.el);
+        card.appendChild(listBox);
+        card.appendChild(moreBtn);
+        card.appendChild(replying);
+        card.appendChild(foot);
+
+        function setReply(c) {
+
+            replyTo = c;
+            replying.style.display = c ? "flex" : "none";
+            replyText.textContent = c ? "Replying to " + c.name + ": " + c.text : "";
+            field.placeholder = c ? "Write a reply" : "Write a comment";
+
+            if (c) {
+                field.focus();
+            }
+        }
+
+        function link(text, kind) {
+
+            const b = document.createElement("button");
+
+            b.type = "button";
+            b.className = "mp-cm-link" + (kind ? " " + kind : "");
+            b.textContent = text;
+
+            return b;
+        }
+
+        // A comment's row: who, when, the text, the like and Reply
+        function row(c, depth) {
+
+            const box = document.createElement("div");
+            const top = document.createElement("div");
+            const who = document.createElement("span");
+            const when = document.createElement("span");
+            const text = document.createElement("div");
+            const acts = document.createElement("div");
+            const like = link("");
+            const reply = link("Reply");
+            const paintLike = function () {
+
+                like.textContent = (c.liked ? "\u2665" : "\u2661") + (c.likes > 0 ? " " + c.likes : "");
+                like.classList.toggle("liked", c.liked === true);
+            };
+
+            box.className = "mp-cm-item" + (depth > 0 ? " reply" : "");
+            box.__commentId = c.id;
+            box.__replyOf = depth > 0 ? c.parent : "";
+            top.className = "mp-cm-top";
+            who.className = "mp-cm-who" + (c.mine ? " mine" : "");
+            who.textContent = c.name + (c.mine ? " (you)" : "");
+            when.className = "mp-cm-when";
+            when.textContent = c.at ? commentAge(c.at) : "";
+            text.className = "mp-cm-text";
+            text.textContent = c.text;
+            acts.className = "mp-cm-acts";
+            paintLike();
+
+            like.addEventListener("click", function () {
+
+                host.like(c).then(function (r) {
+
+                    if (r && r.ok) {
+
+                        c.liked = r.liked;
+                        c.likes = r.likes;
+                        paintLike();
+                    } else {
+                        host.toast("Could not like it" + (r && r.why ? ", " + r.why : ""), false);
+                    }
+                });
+            });
+
+            // A reply to a reply goes to the comment it is under
+            reply.addEventListener("click", function () {
+                setReply(depth > 0 && c.parent ? Object.assign({}, c, { id: c.parent, replyName: c.name }) : c);
+            });
+
+            top.appendChild(who);
+            top.appendChild(when);
+
+            // A comment tagged with a place in the song, played from there
+            if (c.moment >= 0) {
+
+                const at = link("\u25B6 " + cmTime(c.moment), "at");
+
+                at.title = "Play from " + cmTime(c.moment);
+                at.addEventListener("click", function () {
+                    host.seek(c.moment);
+                });
+                top.appendChild(at);
+            }
+
+            acts.appendChild(like);
+            acts.appendChild(reply);
+
+            // Your own comment can be taken away, a comment with its replies
+            if (c.mine) {
+
+                const del = link("Delete", "del");
+
+                del.addEventListener("click", function () {
+
+                    host.confirm("Delete " + (depth > 0 ? "this reply" : "this comment" + (c.replies && c.replies.length ? " and its replies" : "")) + "?",
+                        c.text, "Delete", function () {
+
+                        host.del(c).then(function (r) {
+
+                            if (!r || !r.ok) {
+
+                                host.toast("Could not delete it" + (r && r.why ? ", " + r.why : ""), false);
+                                return;
+                            }
+
+                            let next = box.nextSibling;
+
+                            // A comment's replies, set in under it, go too
+                            while (depth === 0 && next && next !== note && next.__replyOf === c.id) {
+
+                                const after = next.nextSibling;
+
+                                next.remove();
+                                next = after;
+                            }
+
+                            box.remove();
+                            host.toast("Deleted", true);
+                        });
+                    });
+                });
+                acts.appendChild(del);
+            }
+
+            box.appendChild(top);
+            box.appendChild(text);
+            box.appendChild(acts);
+
+            return box;
+        }
+
+        function show(c) {
+
+            const replies = c.replies || [];
+            const left = (c.replyCount || 0) - replies.length;
+
+            listBox.insertBefore(row(c, 0), note);
+
+            for (const r of replies) {
+                listBox.insertBefore(row(r, 1), note);
+            }
+
+            if (left > 0) {
+
+                const n = document.createElement("div");
+
+                n.className = "mp-cm-more";
+                n.textContent = left + " more " + (left === 1 ? "reply" : "replies") + " on Mureka";
+                listBox.insertBefore(n, note);
+            }
+        }
+
+        function load(first) {
+
+            if (busy) {
+                return;
+            }
+
+            busy = true;
+            note.textContent = first ? "Reading the comments" : "Reading more";
+            note.style.display = "";
+            moreBtn.style.display = "none";
+
+            host.list(first ? "" : last).then(function (r) {
+
+                busy = false;
+
+                if (!r || !r.ok) {
+
+                    note.textContent = "The comments could not be read" + (r && r.why ? ", " + r.why : "");
+                    return;
+                }
+
+                const list = Array.isArray(r.list) ? r.list : [];
+
+                for (const c of list) {
+                    show(c);
+                }
+
+                last = r.last || last;
+                note.style.display = "none";
+
+                if (first && list.length === 0) {
+
+                    note.textContent = "No comments yet. Be the first.";
+                    note.style.display = "";
+                }
+
+                moreBtn.style.display = r.more && list.length > 0 ? "" : "none";
+            });
+        }
+
+        function post() {
+
+            const text = field.value.trim();
+
+            if (!text || busy) {
+                return;
+            }
+
+            send.disabled = true;
+
+            host.add(text, replyTo ? replyTo.id : "").then(function (r) {
+
+                send.disabled = false;
+
+                if (!r || !r.ok || !r.comment) {
+
+                    host.toast("Could not send it" + (r && r.why ? ", " + r.why : ""), false);
+                    return;
+                }
+
+                field.value = "";
+
+                // Shown at once, a reply under its comment, a comment on top
+                if (replyTo) {
+
+                    const at = Array.from(listBox.children).find(function (el) {
+                        return el.__commentId === replyTo.id;
+                    });
+
+                    listBox.insertBefore(row(r.comment, 1), at ? at.nextSibling : note);
+                } else {
+
+                    listBox.insertBefore(row(r.comment, 0), listBox.firstChild);
+                    note.style.display = "none";
+                }
+
+                host.toast(replyTo ? "Replied" : "Commented", true);
+                setReply(null);
+            });
+        }
+
+        field.addEventListener("keydown", function (ev) {
+
+            if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) {
+
+                ev.preventDefault();
+                post();
+            }
+        });
+
+        load(true);
+    }
+    // END SHARED comments
 
     // BEGIN SHARED chat
     // Written by embed-webview.sh from src/shared/chat.js. Change that
@@ -76634,15 +77511,6 @@
         }
     }
 
-    // The place in the song a tagged comment is about, as mm:ss
-    function momentText(sec) {
-
-        const s = Math.max(0, Math.round(sec));
-
-        // As Mureka's page shows it, 01:15
-        return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
-    }
-
     // A tagged comment's place played: the song moved there when it is the
     // one playing, else played and moved there once it is ready
     function playCommentMoment(songId, sec) {
@@ -76672,29 +77540,6 @@
         }, 250);
     }
 
-    // When a comment was written, as a short time ago
-    function commentAge(at) {
-
-        const s = Math.max(0, (Date.now() - at) / 1000);
-
-        if (s < 60) {
-            return "now";
-        }
-
-        if (s < 3600) {
-            return Math.floor(s / 60) + " min";
-        }
-
-        if (s < 86400) {
-            return Math.floor(s / 3600) + " h";
-        }
-
-        if (s < 86400 * 30) {
-            return Math.floor(s / 86400) + " d";
-        }
-
-        return new Date(at).toLocaleDateString();
-    }
 
     // A song's comments on the device: each with its replies under it, a
     // like and Reply, more comments on asking, and a field to comment or
@@ -76705,330 +77550,54 @@
             return;
         }
 
-        const dialog = makeDialog({
-            cardCss: "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:12px;width:100%;max-width:420px;"
-                + "max-height:86%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px"
-        });
-        const card = dialog.card;
-        const head = document.createElement("div");
-        const title = document.createElement("div");
-        const shut = makeButton("Close", "#444", "#fff", function () {
-            dialog.close();
-        });
-        const listBox = document.createElement("div");
-        const note = document.createElement("div");
-        const moreBtn = makeButton("More comments", "#333", "#fff", function () {
-            load(false);
-        });
-        const replying = document.createElement("div");
-        const replyText = document.createElement("span");
-        const replyCancel = document.createElement("button");
-        const foot = document.createElement("div");
-        const field = document.createElement("textarea");
-        const send = makeButton("Send", ACCENT, "#000", function () {
-            post();
-        });
-        let last = "";
-        let replyTo = null;
-        let busy = false;
+        const dialog = makeDialog({});
+        const why = function (e) {
+            return { ok: false, why: errText(e) };
+        };
 
-        head.classList.add("mp-between");
-        title.textContent = "Comments on \"" + ((song.title || "").trim() || "Untitled") + "\"";
-        title.style.cssText = "font-weight:600;overflow-wrap:anywhere;flex:1 1 auto;min-width:0";
-        shut.style.flex = "0 0 auto";
+        cmView(dialog.card, { id: song.song_id, title: song.title, cover: coverUrl(song) }, {
+            list: function (after) {
 
-        // The song's cover beside the title, a tap plays the song
-        if (coverUrl(song)) {
+                return loadComments(song.song_id, after).then(function (r) {
+                    return { ok: true, list: r.list, last: r.last, more: r.more };
+                }, why);
+            },
+            like: function (c) {
 
-            const pic = document.createElement("img");
+                return likeComment(c).then(function (r) {
+                    return { ok: true, liked: r.liked, likes: r.likes };
+                }, why);
+            },
+            del: function (c) {
 
-            pic.src = coverUrl(song);
-            pic.alt = "";
-            pic.title = "Play the song";
-            pic.style.cssText = "flex:0 0 auto;width:44px;height:44px;border-radius:6px;object-fit:cover;background:#333;cursor:pointer";
-            pic.addEventListener("error", function () {
-                pic.remove();
-            });
-            pic.addEventListener("click", function () {
+                return deleteComment(song.song_id, c).then(function () {
+                    return { ok: true };
+                }, why);
+            },
+            add: function (text, parent) {
+
+                return addComment(song.song_id, text, parent).then(function (c) {
+                    return { ok: true, comment: c };
+                }, why);
+            },
+            seek: function (at) {
+                playCommentMoment(song.song_id, at);
+            },
+            play: function () {
                 playFromTapped(song.song_id);
-            });
-            head.style.gap = "10px";
-            head.appendChild(pic);
-        }
-
-        head.appendChild(title);
-        head.appendChild(shut);
-        listBox.style.cssText = "flex:1 1 auto;min-height:80px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"
-            + "-webkit-overflow-scrolling:touch;overscroll-behavior:contain";
-        note.style.cssText = "font-size:12px;color:#888;line-height:1.5;padding:4px 2px";
-        moreBtn.style.display = "none";
-        replying.style.cssText = "display:none;align-items:center;gap:8px;font-size:12px;color:#bbb";
-        replyText.style.cssText = "flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
-        replyCancel.type = "button";
-        replyCancel.textContent = "\u00d7";
-        replyCancel.setAttribute("aria-label", "Do not reply");
-        replyCancel.style.cssText = "border:none;background:none;color:#bbb;font-size:18px;line-height:1;cursor:pointer;padding:0 4px";
-        replyCancel.addEventListener("click", function () {
-            setReply(null);
+            },
+            cover: function (url) {
+                return url;
+            },
+            confirm: function (title, text, yes, go) {
+                askYesNo(title, text, yes, go, null, true);
+            },
+            toast: showToast,
+            close: function () {
+                dialog.close();
+            }
         });
-        replying.appendChild(replyText);
-        replying.appendChild(replyCancel);
-
-        foot.classList.add("mp-row8");
-        field.rows = 2;
-        field.placeholder = "Write a comment";
-        field.style.cssText = "flex:1 1 auto;min-width:0;box-sizing:border-box;padding:8px 10px;border:1px solid #4a4a52;border-radius:6px;"
-            + "background:#1b1b20;color:#fff;font:inherit;font-size:16px;resize:none;outline:none";
-        send.style.flex = "0 0 auto";
-        foot.appendChild(field);
-        foot.appendChild(send);
-        listBox.appendChild(note);
-        card.appendChild(head);
-        card.appendChild(listBox);
-        card.appendChild(moreBtn);
-        card.appendChild(replying);
-        card.appendChild(foot);
         panelEl.appendChild(dialog.back);
-
-        function setReply(c) {
-
-            replyTo = c;
-            replying.style.display = c ? "flex" : "none";
-            replyText.textContent = c ? "Replying to " + c.name + ": " + c.text : "";
-            field.placeholder = c ? "Write a reply" : "Write a comment";
-
-            if (c) {
-                field.focus();
-            }
-        }
-
-        // A comment's row: who, when, the text, the like and Reply
-        function row(c, depth) {
-
-            const box = document.createElement("div");
-            const top = document.createElement("div");
-            const who = document.createElement("span");
-            const when = document.createElement("span");
-            const text = document.createElement("div");
-            const acts = document.createElement("div");
-            const like = document.createElement("button");
-            const reply = document.createElement("button");
-            const paintLike = function () {
-                like.textContent = (c.liked ? "\u2665" : "\u2661") + (c.likes > 0 ? " " + c.likes : "");
-                like.style.color = c.liked ? "#ff6b8a" : "#999";
-            };
-
-            box.style.cssText = "display:flex;flex-direction:column;gap:3px;padding:6px 8px;border-radius:8px;background:"
-                + (depth > 0 ? "#202026;margin-left:18px" : "#1d1d22");
-            top.style.cssText = "display:flex;gap:8px;align-items:baseline;font-size:12px";
-            who.textContent = c.name + (c.mine ? " (you)" : "");
-            who.style.cssText = "font-weight:600;color:" + (c.mine ? ACCENT : "#ddd");
-            when.textContent = c.at ? commentAge(c.at) : "";
-            when.style.color = "#888";
-            text.textContent = c.text;
-            text.style.cssText = "font-size:14px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere";
-            acts.style.cssText = "display:flex;gap:14px;font-size:12px";
-            like.type = "button";
-            reply.type = "button";
-            reply.textContent = "Reply";
-            like.style.cssText = "border:none;background:none;padding:0;cursor:pointer;font:inherit";
-            reply.style.cssText = "border:none;background:none;padding:0;cursor:pointer;font:inherit;color:#999";
-            paintLike();
-
-            like.addEventListener("click", function () {
-
-                likeComment(c).then(function (r) {
-
-                    c.liked = r.liked;
-                    c.likes = r.likes;
-                    paintLike();
-                }, function (e) {
-                    showToast("Could not like it, " + errText(e), false);
-                });
-            });
-
-            // A reply to a reply goes to the comment it is under
-            reply.addEventListener("click", function () {
-                setReply(depth > 0 && c.parent ? Object.assign({}, c, { id: c.parent, replyName: c.name }) : c);
-            });
-
-            top.appendChild(who);
-            top.appendChild(when);
-
-            // A comment tagged with a place in the song, played from there
-            if (c.moment >= 0) {
-
-                const at = document.createElement("button");
-
-                at.type = "button";
-                at.textContent = "\u25B6 " + momentText(c.moment);
-                at.title = "Play from " + momentText(c.moment);
-                at.style.cssText = "border:none;background:none;padding:0;cursor:pointer;font:inherit;color:" + ACCENT;
-                at.addEventListener("click", function () {
-                    playCommentMoment(song.song_id, c.moment);
-                });
-                top.appendChild(at);
-            }
-
-            acts.appendChild(like);
-            acts.appendChild(reply);
-
-            // Your own comment can be taken away, a comment with its replies
-            if (c.mine) {
-
-                const del = document.createElement("button");
-
-                del.type = "button";
-                del.textContent = "Delete";
-                del.style.cssText = "border:none;background:none;padding:0;cursor:pointer;font:inherit;color:#e57373";
-                del.addEventListener("click", function () {
-
-                    askYesNo("Delete " + (depth > 0 ? "this reply" : "this comment" + (c.replies && c.replies.length ? " and its replies" : "")) + "?",
-                        c.text, "Delete", function () {
-
-                        deleteComment(song.song_id, c).then(function () {
-
-                            let next = box.nextSibling;
-
-                            // A comment's replies, set in under it, go too
-                            while (depth === 0 && next && next !== note && next.__replyOf === c.id) {
-
-                                const after = next.nextSibling;
-
-                                next.remove();
-                                next = after;
-                            }
-
-                            box.remove();
-                            showToast("Deleted", true);
-                        }, function (e) {
-                            showToast("Could not delete it, " + errText(e), false);
-                        });
-                    }, null, true);
-                });
-                acts.appendChild(del);
-            }
-
-            box.__replyOf = depth > 0 ? c.parent : "";
-            box.appendChild(top);
-            box.appendChild(text);
-            box.appendChild(acts);
-
-            return box;
-        }
-
-        function show(c) {
-
-            const el = row(c, 0);
-
-            // Known by its id, to put a reply made here under it
-            el.__commentId = c.id;
-            listBox.insertBefore(el, note);
-
-            for (const r of c.replies) {
-                listBox.insertBefore(row(r, 1), note);
-            }
-
-            if (c.replyCount > c.replies.length) {
-
-                const n = document.createElement("div");
-
-                n.textContent = (c.replyCount - c.replies.length) + " more " + (c.replyCount - c.replies.length === 1 ? "reply" : "replies") + " on Mureka";
-                n.style.cssText = "font-size:11px;color:#888;margin-left:26px";
-                listBox.insertBefore(n, note);
-            }
-        }
-
-        function load(first) {
-
-            if (busy) {
-                return;
-            }
-
-            busy = true;
-            note.textContent = first ? "Reading the comments" : "Reading more";
-            note.style.display = "";
-            moreBtn.style.display = "none";
-
-            loadComments(song.song_id, first ? "" : last).then(function (r) {
-
-                busy = false;
-
-                for (const c of r.list) {
-                    show(c);
-                }
-
-                last = r.last || last;
-                note.style.display = "none";
-
-                if (first && r.list.length === 0) {
-
-                    note.textContent = "No comments yet. Be the first.";
-                    note.style.display = "";
-                }
-
-                moreBtn.style.display = r.more && r.list.length > 0 ? "" : "none";
-            }, function (e) {
-
-                busy = false;
-                note.textContent = "The comments could not be read, " + errText(e);
-                note.style.display = "";
-            });
-        }
-
-        function post() {
-
-            const text = field.value.trim();
-
-            if (!text || busy) {
-                return;
-            }
-
-            send.disabled = true;
-
-            addComment(song.song_id, text, replyTo ? replyTo.id : "").then(function (c) {
-
-                send.disabled = false;
-                field.value = "";
-
-                // Shown at once, a reply under its comment, a comment on top
-                if (replyTo) {
-
-                    const at = Array.from(listBox.children).find(function (el) {
-                        return el.__commentId === replyTo.id;
-                    });
-                    const el = row(c, 1);
-
-                    el.__commentId = c.id;
-                    listBox.insertBefore(el, at ? at.nextSibling : note);
-                } else {
-
-                    const el = row(c, 0);
-
-                    el.__commentId = c.id;
-                    listBox.insertBefore(el, listBox.firstChild);
-                    note.style.display = "none";
-                }
-
-                showToast(replyTo ? "Replied" : "Commented", true);
-                setReply(null);
-            }, function (e) {
-
-                send.disabled = false;
-                showToast("Could not send it, " + errText(e), false);
-            });
-        }
-
-        field.addEventListener("keydown", function (ev) {
-
-            if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) {
-
-                ev.preventDefault();
-                post();
-            }
-        });
-
-        load(true);
     }
 
     // Mureka's notifications, newest first: a disc in the kind's colour,
@@ -77044,291 +77613,69 @@
         }
 
         const dialog = makeDialog({
-            cardCss: "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:12px;width:100%;max-width:420px;"
-                + "max-height:86%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px",
             onCancel: function () {
                 msgRepaint = null;
             }
         });
-        const card = dialog.card;
-        const head = document.createElement("div");
-        const title = document.createElement("div");
-        const headSpin = msgSpinner(12);
-        const spacer = document.createElement("div");
-        const allBtn = makeButton("Mark all read", "#333", "#fff", function () {
-
-            allBtn.disabled = true;
-            msgMarkAllRead().then(function () {
-                allBtn.disabled = false;
-            }, function (e) {
-
-                allBtn.disabled = false;
-                showToast("Marked read here, Mureka did not take it: " + errText(e), false);
-            });
-        });
-        const shut = makeButton("Close", "#444", "#fff", function () {
-            done();
-        });
-        const listBox = document.createElement("div");
-        let extra = [];
-        let last = msgLast;
-        let busy = false;
-        let first = true;
         const done = function () {
 
             msgRepaint = null;
             dialog.close();
         };
+        const view = nfView(dialog.card, {
+            list: function (after) {
 
-        // The buttons at the right on the title's line, Close there too
-        // while Mark all read is away
-        head.classList.add("mp-row8");
-        head.style.alignItems = "center";
-        title.textContent = "Notifications";
-        title.style.cssText = "font-weight:600;min-width:0";
-        headSpin.style.display = "none";
-        spacer.style.flex = "1 1 auto";
-        allBtn.style.cssText += ";flex:0 0 auto";
-        shut.style.flex = "0 0 auto";
-        head.appendChild(title);
-        head.appendChild(headSpin);
-        head.appendChild(spacer);
-        head.appendChild(allBtn);
-        head.appendChild(shut);
-        listBox.style.cssText = "flex:1 1 auto;min-height:80px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"
-            + "-webkit-overflow-scrolling:touch;overscroll-behavior:contain";
-        listBox.addEventListener("scroll", nearEnd, { passive: true });
-        card.appendChild(head);
-        card.appendChild(listBox);
+                const read = after
+                    ? moreNotifications(after).then(function (r) {
+                        return { ok: true, list: r.list, last: r.last };
+                    })
+                    : refreshNotifications().then(function () {
+                        return { ok: true, list: msgList, last: msgLast };
+                    });
+
+                return read.catch(function (e) {
+                    return { ok: false, why: errText(e) };
+                });
+            },
+            readAll: function () {
+
+                return msgMarkAllRead().then(function () {
+                    return { ok: true };
+                }, function (e) {
+                    return { ok: false, why: errText(e) };
+                });
+            },
+            open: function (m) {
+                msgOpen(m.id, true);
+            },
+
+            // The song played, the list left open behind
+            play: function (m) {
+
+                const song = m.song ? hostFindSong(m.song) : null;
+
+                msgMarkRead(m.id);
+
+                if (song) {
+                    playFromTapped(song.song_id);
+                }
+            },
+            counted: function () {
+                return msgThere > 0;
+            },
+            cover: function (url) {
+                return url;
+            },
+            toast: showToast,
+            close: done
+        });
+
         panelEl.appendChild(dialog.back);
 
-        // The song played, the list left open behind
-        function playIt(m) {
-
-            const song = m.song ? hostFindSong(m.song) : null;
-
-            msgMarkRead(m.id);
-
-            if (song) {
-                playFromTapped(song.song_id);
-            }
-        }
-
-        function row(m) {
-
-            const kind = msgKind(m.code);
-            const box = document.createElement("div");
-            const disc = document.createElement("span");
-            const mid = document.createElement("div");
-            const top = document.createElement("div");
-            const who = document.createElement("span");
-            const when = document.createElement("span");
-            const what = document.createElement("div");
-
-            box.style.cssText = "flex:0 0 auto;display:flex;gap:10px;align-items:flex-start;padding:9px 10px 9px 8px;border-radius:8px;cursor:pointer;"
-                + "border-left:3px solid " + (m.read ? "transparent" : ACCENT) + ";background:" + (m.read ? "#1c1c21" : "#2c3238");
-            disc.style.cssText = "flex:0 0 auto;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;"
-                + "background:" + kind.color + "2e;color:" + kind.color + ";opacity:" + (m.read ? "0.75" : "1");
-            disc.title = kind.name;
-            disc.appendChild(makeSvgIcon(kind.shapes, 16));
-            mid.style.cssText = "flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:3px";
-            top.style.cssText = "display:flex;gap:8px;align-items:baseline;font-size:13px";
-            who.textContent = m.who;
-            who.style.cssText = "font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:" + (m.read ? "#ccc" : "#fff");
-            when.textContent = m.at ? commentAge(m.at) : "";
-            when.style.cssText = "flex:0 0 auto;margin-left:auto;font-size:11px;color:#888";
-            what.style.cssText = "font-size:13px;line-height:1.4;overflow-wrap:anywhere;color:" + (m.read ? "#999" : "#ccc");
-            top.appendChild(who);
-
-            // A new one says so beside the name, not by its colours alone
-            if (!m.read) {
-
-                const tag = document.createElement("span");
-
-                tag.textContent = "New";
-                tag.style.cssText = "flex:0 0 auto;padding:0 6px;border-radius:7px;background:" + ACCENT + ";color:#000;"
-                    + "font-size:10px;font-weight:700;line-height:15px";
-                top.appendChild(tag);
-            }
-
-            top.appendChild(when);
-            mid.appendChild(top);
-
-            // What happened, the song's title a link that plays it
-            if (m.title && m.song && m.what.indexOf("\"" + m.title + "\"") >= 0) {
-
-                const at = m.what.indexOf("\"" + m.title + "\"");
-                const link = document.createElement("span");
-
-                link.textContent = m.title;
-                link.title = "Play the song";
-                link.style.cssText = "color:" + ACCENT + ";font-weight:600;cursor:pointer";
-                link.addEventListener("click", function (ev) {
-
-                    ev.stopPropagation();
-                    playIt(m);
-                });
-                what.appendChild(document.createTextNode(m.what.slice(0, at)));
-                what.appendChild(link);
-                what.appendChild(document.createTextNode(m.what.slice(at + m.title.length + 2)));
-            } else {
-                what.textContent = m.what;
-            }
-
-            mid.appendChild(what);
-
-            if (m.text) {
-
-                const said = document.createElement("div");
-
-                said.textContent = m.text;
-                said.style.cssText = "font-size:13px;line-height:1.4;padding:2px 0 2px 8px;border-left:2px solid " + kind.color + ";white-space:pre-wrap;"
-                    + "overflow-wrap:anywhere;color:" + (m.read ? "#aaa" : "#eee");
-                mid.appendChild(said);
-            }
-
-            box.appendChild(disc);
-            box.appendChild(mid);
-
-            if (m.cover) {
-
-                const pic = document.createElement("img");
-
-                pic.src = m.cover;
-                pic.alt = "";
-                pic.loading = "lazy";
-                pic.title = m.song ? "Play the song" : "";
-                pic.style.cssText = "flex:0 0 auto;width:44px;height:44px;border-radius:6px;object-fit:cover;background:#333";
-                pic.addEventListener("error", function () {
-                    pic.remove();
-                });
-
-                if (m.song) {
-
-                    pic.addEventListener("click", function (ev) {
-
-                        ev.stopPropagation();
-                        playIt(m);
-                    });
-                }
-
-                box.appendChild(pic);
-            }
-
-            box.title = m.song ? (/^(1002|2003|2004)$/.test(m.code) ? "Open the comments" : "Play the song")
-                : m.video ? "Watch the video" : m.on ? "Open the comments" : m.link ? "Open it on Mureka" : "Mark read";
-            box.addEventListener("click", function () {
-                msgOpen(m.id, true);
-            });
-
-            return box;
-        }
-
-        function loader(text) {
-
-            const box = document.createElement("div");
-            const word = document.createElement("span");
-
-            box.style.cssText = "flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:12px;color:#888";
-            word.textContent = text;
-            box.appendChild(msgSpinner(14));
-            box.appendChild(word);
-
-            return box;
-        }
-
-        function paint() {
-
-            const all = msgList.concat(extra);
-            const keep = listBox.scrollTop;
-
-            listBox.textContent = "";
-
-            for (const m of all) {
-                listBox.appendChild(row(m));
-            }
-
-            if (!all.length && busy) {
-                listBox.appendChild(loader("Reading Mureka's notifications"));
-            } else if (!all.length) {
-
-                const note = document.createElement("div");
-
-                note.textContent = "No notifications";
-                note.style.cssText = "font-size:12px;color:#888;line-height:1.5;padding:4px 2px";
-                listBox.appendChild(note);
-            } else if (busy && !first) {
-                listBox.appendChild(loader("Loading older notifications"));
-            }
-
-            listBox.scrollTop = keep;
-            headSpin.style.display = busy && first && all.length ? "" : "none";
-            // Also for Mureka's own count, unread ones this list may not hold
-            allBtn.style.display = msgThere > 0 || all.some(function (m) {
-                return !m.read || m.unreadThere;
-            }) ? "" : "none";
-        }
-
-        // Older ones loaded once the list is scrolled near its end, or
-        // when it does not fill the box
-        function nearEnd() {
-
-            if (!busy && last && listBox.scrollTop + listBox.clientHeight >= listBox.scrollHeight - 240) {
-                more();
-            }
-        }
-
-        function more() {
-
-            busy = true;
-            paint();
-            moreNotifications(last).then(function (r) {
-
-                extra = extra.concat(r.list);
-                last = r.last;
-            }, function (e) {
-
-                last = "";
-                showToast("Could not read more notifications: " + errText(e), false);
-            }).then(function () {
-
-                busy = false;
-                paint();
-                nearEnd();
-            });
-        }
-
+        // Read again elsewhere, the notifications shown follow
         msgRepaint = function () {
-
-            if (!extra.length) {
-                last = msgLast;
-            }
-
-            paint();
+            view.show(msgList, msgLast);
         };
-        busy = true;
-        paint();
-        refreshNotifications().then(function () {
-
-            busy = false;
-            first = false;
-
-            if (msgRepaint) {
-                msgRepaint();
-                nearEnd();
-            }
-        });
-    }
-
-    // A small turning ring, while notifications load
-    function msgSpinner(size) {
-
-        const ring = document.createElement("span");
-
-        ring.style.cssText = "flex:0 0 auto;display:inline-block;box-sizing:border-box;width:" + size + "px;height:" + size + "px;"
-            + "border:2px solid rgba(" + ACCENT_RGB + ",0.3);border-top-color:" + ACCENT + ";border-radius:50%;animation:mureka-spin 0.8s linear infinite";
-
-        return ring;
     }
 
     // ---- The web view's way in ----
@@ -82442,138 +82789,6 @@
         vertical-align: 1px;
     }
 
-    /* A notification: a disc in its kind's colour, who and when, what
-       happened, the comment of a comment and the song's cover. Lit, with
-       an accent edge, while unread */
-    .nfList {
-        gap: 8px;
-    }
-
-    .nfItem {
-        flex: 0 0 auto;
-        display: flex;
-        align-items: flex-start;
-        gap: 10px;
-        padding: 9px 10px 9px 8px;
-        border-left: 3px solid transparent;
-        border-radius: 8px;
-        background: #1c1c21;
-        color: #999;
-        text-align: left;
-        cursor: pointer;
-    }
-
-    .nfItem.unread {
-        border-left-color: var(--accent);
-        background: #2c3238;
-        color: #ccc;
-    }
-
-    .nfDisc {
-        flex: 0 0 auto;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 2em;
-        height: 2em;
-        border-radius: 50%;
-        opacity: 0.75;
-    }
-
-    .nfItem.unread .nfDisc {
-        opacity: 1;
-    }
-
-    .nfDisc .ico {
-        width: 1.05em;
-        height: 1.05em;
-    }
-
-    .nfMid {
-        flex: 1 1 auto;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 3px;
-    }
-
-    .nfTop {
-        display: flex;
-        align-items: baseline;
-        gap: 8px;
-        font-size: 0.85em;
-    }
-
-    .nfWho {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-weight: 600;
-        color: #ccc;
-    }
-
-    .nfItem.unread .nfWho {
-        color: #fff;
-    }
-
-    .nfNew {
-        flex: 0 0 auto;
-        padding: 0 0.45em;
-        border-radius: 0.6em;
-        background: var(--accent);
-        color: #000;
-        font-size: 0.75em;
-        font-weight: 700;
-        line-height: 1.5;
-    }
-
-    .nfWhen {
-        flex: 0 0 auto;
-        margin-left: auto;
-        font-size: 0.85em;
-        color: var(--muted, #888);
-    }
-
-    .nfWhat {
-        line-height: 1.4;
-        overflow-wrap: anywhere;
-    }
-
-    .nfSong {
-        color: var(--accent);
-        font-weight: 600;
-        cursor: pointer;
-    }
-
-    .nfSaid {
-        padding: 2px 0 2px 0.6em;
-        border-left: 2px solid #ffb454;
-        line-height: 1.4;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-        color: #aaa;
-    }
-
-    .nfItem.unread .nfSaid {
-        color: #eee;
-    }
-
-    .nfPic {
-        flex: 0 0 auto;
-        width: 2.75em;
-        height: 2.75em;
-        border-radius: 6px;
-        object-fit: cover;
-        background: var(--card);
-        cursor: pointer;
-    }
-
-    .nfSpin {
-        flex: 0 0 auto;
-        color: var(--muted);
-    }
-
     /* A darker, quieter take on WireGuard's red, and a soft white */
     #wgBadge.on {
         border-color: #642326;
@@ -83239,170 +83454,6 @@
         padding: 16px;
         box-sizing: border-box;
         z-index: 2147483500;
-    }
-
-    .cmCard {
-        background: var(--panel, #26262c);
-        border: 1px solid #3a3a42;
-        border-radius: 12px;
-        padding: 14px;
-        width: 100%;
-        max-width: 640px;
-        max-height: 100%;
-        box-sizing: border-box;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-    }
-
-    .cmHead,
-    .cmFoot {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-
-    .cmTitle {
-        flex: 1 1 auto;
-        min-width: 0;
-        font-weight: 600;
-        overflow-wrap: anywhere;
-    }
-
-    .cmList {
-        flex: 1 1 auto;
-        min-height: 4em;
-        overflow-y: auto;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        overscroll-behavior: contain;
-    }
-
-    .cmItem {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        padding: 8px 10px;
-        border-radius: 8px;
-        background: #1d1d22;
-    }
-
-    .cmItem.reply {
-        margin-left: 1.6em;
-        background: #202026;
-    }
-
-    .cmTop {
-        display: flex;
-        gap: 10px;
-        align-items: baseline;
-        font-size: 0.8em;
-    }
-
-    .cmWho {
-        font-weight: 600;
-        color: #ddd;
-    }
-
-    .cmWho.mine {
-        color: var(--accent);
-    }
-
-    .cmWhen,
-    .cmNote,
-    .cmMoreReplies {
-        color: var(--muted, #888);
-    }
-
-    .cmNote,
-    .cmMoreReplies {
-        font-size: 0.8em;
-    }
-
-    .cmMoreReplies {
-        margin-left: 2.2em;
-    }
-
-    .cmText {
-        line-height: 1.45;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-    }
-
-    .cmActs {
-        display: flex;
-        gap: 18px;
-        font-size: 0.8em;
-    }
-
-    .cmLike,
-    .cmReply,
-    .cmX {
-        border: none;
-        background: none;
-        padding: 0;
-        cursor: pointer;
-        font: inherit;
-        color: #999;
-    }
-
-    .cmAt {
-        border: none;
-        background: none;
-        padding: 0;
-        cursor: pointer;
-        font: inherit;
-        color: var(--accent);
-    }
-
-    .cmDel {
-        border: none;
-        background: none;
-        padding: 0;
-        cursor: pointer;
-        font: inherit;
-        color: #e57373;
-    }
-
-    .cmLike.on {
-        color: #ff6b8a;
-    }
-
-    .cmX {
-        font-size: 1.4em;
-        line-height: 1;
-        padding: 0 4px;
-    }
-
-    .cmReplying {
-        display: none;
-        align-items: center;
-        gap: 8px;
-        font-size: 0.8em;
-        color: #bbb;
-    }
-
-    .cmReplying span {
-        flex: 1 1 auto;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .cmFoot textarea {
-        flex: 1 1 auto;
-        min-width: 0;
-        box-sizing: border-box;
-        padding: 8px 10px;
-        border: 1px solid #4a4a52;
-        border-radius: 8px;
-        background: #1b1b20;
-        color: #fff;
-        font: inherit;
-        resize: none;
-        outline: none;
     }
 
     .chip.crPrimary.crBottom {
@@ -93471,6 +93522,883 @@
         return { el: row, title: title };
     }
     // END SHARED songrow
+
+    // BEGIN SHARED ui
+    // Written by embed-webview.sh from src/shared/ui.js. Change that
+    // file and run make embed, never the lines up to END SHARED ui
+    // Small parts both the player and the web view draw the same way: an
+    // icon from its shapes, a turning ring, a plain button and the card of
+    // a dialog. Each kind of part has its look in one style sheet, put in
+    // the page once. Shared by the player and the web view's page,
+    // src/shared/ui.js, inlined into both by embed-webview.sh
+    const UI_CSS = ""
+        + ".mp-ui-spin{flex:0 0 auto;display:inline-block;box-sizing:border-box;border:2px solid rgba(" + ACCENT_RGB + ",0.3);"
+        + "border-top-color:" + ACCENT + ";border-radius:50%;animation:mp-ui-turn 0.8s linear infinite}"
+        + "@keyframes mp-ui-turn{to{transform:rotate(360deg)}}"
+        + ".mp-ui-btn{flex:0 0 auto;min-height:30px;box-sizing:border-box;padding:7px 10px;border:none;border-radius:6px;"
+        + "background:#333;color:#fff;font:inherit;font-size:13px;font-weight:600;cursor:pointer}"
+        + ".mp-ui-btn.dim{background:#444}"
+        + ".mp-ui-btn.on{background:" + ACCENT + ";color:#000}"
+        + ".mp-ui-btn:disabled{opacity:0.5;cursor:default}"
+        + ".mp-ui-btn{transition:filter 0.08s ease,transform 0.08s ease}"
+        + ".mp-ui-btn:not(:disabled):active{filter:brightness(1.45);transform:scale(0.96)}"
+        + "@media (pointer:coarse){.mp-ui-btn{min-height:44px}}"
+        + ".mp-ui-card{background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:12px;width:100%;max-width:420px;"
+        + "max-height:86%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;color:#fff;font-size:13px;line-height:1.4;"
+        + "text-align:left}"
+        + ".mp-ui-head{display:flex;gap:8px;align-items:center}"
+        + ".mp-ui-title{font-weight:600;min-width:0}"
+        + ".mp-ui-gap{flex:1 1 auto}"
+        + ".mp-ui-note{font-size:12px;color:#888;line-height:1.5;padding:4px 2px}"
+        + ".mp-ui-loading{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:12px;color:#888}";
+
+    // The style sheet, once in a page
+    function uiStyle() {
+
+        if (document.getElementById("mp-ui-style")) {
+            return;
+        }
+
+        const style = document.createElement("style");
+
+        style.id = "mp-ui-style";
+        style.textContent = UI_CSS;
+        (document.head || document.documentElement).appendChild(style);
+    }
+
+    // An icon from its shapes, 24 units square with round strokes in the
+    // colour of the text around it
+    function uiSvg(shapes, size) {
+
+        const ns = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(ns, "svg");
+        const s = String(size || 18);
+
+        svg.setAttribute("width", s);
+        svg.setAttribute("height", s);
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("fill", "none");
+        svg.setAttribute("stroke", "currentColor");
+        svg.setAttribute("stroke-width", "2");
+        svg.setAttribute("stroke-linecap", "round");
+        svg.setAttribute("stroke-linejoin", "round");
+
+        for (const shape of shapes) {
+
+            const el = document.createElementNS(ns, shape[0]);
+
+            for (const key of Object.keys(shape[1])) {
+                el.setAttribute(key, shape[1][key]);
+            }
+
+            svg.appendChild(el);
+        }
+
+        return svg;
+    }
+
+    // A ring turning while something is read
+    function uiSpin(size) {
+
+        const ring = document.createElement("span");
+
+        uiStyle();
+        ring.className = "mp-ui-spin";
+        ring.style.width = size + "px";
+        ring.style.height = size + "px";
+
+        return ring;
+    }
+
+    // A plain button, dim for one that closes
+    function uiBtn(label, fn, dim) {
+
+        const b = document.createElement("button");
+
+        uiStyle();
+        b.type = "button";
+        b.className = "mp-ui-btn" + (dim ? " dim" : "");
+        b.textContent = label;
+        b.addEventListener("click", fn);
+
+        return b;
+    }
+
+    // A line saying something is being read, with its ring
+    function uiLoading(text) {
+
+        const box = document.createElement("div");
+        const word = document.createElement("span");
+
+        box.className = "mp-ui-loading";
+        word.textContent = text;
+        box.appendChild(uiSpin(14));
+        box.appendChild(word);
+
+        return box;
+    }
+
+    // A dialog's head: its title, a ring while reading, then the buttons
+    // at the right
+    function uiHead(title, buttons) {
+
+        const head = document.createElement("div");
+        const name = document.createElement("div");
+        const spin = uiSpin(12);
+        const gap = document.createElement("div");
+
+        uiStyle();
+        head.className = "mp-ui-head";
+        name.className = "mp-ui-title";
+        name.textContent = title;
+        spin.style.display = "none";
+        gap.className = "mp-ui-gap";
+        head.appendChild(name);
+        head.appendChild(spin);
+        head.appendChild(gap);
+
+        for (const b of buttons) {
+            head.appendChild(b);
+        }
+
+        return { el: head, title: name, spin: spin };
+    }
+    // END SHARED ui
+
+    // BEGIN SHARED notify
+    // Written by embed-webview.sh from src/shared/notify.js. Change that
+    // file and run make embed, never the lines up to END SHARED notify
+    // Mureka's notifications, newest first, as the player and the web view
+    // both show them: a disc in the kind's colour, who, what and when, the
+    // comment of a comment and the song's cover. A tap marks one read and
+    // opens what it is about, the song's title and cover play the song.
+    // Older ones load on their own near the end. Shared by the player and
+    // the web view's page, src/shared/notify.js, inlined into both by
+    // embed-webview.sh
+    //
+    // card: the dialog's card to fill. host: list(after), a promise of
+    // { ok, list, last, why }, the first page with after empty; readAll(),
+    // a promise of { ok, why }; open(m) and play(m), what a tap does;
+    // counted(), whether Mureka counts unread ones this list may not hold;
+    // cover(url), the address to show a cover by; toast(text, ok); close().
+    // Answers { show(list, last) }, for a first page read elsewhere
+    const NF_CSS = ""
+        + ".mp-nf-list{flex:1 1 auto;min-height:80px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"
+        + "-webkit-overflow-scrolling:touch;overscroll-behavior:contain}"
+        + ".mp-nf-item{flex:0 0 auto;display:flex;gap:10px;align-items:flex-start;padding:9px 10px 9px 8px;border-radius:8px;"
+        + "cursor:pointer;border-left:3px solid transparent;background:#1c1c21}"
+        + ".mp-nf-item.unread{border-left-color:" + ACCENT + ";background:#2c3238}"
+        + ".mp-nf-disc{flex:0 0 auto;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;opacity:0.75}"
+        + ".mp-nf-item.unread .mp-nf-disc{opacity:1}"
+        + ".mp-nf-mid{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:3px}"
+        + ".mp-nf-top{display:flex;gap:8px;align-items:baseline;font-size:13px}"
+        + ".mp-nf-who{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#ccc}"
+        + ".mp-nf-item.unread .mp-nf-who{color:#fff}"
+        + ".mp-nf-new{flex:0 0 auto;padding:0 6px;border-radius:7px;background:" + ACCENT + ";color:#000;font-size:10px;font-weight:700;line-height:15px}"
+        + ".mp-nf-when{flex:0 0 auto;margin-left:auto;font-size:11px;color:#888}"
+        + ".mp-nf-what{font-size:13px;line-height:1.4;overflow-wrap:anywhere;color:#999}"
+        + ".mp-nf-item.unread .mp-nf-what{color:#ccc}"
+        + ".mp-nf-song{color:" + ACCENT + ";font-weight:600;cursor:pointer}"
+        + ".mp-nf-said{font-size:13px;line-height:1.4;padding:2px 0 2px 8px;border-left:2px solid;white-space:pre-wrap;"
+        + "overflow-wrap:anywhere;color:#aaa}"
+        + ".mp-nf-item.unread .mp-nf-said{color:#eee}"
+        + ".mp-nf-pic{flex:0 0 auto;width:44px;height:44px;border-radius:6px;object-fit:cover;background:#333}";
+
+    // When something was written, as a short time ago
+    function commentAge(at) {
+
+        const s = Math.max(0, (Date.now() - at) / 1000);
+
+        if (s < 60) {
+            return "now";
+        }
+
+        if (s < 3600) {
+            return Math.floor(s / 60) + " min";
+        }
+
+        if (s < 86400) {
+            return Math.floor(s / 3600) + " h";
+        }
+
+        if (s < 86400 * 30) {
+            return Math.floor(s / 86400) + " d";
+        }
+
+        return new Date(at).toLocaleDateString();
+    }
+
+    function nfView(card, host) {
+
+        let firstItems = [];
+        let extra = [];
+        let items = [];
+        let last = "";
+        let busy = false;
+        let first = true;
+
+        if (!document.getElementById("mp-nf-style")) {
+
+            const style = document.createElement("style");
+
+            style.id = "mp-nf-style";
+            style.textContent = NF_CSS;
+            (document.head || document.documentElement).appendChild(style);
+        }
+
+        const all = uiBtn("Mark all read", function () {
+
+            all.disabled = true;
+            host.readAll().then(function (r) {
+
+                all.disabled = false;
+
+                for (const m of items) {
+
+                    m.read = true;
+                    m.unreadThere = false;
+                }
+
+                paint();
+
+                if (!r || !r.ok) {
+                    host.toast("Marked read here, Mureka did not take it" + (r && r.why ? ": " + r.why : ""), false);
+                }
+            });
+        });
+        const head = uiHead("Notifications", [all, uiBtn("Close", host.close, true)]);
+        const listBox = document.createElement("div");
+
+        card.classList.add("mp-ui-card");
+        listBox.className = "mp-nf-list";
+        listBox.addEventListener("scroll", nearEnd, { passive: true });
+        card.appendChild(head.el);
+        card.appendChild(listBox);
+
+        function row(m) {
+
+            const kind = msgKind(m.code);
+            const box = document.createElement("div");
+            const disc = document.createElement("span");
+            const mid = document.createElement("div");
+            const top = document.createElement("div");
+            const who = document.createElement("span");
+            const when = document.createElement("span");
+            const what = document.createElement("div");
+
+            box.className = "mp-nf-item" + (m.read ? "" : " unread");
+            box.setAttribute("role", "button");
+            box.tabIndex = 0;
+            box.title = m.song ? (/^(1002|2003|2004)$/.test(m.code) ? "Open the comments" : "Play the song")
+                : m.video ? "Watch the video" : m.on ? "Open the comments" : m.link ? "Open it on Mureka" : "Mark read";
+            disc.className = "mp-nf-disc";
+            disc.title = kind.name;
+            disc.style.color = kind.color;
+            disc.style.background = kind.color + "2e";
+            disc.appendChild(uiSvg(kind.shapes, 16));
+            mid.className = "mp-nf-mid";
+            top.className = "mp-nf-top";
+            who.className = "mp-nf-who";
+            who.textContent = m.who;
+            when.className = "mp-nf-when";
+            when.textContent = m.at ? commentAge(m.at) : "";
+            what.className = "mp-nf-what";
+            top.appendChild(who);
+
+            // A new one says so beside the name, not by its colours alone
+            if (!m.read) {
+
+                const tag = document.createElement("span");
+
+                tag.className = "mp-nf-new";
+                tag.textContent = "New";
+                top.appendChild(tag);
+            }
+
+            top.appendChild(when);
+            mid.appendChild(top);
+
+            // What happened, the song's title a link that plays it
+            const at = m.title && m.song ? String(m.what).indexOf("\"" + m.title + "\"") : -1;
+
+            if (at >= 0) {
+
+                const link = document.createElement("span");
+
+                link.className = "mp-nf-song";
+                link.textContent = m.title;
+                link.title = "Play the song";
+                link.addEventListener("click", function (ev) {
+
+                    ev.stopPropagation();
+                    play(m);
+                });
+                what.appendChild(document.createTextNode(m.what.slice(0, at)));
+                what.appendChild(link);
+                what.appendChild(document.createTextNode(m.what.slice(at + m.title.length + 2)));
+            } else {
+                what.textContent = m.what;
+            }
+
+            mid.appendChild(what);
+
+            if (m.text) {
+
+                const said = document.createElement("div");
+
+                said.className = "mp-nf-said";
+                said.style.borderLeftColor = kind.color;
+                said.textContent = m.text;
+                mid.appendChild(said);
+            }
+
+            box.appendChild(disc);
+            box.appendChild(mid);
+
+            if (m.cover) {
+
+                const pic = document.createElement("img");
+
+                pic.className = "mp-nf-pic";
+                pic.src = host.cover(m.cover);
+                pic.alt = "";
+                pic.loading = "lazy";
+                pic.addEventListener("error", function () {
+                    pic.remove();
+                });
+
+                if (m.song) {
+
+                    pic.title = "Play the song";
+                    pic.addEventListener("click", function (ev) {
+
+                        ev.stopPropagation();
+                        play(m);
+                    });
+                }
+
+                box.appendChild(pic);
+            }
+
+            box.addEventListener("click", function () {
+                open(m);
+            });
+            box.addEventListener("keydown", function (ev) {
+
+                if (ev.key === "Enter" || ev.key === " ") {
+
+                    ev.preventDefault();
+                    open(m);
+                }
+            });
+
+            return box;
+        }
+
+        function open(m) {
+
+            m.read = true;
+            paint();
+            host.open(m);
+        }
+
+        function play(m) {
+
+            m.read = true;
+            paint();
+            host.play(m);
+        }
+
+        function paint() {
+
+            const keep = listBox.scrollTop;
+
+            listBox.textContent = "";
+
+            for (const m of items) {
+                listBox.appendChild(row(m));
+            }
+
+            if (!items.length && busy) {
+                listBox.appendChild(uiLoading("Reading Mureka's notifications"));
+            } else if (!items.length) {
+
+                const note = document.createElement("div");
+
+                note.className = "mp-ui-note";
+                note.textContent = "No notifications";
+                listBox.appendChild(note);
+            } else if (busy && !first) {
+                listBox.appendChild(uiLoading("Loading older notifications"));
+            }
+
+            listBox.scrollTop = keep;
+            head.spin.style.display = busy && first && items.length ? "" : "none";
+
+            // Also for the unread ones Mureka counts, which this list may
+            // give as read
+            all.style.display = host.counted() || items.some(function (m) {
+                return !m.read || m.unreadThere;
+            }) ? "" : "none";
+        }
+
+        // Older ones loaded once the list is scrolled near its end, or
+        // when it does not fill the box
+        function nearEnd() {
+
+            if (!busy && last && listBox.scrollTop + listBox.clientHeight >= listBox.scrollHeight - 240) {
+                load(false);
+            }
+        }
+
+        function load(firstPage) {
+
+            if (busy) {
+                return;
+            }
+
+            busy = true;
+            paint();
+            host.list(firstPage ? "" : last).then(function (r) {
+
+                busy = false;
+
+                if (!r || !r.ok) {
+
+                    last = "";
+
+                    if (!firstPage) {
+                        host.toast("Could not read more notifications" + (r && r.why ? ": " + r.why : ""), false);
+                    }
+
+                    paint();
+
+                    if (firstPage) {
+
+                        const note = document.createElement("div");
+
+                        note.className = "mp-ui-note";
+                        note.textContent = "Could not read the notifications" + (r && r.why ? ": " + r.why : "");
+                        listBox.appendChild(note);
+                    }
+
+                    first = false;
+                    return;
+                }
+
+                const list = Array.isArray(r.list) ? r.list : [];
+
+                if (firstPage) {
+                    firstItems = list;
+                } else {
+                    extra = extra.concat(list);
+                }
+
+                items = firstItems.concat(extra);
+                last = String(r.last || "");
+                first = false;
+                paint();
+                nearEnd();
+            });
+        }
+
+        load(true);
+
+        return {
+
+            // The first page read again elsewhere, the older ones kept
+            show: function (list, lastAfter) {
+
+                firstItems = list;
+                items = firstItems.concat(extra);
+
+                if (!extra.length) {
+                    last = lastAfter || "";
+                }
+
+                paint();
+            }
+        };
+    }
+    // END SHARED notify
+
+    // BEGIN SHARED comments
+    // Written by embed-webview.sh from src/shared/comments.js. Change that
+    // file and run make embed, never the lines up to END SHARED comments
+    // A song's comments on Mureka, as the player and the web view both show
+    // them: each comment with its replies under it, a like and Reply, a
+    // place in the song to play from, Delete on your own, more comments on
+    // asking, and a field to comment or reply at the foot. Shared by the
+    // player and the web view's page, src/shared/comments.js, inlined into
+    // both by embed-webview.sh
+    //
+    // card: the dialog's card to fill. song: id, title and cover. host,
+    // each answer a promise of { ok, why } with more: list(after) with
+    // list, last and more; like(c) with liked and likes; del(c);
+    // add(text, parent) with comment; then seek(at), play the song from a
+    // place; play(); cover(url); confirm(title, text, yes, go); toast(text,
+    // ok); close()
+    const CM_CSS = ""
+        + ".mp-cm-pic{flex:0 0 auto;width:44px;height:44px;border-radius:6px;object-fit:cover;background:#333;cursor:pointer}"
+        + ".mp-cm-title{font-weight:600;overflow-wrap:anywhere;flex:1 1 auto;min-width:0}"
+        + ".mp-cm-list{flex:1 1 auto;min-height:80px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"
+        + "-webkit-overflow-scrolling:touch;overscroll-behavior:contain}"
+        + ".mp-cm-item{display:flex;flex-direction:column;gap:3px;padding:6px 8px;border-radius:8px;background:#1d1d22}"
+        + ".mp-cm-item.reply{background:#202026;margin-left:18px}"
+        + ".mp-cm-top{display:flex;gap:8px;align-items:baseline;font-size:12px}"
+        + ".mp-cm-who{font-weight:600;color:#ddd}"
+        + ".mp-cm-who.mine{color:" + ACCENT + "}"
+        + ".mp-cm-when{color:#888}"
+        + ".mp-cm-text{font-size:14px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}"
+        + ".mp-cm-acts{display:flex;gap:14px;font-size:12px}"
+        + ".mp-cm-link{border:none;background:none;padding:0;cursor:pointer;font:inherit;color:#999}"
+        + ".mp-ui-card .mp-cm-link{min-height:0}"
+        + ".mp-cm-link.liked{color:#ff6b8a}"
+        + ".mp-cm-link.at{color:" + ACCENT + "}"
+        + ".mp-cm-link.del{color:#e57373}"
+        + ".mp-cm-more{font-size:11px;color:#888;margin-left:26px}"
+        + ".mp-cm-replying{display:none;align-items:center;gap:8px;font-size:12px;color:#bbb}"
+        + ".mp-cm-replying span{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+        + ".mp-cm-x{border:none;background:none;color:#bbb;font-size:18px;line-height:1;cursor:pointer;padding:0 4px}"
+        + ".mp-cm-foot{display:flex;gap:8px}"
+        + ".mp-cm-field{flex:1 1 auto;min-width:0;box-sizing:border-box;padding:8px 10px;border:1px solid #4a4a52;border-radius:6px;"
+        + "background:#1b1b20;color:#fff;font:inherit;font-size:16px;resize:none;outline:none}";
+
+    // A place in a song as Mureka's page shows it, 01:15
+    function cmTime(sec) {
+
+        const s = Math.max(0, Math.round(sec));
+
+        return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+    }
+
+    function cmView(card, song, host) {
+
+        let last = "";
+        let replyTo = null;
+        let busy = false;
+
+        if (!document.getElementById("mp-cm-style")) {
+
+            const style = document.createElement("style");
+
+            style.id = "mp-cm-style";
+            style.textContent = CM_CSS;
+            (document.head || document.documentElement).appendChild(style);
+        }
+
+        const head = uiHead("Comments on \"" + ((song.title || "").trim() || "Untitled") + "\"", [uiBtn("Close", host.close, true)]);
+        const listBox = document.createElement("div");
+        const note = document.createElement("div");
+        const moreBtn = uiBtn("More comments", function () {
+            load(false);
+        });
+        const replying = document.createElement("div");
+        const replyText = document.createElement("span");
+        const replyCancel = document.createElement("button");
+        const foot = document.createElement("div");
+        const field = document.createElement("textarea");
+        const send = uiBtn("Send", function () {
+            post();
+        });
+
+        card.classList.add("mp-ui-card");
+        head.title.className = "mp-cm-title";
+
+        // The song's cover beside the title, a tap plays the song
+        if (song.cover) {
+
+            const pic = document.createElement("img");
+
+            pic.className = "mp-cm-pic";
+            pic.src = host.cover(song.cover);
+            pic.alt = "";
+            pic.title = "Play the song";
+            pic.addEventListener("error", function () {
+                pic.remove();
+            });
+            pic.addEventListener("click", host.play);
+            head.el.style.gap = "10px";
+            head.el.insertBefore(pic, head.el.firstChild);
+        }
+
+        listBox.className = "mp-cm-list";
+        note.className = "mp-ui-note";
+        moreBtn.style.display = "none";
+        moreBtn.style.alignSelf = "stretch";
+        replying.className = "mp-cm-replying";
+        replyCancel.type = "button";
+        replyCancel.className = "mp-cm-x";
+        replyCancel.textContent = "\u00D7";
+        replyCancel.setAttribute("aria-label", "Do not reply");
+        replyCancel.addEventListener("click", function () {
+            setReply(null);
+        });
+        replying.appendChild(replyText);
+        replying.appendChild(replyCancel);
+        foot.className = "mp-cm-foot";
+        field.className = "mp-cm-field";
+        field.rows = 2;
+        field.placeholder = "Write a comment";
+        send.classList.add("on");
+        foot.appendChild(field);
+        foot.appendChild(send);
+        listBox.appendChild(note);
+        card.appendChild(head.el);
+        card.appendChild(listBox);
+        card.appendChild(moreBtn);
+        card.appendChild(replying);
+        card.appendChild(foot);
+
+        function setReply(c) {
+
+            replyTo = c;
+            replying.style.display = c ? "flex" : "none";
+            replyText.textContent = c ? "Replying to " + c.name + ": " + c.text : "";
+            field.placeholder = c ? "Write a reply" : "Write a comment";
+
+            if (c) {
+                field.focus();
+            }
+        }
+
+        function link(text, kind) {
+
+            const b = document.createElement("button");
+
+            b.type = "button";
+            b.className = "mp-cm-link" + (kind ? " " + kind : "");
+            b.textContent = text;
+
+            return b;
+        }
+
+        // A comment's row: who, when, the text, the like and Reply
+        function row(c, depth) {
+
+            const box = document.createElement("div");
+            const top = document.createElement("div");
+            const who = document.createElement("span");
+            const when = document.createElement("span");
+            const text = document.createElement("div");
+            const acts = document.createElement("div");
+            const like = link("");
+            const reply = link("Reply");
+            const paintLike = function () {
+
+                like.textContent = (c.liked ? "\u2665" : "\u2661") + (c.likes > 0 ? " " + c.likes : "");
+                like.classList.toggle("liked", c.liked === true);
+            };
+
+            box.className = "mp-cm-item" + (depth > 0 ? " reply" : "");
+            box.__commentId = c.id;
+            box.__replyOf = depth > 0 ? c.parent : "";
+            top.className = "mp-cm-top";
+            who.className = "mp-cm-who" + (c.mine ? " mine" : "");
+            who.textContent = c.name + (c.mine ? " (you)" : "");
+            when.className = "mp-cm-when";
+            when.textContent = c.at ? commentAge(c.at) : "";
+            text.className = "mp-cm-text";
+            text.textContent = c.text;
+            acts.className = "mp-cm-acts";
+            paintLike();
+
+            like.addEventListener("click", function () {
+
+                host.like(c).then(function (r) {
+
+                    if (r && r.ok) {
+
+                        c.liked = r.liked;
+                        c.likes = r.likes;
+                        paintLike();
+                    } else {
+                        host.toast("Could not like it" + (r && r.why ? ", " + r.why : ""), false);
+                    }
+                });
+            });
+
+            // A reply to a reply goes to the comment it is under
+            reply.addEventListener("click", function () {
+                setReply(depth > 0 && c.parent ? Object.assign({}, c, { id: c.parent, replyName: c.name }) : c);
+            });
+
+            top.appendChild(who);
+            top.appendChild(when);
+
+            // A comment tagged with a place in the song, played from there
+            if (c.moment >= 0) {
+
+                const at = link("\u25B6 " + cmTime(c.moment), "at");
+
+                at.title = "Play from " + cmTime(c.moment);
+                at.addEventListener("click", function () {
+                    host.seek(c.moment);
+                });
+                top.appendChild(at);
+            }
+
+            acts.appendChild(like);
+            acts.appendChild(reply);
+
+            // Your own comment can be taken away, a comment with its replies
+            if (c.mine) {
+
+                const del = link("Delete", "del");
+
+                del.addEventListener("click", function () {
+
+                    host.confirm("Delete " + (depth > 0 ? "this reply" : "this comment" + (c.replies && c.replies.length ? " and its replies" : "")) + "?",
+                        c.text, "Delete", function () {
+
+                        host.del(c).then(function (r) {
+
+                            if (!r || !r.ok) {
+
+                                host.toast("Could not delete it" + (r && r.why ? ", " + r.why : ""), false);
+                                return;
+                            }
+
+                            let next = box.nextSibling;
+
+                            // A comment's replies, set in under it, go too
+                            while (depth === 0 && next && next !== note && next.__replyOf === c.id) {
+
+                                const after = next.nextSibling;
+
+                                next.remove();
+                                next = after;
+                            }
+
+                            box.remove();
+                            host.toast("Deleted", true);
+                        });
+                    });
+                });
+                acts.appendChild(del);
+            }
+
+            box.appendChild(top);
+            box.appendChild(text);
+            box.appendChild(acts);
+
+            return box;
+        }
+
+        function show(c) {
+
+            const replies = c.replies || [];
+            const left = (c.replyCount || 0) - replies.length;
+
+            listBox.insertBefore(row(c, 0), note);
+
+            for (const r of replies) {
+                listBox.insertBefore(row(r, 1), note);
+            }
+
+            if (left > 0) {
+
+                const n = document.createElement("div");
+
+                n.className = "mp-cm-more";
+                n.textContent = left + " more " + (left === 1 ? "reply" : "replies") + " on Mureka";
+                listBox.insertBefore(n, note);
+            }
+        }
+
+        function load(first) {
+
+            if (busy) {
+                return;
+            }
+
+            busy = true;
+            note.textContent = first ? "Reading the comments" : "Reading more";
+            note.style.display = "";
+            moreBtn.style.display = "none";
+
+            host.list(first ? "" : last).then(function (r) {
+
+                busy = false;
+
+                if (!r || !r.ok) {
+
+                    note.textContent = "The comments could not be read" + (r && r.why ? ", " + r.why : "");
+                    return;
+                }
+
+                const list = Array.isArray(r.list) ? r.list : [];
+
+                for (const c of list) {
+                    show(c);
+                }
+
+                last = r.last || last;
+                note.style.display = "none";
+
+                if (first && list.length === 0) {
+
+                    note.textContent = "No comments yet. Be the first.";
+                    note.style.display = "";
+                }
+
+                moreBtn.style.display = r.more && list.length > 0 ? "" : "none";
+            });
+        }
+
+        function post() {
+
+            const text = field.value.trim();
+
+            if (!text || busy) {
+                return;
+            }
+
+            send.disabled = true;
+
+            host.add(text, replyTo ? replyTo.id : "").then(function (r) {
+
+                send.disabled = false;
+
+                if (!r || !r.ok || !r.comment) {
+
+                    host.toast("Could not send it" + (r && r.why ? ", " + r.why : ""), false);
+                    return;
+                }
+
+                field.value = "";
+
+                // Shown at once, a reply under its comment, a comment on top
+                if (replyTo) {
+
+                    const at = Array.from(listBox.children).find(function (el) {
+                        return el.__commentId === replyTo.id;
+                    });
+
+                    listBox.insertBefore(row(r.comment, 1), at ? at.nextSibling : note);
+                } else {
+
+                    listBox.insertBefore(row(r.comment, 0), listBox.firstChild);
+                    note.style.display = "none";
+                }
+
+                host.toast(replyTo ? "Replied" : "Commented", true);
+                setReply(null);
+            });
+        }
+
+        field.addEventListener("keydown", function (ev) {
+
+            if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) {
+
+                ev.preventDefault();
+                post();
+            }
+        });
+
+        load(true);
+    }
+    // END SHARED comments
 
     // BEGIN SHARED chat
     // Written by embed-webview.sh from src/shared/chat.js. Change that
@@ -115635,40 +116563,6 @@
         }, 500);
     }
 
-    // A song's comments on Mureka, read and written through the Android
-    // device: each comment with its replies under it, a like and Reply,
-    // more on asking, and a field to comment or reply at the foot
-    function commentAge(at) {
-
-        const s = Math.max(0, (Date.now() - at) / 1000);
-
-        if (s < 60) {
-            return "now";
-        }
-
-        if (s < 3600) {
-            return Math.floor(s / 60) + " min";
-        }
-
-        if (s < 86400) {
-            return Math.floor(s / 3600) + " h";
-        }
-
-        if (s < 86400 * 30) {
-            return Math.floor(s / 86400) + " d";
-        }
-
-        return new Date(at).toLocaleDateString();
-    }
-
-    // A place in the song as m:ss
-    function cmTime(sec) {
-
-        const s = Math.max(0, Math.round(sec));
-
-        // As Mureka's page shows it, 01:15
-        return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
-    }
 
     // The room's chat, read through the Android device, from the shared
     // view, in a window floating over the page. Read again as the phone's
@@ -115809,7 +116703,9 @@
             }
         };
 
-        title.className = "cmTitle";
+        uiStyle();
+        title.className = "mp-ui-title";
+        title.style.flex = "1 1 auto";
         title.textContent = "Chat";
         shut.type = "button";
         shut.className = "chip";
@@ -115995,16 +116891,6 @@
 
         const back = document.createElement("div");
         const card = document.createElement("div");
-        const head = document.createElement("div");
-        const title = document.createElement("div");
-        const headSpin = icon("spin");
-        const all = document.createElement("button");
-        const shut = document.createElement("button");
-        const listBox = document.createElement("div");
-        let items = [];
-        let last = "";
-        let busy = false;
-        let first = true;
         let unBack = null;
         const close = function () {
 
@@ -116016,173 +116902,24 @@
         };
 
         back.className = "cmBack";
-        card.className = "cmCard";
-        head.className = "cmHead";
-        title.className = "cmTitle";
-        title.textContent = "Notifications";
-        headSpin.classList.add("spin", "nfSpin");
-        all.type = "button";
-        all.className = "chip";
-        all.textContent = "Mark all read";
-        all.style.display = "none";
-        all.addEventListener("click", function () {
-
-            all.disabled = true;
-            crAsk({ op: "msgReadAll" }).then(function (r) {
-
-                all.disabled = false;
-
-                for (const m of items) {
-
-                    m.read = true;
-                    m.unreadThere = false;
-                }
-
-                paint();
-
-                if (!r || !r.ok) {
-                    toast("Marked read on the Android device, Mureka did not take it" + (r && r.why ? ": " + r.why : ""), "bad");
-                }
-            });
-        });
-        shut.type = "button";
-        shut.className = "chip";
-        shut.textContent = "Close";
-        shut.addEventListener("click", close);
-        listBox.className = "cmList nfList";
-        listBox.addEventListener("scroll", nearEnd, { passive: true });
         back.addEventListener("click", function (ev) {
 
             if (ev.target === back) {
                 close();
             }
         });
-
-        head.appendChild(title);
-        head.appendChild(headSpin);
-        head.appendChild(all);
-        head.appendChild(shut);
-        card.appendChild(head);
-        card.appendChild(listBox);
         back.appendChild(card);
         document.body.appendChild(back);
         unBack = onBack(close);
 
-        // The song played on the Android device, the list left open
-        function playIt(m) {
-
-            m.read = true;
-            paint();
-            crAsk({ op: "msgPlay", id: m.id });
-        }
-
-        function row(m) {
-
-            const kind = msgKind(m.code);
-            const box = document.createElement("div");
-            const disc = document.createElement("span");
-            const mid = document.createElement("div");
-            const top = document.createElement("div");
-            const who = document.createElement("span");
-            const when = document.createElement("span");
-            const what = document.createElement("div");
-
-            ICONS["nf" + m.code] = kind.shapes;
-            box.className = "nfItem" + (m.read ? "" : " unread");
-            box.setAttribute("role", "button");
-            box.tabIndex = 0;
-            box.title = m.song ? (/^(1002|2003|2004)$/.test(m.code) ? "Open the comments" : "Play the song")
-                : m.video ? "Watch the video" : m.on ? "Open the comments" : m.link ? "Open it on Mureka" : "Mark read";
-            disc.className = "nfDisc";
-            disc.title = kind.name;
-            disc.style.color = kind.color;
-            disc.style.background = kind.color + "2e";
-            disc.appendChild(icon("nf" + m.code));
-            mid.className = "nfMid";
-            top.className = "nfTop";
-            who.className = "nfWho";
-            who.textContent = m.who;
-            when.className = "nfWhen";
-            when.textContent = m.at ? commentAge(m.at) : "";
-            what.className = "nfWhat";
-            top.appendChild(who);
-
-            // A new one says so beside the name, not by its colours alone
-            if (!m.read) {
-
-                const tag = document.createElement("span");
-
-                tag.className = "nfNew";
-                tag.textContent = "New";
-                top.appendChild(tag);
-            }
-
-            top.appendChild(when);
-            mid.appendChild(top);
-
-            // What happened, the song's title a link that plays it
-            const at = m.title && m.song ? String(m.what).indexOf("\"" + m.title + "\"") : -1;
-
-            if (at >= 0) {
-
-                const link = document.createElement("span");
-
-                link.className = "nfSong";
-                link.textContent = m.title;
-                link.title = "Play the song";
-                link.addEventListener("click", function (ev) {
-
-                    ev.stopPropagation();
-                    playIt(m);
-                });
-                what.appendChild(document.createTextNode(m.what.slice(0, at)));
-                what.appendChild(link);
-                what.appendChild(document.createTextNode(m.what.slice(at + m.title.length + 2)));
-            } else {
-                what.textContent = m.what;
-            }
-
-            mid.appendChild(what);
-
-            if (m.text) {
-
-                const said = document.createElement("div");
-
-                said.className = "nfSaid";
-                said.style.borderLeftColor = kind.color;
-                said.textContent = m.text;
-                mid.appendChild(said);
-            }
-
-            box.appendChild(disc);
-            box.appendChild(mid);
-
-            if (m.cover) {
-
-                const pic = document.createElement("img");
-
-                pic.className = "nfPic";
-                pic.src = coverAt(m.cover);
-                pic.alt = "";
-                pic.loading = "lazy";
-                pic.addEventListener("error", function () {
-                    pic.remove();
-                });
-
-                if (m.song) {
-
-                    pic.title = "Play the song";
-                    pic.addEventListener("click", function (ev) {
-
-                        ev.stopPropagation();
-                        playIt(m);
-                    });
-                }
-
-                box.appendChild(pic);
-            }
-
-            const open = function () {
+        nfView(card, {
+            list: function (after) {
+                return crAsk({ op: "msgList", after: after });
+            },
+            readAll: function () {
+                return crAsk({ op: "msgReadAll" });
+            },
+            open: function (m) {
 
                 // A page of Mureka's it leads to, opened while the tap still
                 // counts, as a browser opens no tab once an answer came
@@ -116192,8 +116929,6 @@
                     window.open(m.link, "_blank", "noopener");
                 }
 
-                m.read = true;
-                paint();
                 crAsk({ op: "msgOpen", id: m.id }).then(function (r) {
 
                     if (leads) {
@@ -116207,120 +116942,29 @@
                         openComments(r.comments);
                     }
                 });
-            };
+            },
 
-            box.addEventListener("click", open);
-            box.addEventListener("keydown", function (ev) {
-
-                if (ev.key === "Enter" || ev.key === " ") {
-
-                    ev.preventDefault();
-                    open();
-                }
-            });
-
-            return box;
-        }
-
-        function paint() {
-
-            const keep = listBox.scrollTop;
-
-            listBox.textContent = "";
-
-            for (const m of items) {
-                listBox.appendChild(row(m));
-            }
-
-            if (!items.length && busy) {
-                listBox.appendChild(loadingNode("Reading Mureka's notifications"));
-            } else if (!items.length) {
-
-                const note = document.createElement("div");
-
-                note.className = "cmNote";
-                note.textContent = "No notifications";
-                listBox.appendChild(note);
-            } else if (busy && !first) {
-                listBox.appendChild(loadingNode("Loading older notifications"));
-            }
-
-            listBox.scrollTop = keep;
-            headSpin.style.display = busy && first && items.length ? "" : "none";
-            // Also for the unread ones Mureka counts, which this list may
-            // give as read
-            const counted = state && Number(state.msgUnread) > 0;
-
-            all.style.display = counted || items.some(function (m) {
-                return !m.read || m.unreadThere;
-            }) ? "" : "none";
-        }
-
-        // Older ones loaded once the list is scrolled near its end, or
-        // when it does not fill the box
-        function nearEnd() {
-
-            if (!busy && last && listBox.scrollTop + listBox.clientHeight >= listBox.scrollHeight - 240) {
-                load(false);
-            }
-        }
-
-        function load(firstPage) {
-
-            if (busy) {
-                return;
-            }
-
-            busy = true;
-            paint();
-            crAsk({ op: "msgList", after: firstPage ? "" : last }).then(function (r) {
-
-                busy = false;
-                first = false;
-
-                if (!r || !r.ok) {
-
-                    const note = document.createElement("div");
-
-                    last = "";
-                    paint();
-                    note.className = "cmNote";
-                    note.textContent = "Could not read the notifications" + (r && r.why ? ": " + r.why : "");
-                    listBox.appendChild(note);
-                    return;
-                }
-
-                const list = Array.isArray(r.list) ? r.list : [];
-
-                items = firstPage ? list : items.concat(list);
-                last = String(r.last || "");
-                paint();
-                nearEnd();
-            });
-        }
-
-        load(true);
+            // The song played on the Android device, the list left open
+            play: function (m) {
+                crAsk({ op: "msgPlay", id: m.id });
+            },
+            counted: function () {
+                return !!state && Number(state.msgUnread) > 0;
+            },
+            cover: coverAt,
+            toast: function (text, ok) {
+                toast(text, ok ? "ok" : "bad");
+            },
+            close: close
+        });
     }
 
+    // A song's comments on Mureka, read and written through the Android
+    // device, drawn by the shared cmView
     function openComments(m) {
 
         const back = document.createElement("div");
         const card = document.createElement("div");
-        const head = document.createElement("div");
-        const title = document.createElement("div");
-        const shut = document.createElement("button");
-        const listBox = document.createElement("div");
-        const note = document.createElement("div");
-        const more = document.createElement("button");
-        const replying = document.createElement("div");
-        const replyText = document.createElement("span");
-        const replyCancel = document.createElement("button");
-        const foot = document.createElement("div");
-        const field = document.createElement("textarea");
-        const send = document.createElement("button");
-        let last = "";
-        let replyTo = null;
-        let busy = false;
         let unBack = null;
         const close = function () {
 
@@ -116332,334 +116976,44 @@
         };
 
         back.className = "cmBack";
-        card.className = "cmCard";
-        head.className = "cmHead";
-        title.className = "cmTitle";
-        title.textContent = "Comments on \"" + (m.title || "Untitled") + "\"";
-
-        // The song's cover beside the title, a tap plays it on the Android
-        // device
-        if (m.cover) {
-
-            const pic = document.createElement("img");
-
-            pic.className = "nfPic";
-            pic.src = coverAt(m.cover);
-            pic.alt = "";
-            pic.title = "Play the song";
-            pic.addEventListener("error", function () {
-                pic.remove();
-            });
-            pic.addEventListener("click", function () {
-                send("playId", m.id);
-            });
-            head.appendChild(pic);
-        }
-
-        shut.type = "button";
-        shut.className = "chip";
-        shut.textContent = "Close";
-        shut.addEventListener("click", close);
-        listBox.className = "cmList";
-        note.className = "cmNote";
-        more.type = "button";
-        more.className = "chip";
-        more.textContent = "More comments";
-        more.style.display = "none";
-        more.addEventListener("click", function () {
-            load(false);
-        });
-        replying.className = "cmReplying";
-        replyCancel.type = "button";
-        replyCancel.className = "cmX";
-        replyCancel.textContent = "\u00d7";
-        replyCancel.setAttribute("aria-label", "Do not reply");
-        replyCancel.addEventListener("click", function () {
-            setReply(null);
-        });
-        foot.className = "cmFoot";
-        field.rows = 2;
-        field.placeholder = "Write a comment";
-        send.type = "button";
-        send.className = "chip crPrimary";
-        send.textContent = "Send";
-        send.addEventListener("click", post);
         back.addEventListener("click", function (ev) {
 
             if (ev.target === back) {
                 close();
             }
         });
-
-        head.appendChild(title);
-        head.appendChild(shut);
-        replying.appendChild(replyText);
-        replying.appendChild(replyCancel);
-        foot.appendChild(field);
-        foot.appendChild(send);
-        listBox.appendChild(note);
-        card.appendChild(head);
-        card.appendChild(listBox);
-        card.appendChild(more);
-        card.appendChild(replying);
-        card.appendChild(foot);
         back.appendChild(card);
         document.body.appendChild(back);
         unBack = onBack(close);
 
-        function setReply(c) {
-
-            replyTo = c;
-            replying.style.display = c ? "flex" : "none";
-            replyText.textContent = c ? "Replying to " + c.name + ": " + c.text : "";
-            field.placeholder = c ? "Write a reply" : "Write a comment";
-
-            if (c) {
-                field.focus();
-            }
-        }
-
-        function row(c, depth) {
-
-            const box = document.createElement("div");
-            const top = document.createElement("div");
-            const who = document.createElement("span");
-            const when = document.createElement("span");
-            const text = document.createElement("div");
-            const acts = document.createElement("div");
-            const like = document.createElement("button");
-            const reply = document.createElement("button");
-            const paintLike = function () {
-
-                like.textContent = (c.liked ? "\u2665" : "\u2661") + (c.likes > 0 ? " " + c.likes : "");
-                like.classList.toggle("on", c.liked === true);
-            };
-
-            box.className = "cmItem" + (depth > 0 ? " reply" : "");
-            box.__commentId = c.id;
-            top.className = "cmTop";
-            who.className = "cmWho" + (c.mine ? " mine" : "");
-            who.textContent = c.name + (c.mine ? " (you)" : "");
-            when.className = "cmWhen";
-            when.textContent = c.at ? commentAge(c.at) : "";
-            text.className = "cmText";
-            text.textContent = c.text;
-            acts.className = "cmActs";
-            like.type = "button";
-            like.className = "cmLike";
-            reply.type = "button";
-            reply.className = "cmReply";
-            reply.textContent = "Reply";
-            paintLike();
-
-            like.addEventListener("click", function () {
-
-                crAsk({ op: "commentLike", id: c.id, level: c.level }).then(function (r) {
-
-                    if (r && r.ok) {
-
-                        c.liked = r.liked;
-                        c.likes = r.likes;
-                        paintLike();
-                    } else {
-                        toast("Could not like it" + (r && r.why ? ", " + r.why : ""), "bad");
-                    }
-                });
-            });
-
-            // A reply to a reply goes to the comment it is under
-            reply.addEventListener("click", function () {
-                setReply(depth > 0 && c.parent ? Object.assign({}, c, { id: c.parent }) : c);
-            });
-
-            top.appendChild(who);
-            top.appendChild(when);
-
-            // A comment tagged with a place in the song, played from there
-            if (c.moment >= 0) {
-
-                const at = document.createElement("button");
-
-                at.type = "button";
-                at.className = "cmAt";
-                at.textContent = "\u25B6 " + cmTime(c.moment);
-                at.title = "Play from " + cmTime(c.moment);
-                at.addEventListener("click", function () {
-                    crAsk({ op: "commentSeek", song: m.id, at: c.moment });
-                });
-                top.appendChild(at);
-            }
-
-            acts.appendChild(like);
-            acts.appendChild(reply);
-
-            // Your own comment can be taken away, a comment with its replies,
-            // a second tap on Delete to be sure
-            if (c.mine) {
-
-                const del = document.createElement("button");
-                let armed = 0;
-
-                del.type = "button";
-                del.className = "cmDel";
-                del.textContent = "Delete";
-                del.addEventListener("click", function () {
-
-                    if (Date.now() - armed > 3000) {
-
-                        armed = Date.now();
-                        del.textContent = "Tap again to delete";
-                        setTimeout(function () {
-                            del.textContent = "Delete";
-                        }, 3000);
-                        return;
-                    }
-
-                    crAsk({ op: "commentDelete", song: m.id, id: c.id, level: c.level }).then(function (r) {
-
-                        if (!r || !r.ok) {
-
-                            toast("Could not delete it" + (r && r.why ? ", " + r.why : ""), "bad");
-                            return;
-                        }
-
-                        let next = box.nextSibling;
-
-                        // A comment's replies, set in under it, go too
-                        while (depth === 0 && next && next !== note && next.__replyOf === c.id) {
-
-                            const after = next.nextSibling;
-
-                            next.remove();
-                            next = after;
-                        }
-
-                        box.remove();
-                        toast("Deleted", "good");
-                    });
-                });
-                acts.appendChild(del);
-            }
-
-            box.__replyOf = depth > 0 ? c.parent : "";
-            box.appendChild(top);
-            box.appendChild(text);
-            box.appendChild(acts);
-
-            return box;
-        }
-
-        function show(c) {
-
-            listBox.insertBefore(row(c, 0), note);
-
-            for (const r of c.replies || []) {
-                listBox.insertBefore(row(r, 1), note);
-            }
-
-            const left = (c.replyCount || 0) - (c.replies || []).length;
-
-            if (left > 0) {
-
-                const n = document.createElement("div");
-
-                n.className = "cmMoreReplies";
-                n.textContent = left + " more " + (left === 1 ? "reply" : "replies") + " on Mureka";
-                listBox.insertBefore(n, note);
-            }
-        }
-
-        function load(first) {
-
-            if (busy) {
-                return;
-            }
-
-            busy = true;
-            note.textContent = first ? "Reading the comments" : "Reading more";
-            note.style.display = "";
-            more.style.display = "none";
-
-            crAsk({ op: "comments", song: m.id, after: first ? "" : last }).then(function (r) {
-
-                busy = false;
-
-                if (!r || !r.ok) {
-
-                    note.textContent = "The comments could not be read" + (r && r.why ? ", " + r.why : "");
-                    return;
-                }
-
-                const list = Array.isArray(r.list) ? r.list : [];
-
-                for (const c of list) {
-                    show(c);
-                }
-
-                last = r.last || last;
-                note.style.display = "none";
-
-                if (first && list.length === 0) {
-
-                    note.textContent = "No comments yet. Be the first.";
-                    note.style.display = "";
-                }
-
-                more.style.display = r.more && list.length > 0 ? "" : "none";
-            });
-        }
-
-        function post() {
-
-            const text = field.value.trim();
-
-            if (!text || busy) {
-                return;
-            }
-
-            send.disabled = true;
-
-            crAsk({ op: "commentAdd", song: m.id, text: text, parent: replyTo ? replyTo.id : "" }).then(function (r) {
-
-                send.disabled = false;
-
-                if (!r || !r.ok || !r.comment) {
-
-                    toast("Could not send it" + (r && r.why ? ", " + r.why : ""), "bad");
-                    return;
-                }
-
-                field.value = "";
-
-                // Shown at once, a reply under its comment, a comment on top
-                if (replyTo) {
-
-                    const at = Array.from(listBox.children).find(function (el) {
-                        return el.__commentId === replyTo.id;
-                    });
-
-                    listBox.insertBefore(row(r.comment, 1), at ? at.nextSibling : note);
-                } else {
-
-                    listBox.insertBefore(row(r.comment, 0), listBox.firstChild);
-                    note.style.display = "none";
-                }
-
-                toast(replyTo ? "Replied" : "Commented", "good");
-                setReply(null);
-            });
-        }
-
-        field.addEventListener("keydown", function (ev) {
-
-            if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) {
-
-                ev.preventDefault();
-                post();
-            }
+        cmView(card, { id: m.id, title: m.title, cover: m.cover }, {
+            list: function (after) {
+                return crAsk({ op: "comments", song: m.id, after: after });
+            },
+            like: function (c) {
+                return crAsk({ op: "commentLike", id: c.id, level: c.level });
+            },
+            del: function (c) {
+                return crAsk({ op: "commentDelete", song: m.id, id: c.id, level: c.level });
+            },
+            add: function (text, parent) {
+                return crAsk({ op: "commentAdd", song: m.id, text: text, parent: parent });
+            },
+            seek: function (at) {
+                crAsk({ op: "commentSeek", song: m.id, at: at });
+            },
+            play: function () {
+                send("playId", m.id);
+            },
+            cover: coverAt,
+            confirm: function (title, text, yes, go) {
+                askConfirm(title + "\n\n" + text, yes, true, go);
+            },
+            toast: function (text, ok) {
+                toast(text, ok ? "ok" : "bad");
+            },
+            close: close
         });
-
-        load(true);
     }
 
     // A place to paste a picture into, where the page may not read the
