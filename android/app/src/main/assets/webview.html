@@ -1792,20 +1792,21 @@
 
     /* A row of buttons all as wide, as many across as fit */
     .plEdActs.crEven {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
     }
 
-    html.phone .plEdActs.crEven {
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    }
-
+    /* Each as wide as the row's measure gives, see crEvenFit; until it is
+       measured, sharing the row */
     .plEdActs.crEven > .chip {
+        flex: 1 1 150px;
         justify-content: center;
         text-align: center;
         min-width: 0;
         padding-left: 8px;
         padding-right: 8px;
+        box-sizing: border-box;
     }
 
     /* Reset and Create at the top as wide as each other */
@@ -1855,6 +1856,12 @@
         max-width: 100%;
         overflow: hidden;
         text-overflow: ellipsis;
+    }
+
+    /* The set chosen, a row of its own across the width */
+    .chip.crSet.crSetWide {
+        width: 100%;
+        justify-content: center;
     }
 
     .chip.crSet::before {
@@ -1977,6 +1984,18 @@
     .crLine.crStack > .crSeg {
         width: 100%;
         box-sizing: border-box;
+        flex-wrap: nowrap;
+    }
+
+    .crLine.crStack > .crSeg button {
+        min-width: 0;
+    }
+
+    /* On a phone the three choices kept on one line */
+    html.phone .crLine.crStack > .crSeg button {
+        flex: 1 1 auto;
+        padding: 0 6px;
+        font-size: 14px;
     }
 
     .crSeg.crWide button {
@@ -35104,24 +35123,39 @@
             return;
         }
 
-        let widest = 0;
+        const shown = Array.prototype.filter.call(row.children, function (b) {
+            return b.style.display !== "none";
+        });
 
-        for (const b of row.children) {
-
-            if (b.offsetParent === null) {
-                continue;
-            }
-
-            // The name's own width, measured at no width of the button's
-            const was = b.style.width;
-
-            b.style.width = "max-content";
-            widest = Math.max(widest, Math.ceil(b.getBoundingClientRect().width));
-            b.style.width = was;
+        if (shown.length === 0) {
+            return;
         }
 
-        if (widest > 0) {
-            row.style.gridTemplateColumns = "repeat(auto-fit, minmax(" + Math.min(room, widest) + "px, 1fr))";
+        let widest = 0;
+
+        for (const b of shown) {
+
+            // The name's own width, measured at no width of the button's
+            const was = b.style.cssText;
+
+            b.style.flex = "0 0 auto";
+            b.style.width = "max-content";
+            widest = Math.max(widest, Math.ceil(b.getBoundingClientRect().width));
+            b.style.cssText = was;
+        }
+
+        // As many across as fit at the least width set, never more than
+        // there are, all as wide as share the row; a last row with fewer
+        // keeps that width, at the right
+        const gap = parseFloat(getComputedStyle(row).columnGap) || 8;
+        const least = Math.max(widest, isPhone() ? 140 : 170);
+        const across = Math.max(1, Math.min(shown.length, Math.floor((room + gap) / (Math.min(room, least) + gap))));
+        const each = Math.floor((room - gap * (across - 1)) / across);
+
+        for (const b of shown) {
+
+            b.style.flex = "0 0 " + each + "px";
+            b.style.width = each + "px";
         }
     }
 
@@ -35584,9 +35618,9 @@
         ui.acts.push(ui.setOn);
         ready.appendChild(crLine("Put them in a set", [ui.setOn]));
 
-        // Every set laid against what is written so far, the ones alike
-        // offered with a name for a new one
-        ready.appendChild(crRow([crChip("Find matching sets", openCrMatch)]));
+        // The set chosen on a row of its own across the width, then Find
+        // matching sets, every set laid against what is written so far,
+        // and Change side by side, Find alone while no set is wanted
         ui.setBox = document.createElement("div");
         ui.setBox.className = "crBlock";
         ui.setPick = document.createElement("button");
@@ -35599,7 +35633,8 @@
         ui.setChange = crChip("Change", function () {
             openCrPick("sets");
         }, "crFill");
-        ui.setBox.appendChild(crRow([ui.setPick, ui.setChange]));
+        ui.setPick.classList.add("crSetWide");
+        ui.setBox.appendChild(ui.setPick);
         ui.setHint = document.createElement("div");
         ui.setHint.className = "plRowCount";
         ui.setName = crField(false, 80, "setName");
@@ -35607,6 +35642,7 @@
         ui.setBox.appendChild(ui.setHint);
         ui.setBox.appendChild(ui.setName);
         ready.appendChild(ui.setBox);
+        ready.appendChild(crRow([crChip("Find matching sets", openCrMatch), ui.setChange], true));
 
         const foot = document.createElement("div");
 
@@ -35840,6 +35876,12 @@
             ui.setOn.classList.toggle("on", fresh.setOn === true);
             ui.setOn.setAttribute("aria-pressed", fresh.setOn === true ? "true" : "false");
             ui.setBox.style.display = fresh.setOn ? "flex" : "none";
+            ui.setChange.style.display = fresh.setOn ? "" : "none";
+
+            // Buttons shown or hidden since: the even rows measured again
+            for (const row of document.querySelectorAll("#crForm .crEven")) {
+                crEvenFit(row);
+            }
 
             if (Array.isArray(c.sets)) {
                 ui.sets = c.sets;
