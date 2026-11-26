@@ -200,6 +200,15 @@
     .lyricRoll {
         position: relative;
         overflow: visible;
+        touch-action: none;
+        cursor: ns-resize;
+    }
+
+    /* Over the cover, and over it on a phone, only the lyrics themselves
+       take a finger, to turn them */
+    #lyricsOver .lyricRoll,
+    #lyrics .lyricRoll {
+        pointer-events: auto;
     }
 
     #info {
@@ -19385,6 +19394,161 @@
         }
     }
 
+    // Row i of the drum put at a pose at once, with the step's words, what
+    // ran on it stopped
+    function cylPut(roll, i, step, to) {
+
+        const wrap = roll.slots[i];
+        const list = roll.strips[i];
+        const isDots = !!step && step.kind === "pause";
+
+        cylStop(wrap);
+        cylFill(list, step);
+        wrap.style.opacity = String(to.opacity);
+        wrap.style.color = to.color;
+        wrap.style.textShadow = to.textShadow;
+        wrap.style.zIndex = String(10 - Math.abs(i - CYL_MID));
+
+        for (let n = 0; n < list.length; n++) {
+
+            const part = isDots && n === 0 ? to.whole : to.strips[n];
+
+            cylStop(list[n]);
+            list[n].style.transform = part.transform;
+            list[n].style.opacity = String(part.opacity);
+        }
+    }
+
+    // The drum turned by a finger up or down, the song following to the
+    // line in the middle as the finger lets go. Only the lines show
+    // meanwhile, evenly apart, the breaks left out, so a long break is not
+    // a stretch of nothing to turn through. The song's place moves the drum
+    // no more until cylDragFree, so it waits on the line let go on while
+    // the song fades and moves there. False when there is nothing to turn
+    function cylDragStart(roll) {
+
+        if (!roll.geo) {
+            return false;
+        }
+
+        const lines = [];
+
+        for (let i = 0; i < roll.steps.length; i++) {
+
+            if (roll.steps[i].kind === "line") {
+                lines.push(i);
+            }
+        }
+
+        if (lines.length === 0) {
+            return false;
+        }
+
+        // From the line in the middle, or in a break the one before it
+        let at = 0;
+
+        for (let k = 0; k < lines.length; k++) {
+
+            if (lines[k] <= roll.idx) {
+                at = k;
+            }
+        }
+
+        roll.drag = { lines: lines, from: at, pos: at, end: -1 };
+        cylDragPaint(roll);
+
+        return true;
+    }
+
+    // The rows where the finger has the drum, between two lines as it is
+    function cylDragPaint(roll) {
+
+        const d = roll.drag;
+        const mid = Math.round(d.pos);
+
+        for (let i = 0; i < CYL_ROWS; i++) {
+
+            const k = mid + i - CYL_MID;
+            const r = k >= 0 && k < d.lines.length ? d.lines[k] : -1;
+            const off = k - d.pos;
+
+            cylPut(roll, i, r >= 0 ? roll.steps[r] : null, cylPose(roll, off * roll.geo.step, off, r >= 0));
+        }
+    }
+
+    // The finger dy pixels down from where it started: down brings the
+    // lines before into the middle, up the lines after, a line's height
+    // for each line. Past the first or the last line the drum gives a
+    // little and no more
+    function cylDragMove(roll, dy) {
+
+        const d = roll.drag;
+
+        if (!d || d.end >= 0) {
+            return;
+        }
+
+        const last = d.lines.length - 1;
+        let pos = d.from - dy / roll.geo.lineH;
+
+        if (pos < 0) {
+            pos = -Math.min(0.4, -pos * 0.3);
+        } else if (pos > last) {
+            pos = last + Math.min(0.4, (pos - last) * 0.3);
+        }
+
+        d.pos = pos;
+        cylDragPaint(roll);
+    }
+
+    // Let go: the drum settles on the nearest line and answers where the
+    // song goes, in ms, as early as the lines come so it stands in the
+    // middle as it is sung. -1 when let go on the line it started on, the
+    // song left where it is
+    function cylDragEnd(roll) {
+
+        const d = roll.drag;
+
+        if (!d || d.end >= 0) {
+            return -1;
+        }
+
+        const k = Math.max(0, Math.min(d.lines.length - 1, Math.round(d.pos)));
+        const from = d.pos;
+        const t0 = performance.now();
+        const settle = function (now) {
+
+            if (roll.drag !== d) {
+                return;
+            }
+
+            const f = Math.min(1, (now - t0) / CYL_ROLL_MS);
+
+            d.pos = from + (k - from) * (1 - Math.pow(1 - f, 3));
+            cylDragPaint(roll);
+
+            if (f < 1) {
+                requestAnimationFrame(settle);
+            }
+        };
+
+        d.end = k;
+        requestAnimationFrame(settle);
+
+        if (k === d.from) {
+            return -1;
+        }
+
+        return Math.max(0, roll.steps[d.lines[k]].t - (roll.ahead || 0));
+    }
+
+    // The song's place moves the drum again, put in place at the next show
+    function cylDragFree(roll) {
+
+        roll.drag = null;
+        roll.idx = -2;
+    }
+
     // Show the steps at the song's place in milliseconds. One step on rolls
     // the drum a step, the lines after a break roll up into sight from
     // below when it is time, anything else, a seek, a new song or force,
@@ -19393,7 +19557,8 @@
     // before it is sung so it stands in the middle as it is heard
     function cylShow(roll, ms, force) {
 
-        if (!roll.geo) {
+        // Turned by a finger, the song's place waits
+        if (!roll.geo || roll.drag) {
             return;
         }
 
@@ -19436,24 +19601,12 @@
             const list = roll.strips[i];
             const to = cylPose(roll, cylAngle(roll, view.idx, r), r - view.idx, cylShown(roll, r, view));
 
-            cylStop(wrap);
-            cylFill(list, roll.steps[r]);
-            wrap.style.opacity = String(to.opacity);
-            wrap.style.color = to.color;
-            wrap.style.textShadow = to.textShadow;
-            wrap.style.zIndex = String(10 - Math.abs(i - CYL_MID));
+            cylPut(roll, i, roll.steps[r], to);
 
             const isDots = !!roll.steps[r] && roll.steps[r].kind === "pause";
             const part = function (pose, n) {
                 return isDots && n === 0 ? pose.whole : pose.strips[n];
             };
-
-            for (let n = 0; n < list.length; n++) {
-
-                cylStop(list[n]);
-                list[n].style.transform = part(to, n).transform;
-                list[n].style.opacity = String(part(to, n).opacity);
-            }
 
             if (!wrap.animate || (!rolled && !revealed)) {
                 continue;
@@ -19534,6 +19687,125 @@
         info: makeLyricRoll($("lyrics").querySelector(".lyricRoll")),
         cover: makeLyricRoll($("lyricsOver").querySelector(".lyricRoll"))
     };
+
+    // The lyrics turned up or down with a finger or the mouse, see
+    // cylDragStart: let go on a line, the phone moves the song there with
+    // its fade for it, and the drum waits on that line until the song is
+    // there
+    function watchLyricDrag(box) {
+
+        let press = null;
+        const el = box.roll;
+
+        el.addEventListener("pointerdown", function (ev) {
+
+            if (ev.button > 0 || !box.cyl.steps.length || box.cyl.drag) {
+                return;
+            }
+
+            press = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, on: false };
+        });
+
+        el.addEventListener("pointermove", function (ev) {
+
+            if (!press || ev.pointerId !== press.id) {
+                return;
+            }
+
+            const dx = ev.clientX - press.x;
+            const dy = ev.clientY - press.y;
+
+            if (!press.on) {
+
+                if (Math.abs(dx) < 6 && Math.abs(dy) < 6) {
+                    return;
+                }
+
+                // Sideways is not a turn
+                if (Math.abs(dx) > Math.abs(dy) || !cylDragStart(box.cyl)) {
+
+                    press = null;
+                    return;
+                }
+
+                press.on = true;
+                box.dragWait = null;
+
+                try {
+                    el.setPointerCapture(ev.pointerId);
+                } catch (e) {
+                    // Followed while over the lyrics only
+                }
+            }
+
+            ev.preventDefault();
+            cylDragMove(box.cyl, dy);
+        });
+
+        const end = function (ev) {
+
+            if (!press || ev.pointerId !== press.id) {
+                return;
+            }
+
+            const was = press;
+
+            press = null;
+
+            if (!was.on) {
+                return;
+            }
+
+            let to = cylDragEnd(box.cyl);
+
+            if (ev.type === "pointercancel") {
+                to = -1;
+            }
+
+            box.dragWait = { to: to, at: Date.now(), from: shownPos * 1000 };
+
+            if (to >= 0) {
+
+                dbgLog("Lyrics", "turned to " + dbgNum(to / 1000) + " s, the song moved there");
+                send("lyricSeek", Math.round(to) / 1000);
+            }
+        };
+
+        el.addEventListener("pointerup", end);
+        el.addEventListener("pointercancel", end);
+    }
+
+    // Whether the drum still waits on the line let go on: until the song
+    // has moved there, as the phone fades first, at most a few seconds
+    function lyricDragHeld(box, ms) {
+
+        const w = box.dragWait;
+
+        if (!box.cyl.drag) {
+            return false;
+        }
+
+        // Still under the finger
+        if (!w) {
+            return true;
+        }
+
+        const gone = Date.now() - w.at;
+
+        if (gone > 4000) {
+            return false;
+        }
+
+        if (w.to < 0) {
+            return gone < CYL_ROLL_MS;
+        }
+
+        // There, and not where the song would have been without the move
+        return !(gone > 250 && Math.abs(ms - w.to) < 1500 && Math.abs(ms - (w.from + gone)) > 500);
+    }
+
+    watchLyricDrag(lyricBoxes.info);
+    watchLyricDrag(lyricBoxes.cover);
 
     // The layout the phone sends, with the phone's defaults. The size is
     // not in pixels but against the second line under the title, 20 being
@@ -19685,6 +19957,16 @@
         }
 
         box.cyl.ahead = layout.ahead;
+
+        // A new song, or the song moved to the line the lyrics were let go
+        // on: the drum goes with the song again
+        if (box.cyl.drag && (fresh || !lyricDragHeld(box, ms))) {
+
+            cylDragFree(box.cyl);
+            box.dragWait = null;
+            fresh = true;
+        }
+
         cylShow(box.cyl, ms, fresh);
     }
 

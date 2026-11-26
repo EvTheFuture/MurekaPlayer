@@ -764,6 +764,161 @@
         }
     }
 
+    // Row i of the drum put at a pose at once, with the step's words, what
+    // ran on it stopped
+    function cylPut(roll, i, step, to) {
+
+        const wrap = roll.slots[i];
+        const list = roll.strips[i];
+        const isDots = !!step && step.kind === "pause";
+
+        cylStop(wrap);
+        cylFill(list, step);
+        wrap.style.opacity = String(to.opacity);
+        wrap.style.color = to.color;
+        wrap.style.textShadow = to.textShadow;
+        wrap.style.zIndex = String(10 - Math.abs(i - CYL_MID));
+
+        for (let n = 0; n < list.length; n++) {
+
+            const part = isDots && n === 0 ? to.whole : to.strips[n];
+
+            cylStop(list[n]);
+            list[n].style.transform = part.transform;
+            list[n].style.opacity = String(part.opacity);
+        }
+    }
+
+    // The drum turned by a finger up or down, the song following to the
+    // line in the middle as the finger lets go. Only the lines show
+    // meanwhile, evenly apart, the breaks left out, so a long break is not
+    // a stretch of nothing to turn through. The song's place moves the drum
+    // no more until cylDragFree, so it waits on the line let go on while
+    // the song fades and moves there. False when there is nothing to turn
+    function cylDragStart(roll) {
+
+        if (!roll.geo) {
+            return false;
+        }
+
+        const lines = [];
+
+        for (let i = 0; i < roll.steps.length; i++) {
+
+            if (roll.steps[i].kind === "line") {
+                lines.push(i);
+            }
+        }
+
+        if (lines.length === 0) {
+            return false;
+        }
+
+        // From the line in the middle, or in a break the one before it
+        let at = 0;
+
+        for (let k = 0; k < lines.length; k++) {
+
+            if (lines[k] <= roll.idx) {
+                at = k;
+            }
+        }
+
+        roll.drag = { lines: lines, from: at, pos: at, end: -1 };
+        cylDragPaint(roll);
+
+        return true;
+    }
+
+    // The rows where the finger has the drum, between two lines as it is
+    function cylDragPaint(roll) {
+
+        const d = roll.drag;
+        const mid = Math.round(d.pos);
+
+        for (let i = 0; i < CYL_ROWS; i++) {
+
+            const k = mid + i - CYL_MID;
+            const r = k >= 0 && k < d.lines.length ? d.lines[k] : -1;
+            const off = k - d.pos;
+
+            cylPut(roll, i, r >= 0 ? roll.steps[r] : null, cylPose(roll, off * roll.geo.step, off, r >= 0));
+        }
+    }
+
+    // The finger dy pixels down from where it started: down brings the
+    // lines before into the middle, up the lines after, a line's height
+    // for each line. Past the first or the last line the drum gives a
+    // little and no more
+    function cylDragMove(roll, dy) {
+
+        const d = roll.drag;
+
+        if (!d || d.end >= 0) {
+            return;
+        }
+
+        const last = d.lines.length - 1;
+        let pos = d.from - dy / roll.geo.lineH;
+
+        if (pos < 0) {
+            pos = -Math.min(0.4, -pos * 0.3);
+        } else if (pos > last) {
+            pos = last + Math.min(0.4, (pos - last) * 0.3);
+        }
+
+        d.pos = pos;
+        cylDragPaint(roll);
+    }
+
+    // Let go: the drum settles on the nearest line and answers where the
+    // song goes, in ms, as early as the lines come so it stands in the
+    // middle as it is sung. -1 when let go on the line it started on, the
+    // song left where it is
+    function cylDragEnd(roll) {
+
+        const d = roll.drag;
+
+        if (!d || d.end >= 0) {
+            return -1;
+        }
+
+        const k = Math.max(0, Math.min(d.lines.length - 1, Math.round(d.pos)));
+        const from = d.pos;
+        const t0 = performance.now();
+        const settle = function (now) {
+
+            if (roll.drag !== d) {
+                return;
+            }
+
+            const f = Math.min(1, (now - t0) / CYL_ROLL_MS);
+
+            d.pos = from + (k - from) * (1 - Math.pow(1 - f, 3));
+            cylDragPaint(roll);
+
+            if (f < 1) {
+                requestAnimationFrame(settle);
+            }
+        };
+
+        d.end = k;
+        requestAnimationFrame(settle);
+
+        if (k === d.from) {
+            return -1;
+        }
+
+        return Math.max(0, roll.steps[d.lines[k]].t - (roll.ahead || 0));
+    }
+
+    // The song's place moves the drum again, put in place at the next show
+    function cylDragFree(roll) {
+
+        roll.drag = null;
+        roll.idx = -2;
+    }
+
     // Show the steps at the song's place in milliseconds. One step on rolls
     // the drum a step, the lines after a break roll up into sight from
     // below when it is time, anything else, a seek, a new song or force,
@@ -772,7 +927,8 @@
     // before it is sung so it stands in the middle as it is heard
     function cylShow(roll, ms, force) {
 
-        if (!roll.geo) {
+        // Turned by a finger, the song's place waits
+        if (!roll.geo || roll.drag) {
             return;
         }
 
@@ -815,24 +971,12 @@
             const list = roll.strips[i];
             const to = cylPose(roll, cylAngle(roll, view.idx, r), r - view.idx, cylShown(roll, r, view));
 
-            cylStop(wrap);
-            cylFill(list, roll.steps[r]);
-            wrap.style.opacity = String(to.opacity);
-            wrap.style.color = to.color;
-            wrap.style.textShadow = to.textShadow;
-            wrap.style.zIndex = String(10 - Math.abs(i - CYL_MID));
+            cylPut(roll, i, roll.steps[r], to);
 
             const isDots = !!roll.steps[r] && roll.steps[r].kind === "pause";
             const part = function (pose, n) {
                 return isDots && n === 0 ? pose.whole : pose.strips[n];
             };
-
-            for (let n = 0; n < list.length; n++) {
-
-                cylStop(list[n]);
-                list[n].style.transform = part(to, n).transform;
-                list[n].style.opacity = String(part(to, n).opacity);
-            }
 
             if (!wrap.animate || (!rolled && !revealed)) {
                 continue;
