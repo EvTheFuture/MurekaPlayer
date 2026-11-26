@@ -4541,11 +4541,19 @@
     }
 
 
-    /* A field in the question, shown when something is to be typed */
+    /* A field in the question, shown when something is to be typed, its
+       look the shared one, a car's as its other fields */
     #confirmField {
         display: none;
-        width: 100%;
-        box-sizing: border-box;
+    }
+
+    html:not(.phone) #confirmField {
+        min-height: var(--ctl-h);
+        padding: 0 16px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--card);
+        color: var(--text);
         font-size: 0.8em;
     }
 
@@ -7574,7 +7582,7 @@
 <div id="confirmPop">
     <div id="confirmBox" class="mp-ui-ask">
         <div id="confirmText" class="mp-ui-ask-text"></div>
-        <input class="pField" id="confirmField" type="text" autocomplete="off" spellcheck="false">
+        <input class="mp-ui-field" id="confirmField" type="text" autocomplete="off" spellcheck="false">
         <div id="confirmBtns" class="mp-ui-ask-row">
             <button class="mp-ui-btn dim" id="confirmNo" type="button">Cancel</button>
             <button class="mp-ui-btn yes" id="confirmYes" type="button">Yes</button>
@@ -12175,7 +12183,9 @@
         + ".mp-ui-loading{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:12px;color:#888}"
         + ".mp-ui-ask{background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;max-width:340px;"
         + "box-sizing:border-box;display:flex;flex-direction:column;gap:10px;color:#fff;font-size:13px;text-align:left}"
-        + ".mp-ui-ask-title{font-weight:600}"
+        + ".mp-ui-ask-title{font-weight:600;overflow-wrap:anywhere}"
+        + ".mp-ui-field{display:block;flex:0 0 auto;width:100%;box-sizing:border-box;margin:0;padding:8px 10px;"
+        + "border:1px solid #4a4a52;border-radius:6px;background:#1b1b20;color:#fff;font:inherit;font-size:16px;outline:none}"
         + ".mp-ui-ask-text{color:#ccc;font-size:13px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-height:60vh;overflow-y:auto}"
         + ".mp-ui-ask-row{display:flex;gap:8px}"
         + ".mp-ui-ask-row .mp-ui-btn{flex:1}"
@@ -39564,6 +39574,7 @@
         confirmAction = then;
         confirmNoAction = onNo || null;
         $("confirmField").style.display = "none";
+        $("confirmText").className = "mp-ui-ask-text";
         $("confirmText").textContent = text;
         $("confirmYes").textContent = yesLabel;
         $("confirmYes").classList.toggle("danger", danger === true);
@@ -39578,6 +39589,8 @@
             then($("confirmField").value);
         });
 
+        // What is asked as the title, as the mobile player has it
+        $("confirmText").className = "mp-ui-ask-title";
         $("confirmField").value = value;
         $("confirmField").style.display = "block";
         $("confirmField").focus();

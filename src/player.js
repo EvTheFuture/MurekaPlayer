@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.334";
+    const VERSION = "2.0.1.335";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -16334,7 +16334,9 @@
         + ".mp-ui-loading{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:12px;color:#888}"
         + ".mp-ui-ask{background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;max-width:340px;"
         + "box-sizing:border-box;display:flex;flex-direction:column;gap:10px;color:#fff;font-size:13px;text-align:left}"
-        + ".mp-ui-ask-title{font-weight:600}"
+        + ".mp-ui-ask-title{font-weight:600;overflow-wrap:anywhere}"
+        + ".mp-ui-field{display:block;flex:0 0 auto;width:100%;box-sizing:border-box;margin:0;padding:8px 10px;"
+        + "border:1px solid #4a4a52;border-radius:6px;background:#1b1b20;color:#fff;font:inherit;font-size:16px;outline:none}"
         + ".mp-ui-ask-text{color:#ccc;font-size:13px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-height:60vh;overflow-y:auto}"
         + ".mp-ui-ask-row{display:flex;gap:8px}"
         + ".mp-ui-ask-row .mp-ui-btn{flex:1}"
@@ -31740,20 +31742,21 @@
         }
 
         // Counted as an open dialog, so the shortcuts keep off and Escape
-        // closes it when the field has lost focus
-        const dialog = makeDialog({
-            cardCss: "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;max-width:340px;"
-                + "box-sizing:border-box;display:flex;flex-direction:column;gap:10px"
-        });
+        // closes it when the field has lost focus. The look is the shared
+        // question's, src/shared/ui.js, as the web view's
+        const dialog = makeDialog({});
         const back = dialog.back;
         const card = dialog.card;
-
         const head = document.createElement("div");
+
+        uiStyle();
+        card.className = "mp-ui-ask";
+        head.className = "mp-ui-ask-title";
         head.textContent = title;
-        head.style.cssText = "font-weight:600;overflow-wrap:anywhere";
 
         // At least 16 pixels, below that iOS zooms the page in on focus
         const field = document.createElement("input");
+
         field.type = kind === true ? "password" : "text";
 
         if (kind === "numeric") {
@@ -31761,24 +31764,16 @@
             field.inputMode = "numeric";
             field.pattern = "[0-9]*";
         }
+
         field.value = value || "";
+        field.className = "mp-ui-field";
         field.setAttribute("autocomplete", "off");
         field.setAttribute("autocapitalize", "off");
         field.setAttribute("spellcheck", "false");
-        field.style.cssText = [
-            "width:100%",
-            "box-sizing:border-box",
-            "padding:8px 10px",
-            "border:1px solid #4a4a52",
-            "border-radius:6px",
-            "background:#1b1b20",
-            "color:#fff",
-            "font-size:16px",
-            "outline:none"
-        ].join(";");
 
         const row = document.createElement("div");
-        row.style.cssText = "display:flex;gap:8px";
+
+        row.className = "mp-ui-ask-row";
 
         const close = function (accept) {
 
@@ -31786,35 +31781,27 @@
                 onOk(field.value);
             } : null);
         };
-
-        const no = makeButton("Cancel", "#444", "#fff", function () {
+        const no = uiBtn("Cancel", function () {
             close(false);
-        });
-
-        const yes = makeButton(okLabel, ACCENT, "#000", function () {
+        }, true);
+        const yes = uiBtn(okLabel, function () {
             close(true);
         });
 
-        no.style.flex = "1";
-        yes.style.flex = "1";
+        yes.classList.add("yes");
 
         let third = null;
 
         if (extra) {
 
-            third = makeButton(extra.label, "#333", "#fff", function () {
+            third = uiBtn(extra.label, function () {
                 extra.onTap(field.value, function () {
                     close(false);
                 });
             });
-            third.style.flex = "1";
 
             // Ringed in cyan inside, set apart from Cancel and the filled one
-            if (extra.ring) {
-
-                third.style.color = CTRL_ACCENT;
-                third.style.boxShadow = CTRL_RING + CTRL_ACCENT;
-            }
+            third.classList.toggle("ring", extra.ring === true);
 
             if (extra.setup) {
                 extra.setup(third);
@@ -31859,15 +31846,15 @@
 
             const toolRow = document.createElement("div");
 
-            toolRow.style.cssText = "display:flex;gap:8px";
+            toolRow.className = "mp-ui-ask-row";
 
             for (const t of tools) {
 
-                const b = makeButton(t.label, "transparent", CTRL_ACCENT, function () {
+                const b = uiBtn(t.label, function () {
                     t.fn(field);
                 });
 
-                b.style.boxShadow = CTRL_RING + CTRL_ACCENT;
+                b.classList.add("ring");
                 toolRow.appendChild(b);
             }
 
@@ -51808,7 +51795,7 @@
 
             // The answers of a question are tall on a touch screen, so a
             // finger does not land on the one beside the one it meant
-            + "@media (pointer:coarse){[data-mureka-notice] button,.mureka-ask button{min-height:44px}}"
+            + "@media (pointer:coarse){[data-mureka-notice] button,.mureka-ask button{min-height:44px !important}}"
 
             // Every button lights up and dips a little while it is pressed,
             // so a tap is seen to have landed even when what it does shows
@@ -86484,11 +86471,19 @@
     }
 
 
-    /* A field in the question, shown when something is to be typed */
+    /* A field in the question, shown when something is to be typed, its
+       look the shared one, a car's as its other fields */
     #confirmField {
         display: none;
-        width: 100%;
-        box-sizing: border-box;
+    }
+
+    html:not(.phone) #confirmField {
+        min-height: var(--ctl-h);
+        padding: 0 16px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--card);
+        color: var(--text);
         font-size: 0.8em;
     }
 
@@ -89517,7 +89512,7 @@
 <div id="confirmPop">
     <div id="confirmBox" class="mp-ui-ask">
         <div id="confirmText" class="mp-ui-ask-text"></div>
-        <input class="pField" id="confirmField" type="text" autocomplete="off" spellcheck="false">
+        <input class="mp-ui-field" id="confirmField" type="text" autocomplete="off" spellcheck="false">
         <div id="confirmBtns" class="mp-ui-ask-row">
             <button class="mp-ui-btn dim" id="confirmNo" type="button">Cancel</button>
             <button class="mp-ui-btn yes" id="confirmYes" type="button">Yes</button>
@@ -94118,7 +94113,9 @@
         + ".mp-ui-loading{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:12px;color:#888}"
         + ".mp-ui-ask{background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;max-width:340px;"
         + "box-sizing:border-box;display:flex;flex-direction:column;gap:10px;color:#fff;font-size:13px;text-align:left}"
-        + ".mp-ui-ask-title{font-weight:600}"
+        + ".mp-ui-ask-title{font-weight:600;overflow-wrap:anywhere}"
+        + ".mp-ui-field{display:block;flex:0 0 auto;width:100%;box-sizing:border-box;margin:0;padding:8px 10px;"
+        + "border:1px solid #4a4a52;border-radius:6px;background:#1b1b20;color:#fff;font:inherit;font-size:16px;outline:none}"
         + ".mp-ui-ask-text{color:#ccc;font-size:13px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-height:60vh;overflow-y:auto}"
         + ".mp-ui-ask-row{display:flex;gap:8px}"
         + ".mp-ui-ask-row .mp-ui-btn{flex:1}"
@@ -121507,6 +121504,7 @@
         confirmAction = then;
         confirmNoAction = onNo || null;
         $("confirmField").style.display = "none";
+        $("confirmText").className = "mp-ui-ask-text";
         $("confirmText").textContent = text;
         $("confirmYes").textContent = yesLabel;
         $("confirmYes").classList.toggle("danger", danger === true);
@@ -121521,6 +121519,8 @@
             then($("confirmField").value);
         });
 
+        // What is asked as the title, as the mobile player has it
+        $("confirmText").className = "mp-ui-ask-title";
         $("confirmField").value = value;
         $("confirmField").style.display = "block";
         $("confirmField").focus();
