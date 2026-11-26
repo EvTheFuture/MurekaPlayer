@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.353";
+    const VERSION = "2.0.1.354";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -4700,6 +4700,7 @@
             trimZoom: 3,
             pauseOnDisconnect: false,
             noLoudWarning: false,
+            volPressDb: 1,
             playOnConnect: "never",
             coverResend: "title",
             controlOrder: "repeat,shuffle,stop,play",
@@ -4972,6 +4973,7 @@
                     trimZoom: numberIn(parsed.trimZoom, 0, 10, 3),
                     pauseOnDisconnect: parsed.pauseOnDisconnect === true,
                     noLoudWarning: parsed.noLoudWarning === true,
+                    volPressDb: pressDbSetting(parsed.volPressDb),
                     coverResend: ["art", "id", "title"].indexOf(parsed.coverResend) >= 0
                         ? parsed.coverResend
                         : "title",
@@ -19888,6 +19890,15 @@
         return isFinite(n) && n > 0 ? Math.max(5, Math.min(100, n)) : 0;
     }
 
+    // How much louder a press of more volume steps makes it, in dB, a half
+    // to 3 in halves, 1 unless set
+    function pressDbSetting(v) {
+
+        const n = Math.round(Number(v) * 2) / 2;
+
+        return isFinite(n) && n >= 0.5 ? Math.min(3, n) : 1;
+    }
+
     // The step sizes set by hand, to the app, which evens out the volume
     // between the phone's steps by the one of the speaker in use. A
     // speaker without its own takes this device's
@@ -19946,7 +19957,8 @@
                 lows: lows,
                 fallbackLow: s.fallback.lowDb || 0,
                 lowSteps: lowSteps,
-                fallbackLowSteps: s.fallback.lowSteps > 0 ? s.fallback.lowSteps - 1 : 0
+                fallbackLowSteps: s.fallback.lowSteps > 0 ? s.fallback.lowSteps - 1 : 0,
+                pressDb: pressDbSetting(settings.volPressDb)
             }));
         } catch (e) {
             dbgLog("Sound", "volume step sizes not taken: " + errText(e));
@@ -62723,21 +62735,28 @@
             if (isApkHost() && window.MurekaHost && typeof window.MurekaHost.fineVolume === "function") {
 
                 soundBox.appendChild(soundHeading("Android volume"));
-                soundBox.appendChild(makeBoolRow("More volume steps, 100", function () {
+                soundBox.appendChild(makeBoolRow("More volume steps", function () {
                     return fineAsked("on");
                 }, function (v) {
 
                     fineAsk("on", v);
                     window.MurekaHost.fineVolume(v ? "1" : "0");
                 }));
-                soundBox.appendChild(makeBoolRow("Volume buttons move them by 1%", function () {
+                soundBox.appendChild(makeStepperRow("Each step, dB", function () {
+                    return pressDbSetting(settings.volPressDb);
+                }, function (v) {
+
+                    settings.volPressDb = pressDbSetting(v);
+                    pushStepSizes();
+                }, 0.5, 3, 0.5));
+                soundBox.appendChild(makeBoolRow("Volume buttons move them a step at a time", function () {
                     return fineAsked("buttons");
                 }, function (v) {
 
                     fineAsk("buttons", v);
                     window.MurekaHost.volumeButtons(v ? "1" : "0");
                 }));
-                soundBox.appendChild(makeHint("More volume steps turns Android's few media volume steps into 100, the player's own sound evening out between them. With the volume buttons on as well, they move it by 1%, with the app on screen and, while its music plays, outside it too, where Android shows its own slider."));
+                soundBox.appendChild(makeHint("More volume steps puts more steps between Android's few media volume steps, the player's own sound evening out between them. Each step makes it the same dB louder, so there are as many between two of Android's steps as the gap between them holds: twice as many for a 6 dB gap as for a 3 dB one, by the gaps trained for the speaker in use, or its step size set by hand. Under Android's first step, the steps set for the speaker. With the volume buttons on as well, they move it a step at a time, with the app on screen and, while its music plays, outside it too, where Android shows its own slider."));
 
                 // Android's warning before loud music, confirmed for it
                 // through the hotspot helper, so the car can turn it up
@@ -63202,7 +63221,7 @@
                 }
             };
 
-            // The volume of the speaker playing now in 100 steps, under its
+            // The volume of the speaker playing now in percent, under its
             // step size, to hear the size while it is changed: the level,
             // and the phone's real step with its dB and the player's mixer
             // under it, as in the web view's volume popup
@@ -108032,7 +108051,7 @@
         }
 
         if (volFineOn()) {
-            return "Android's media volume in 100 steps, its own " + state.volMax + " evened out by the player, now step " + state.vol;
+            return "Android's media volume in percent with more steps between its own " + state.volMax + ", evened out by the player, now its step " + state.vol;
         }
 
         return "Android's media volume, " + (state.volUnit === "steps" ? "0 to " + max : "in " + max + " steps")
@@ -108130,7 +108149,7 @@
         bar.appendChild(row);
         bar.appendChild(where);
 
-        // The phone's few steps made 100, the player evening out between
+        // More steps between the phone's few, the player evening out between
         if (t.kind === "phone") {
 
             const fine = document.createElement("label");
@@ -108139,7 +108158,7 @@
 
             fine.className = "volFine";
             box.type = "checkbox";
-            text.textContent = "More steps: 100 instead of Android's own, the player evens out between them";
+            text.textContent = "More steps between Android's own, each as much louder, the player evens out between them";
             box.addEventListener("change", function () {
 
                 const on = box.checked;
@@ -108152,14 +108171,14 @@
             fine.appendChild(text);
             bar.appendChild(fine);
 
-            // The phone's own volume buttons moving the 100 steps by 1%
+            // The phone's own volume buttons moving the more steps one at a time
             const keys = document.createElement("label");
             const keysBox = document.createElement("input");
             const keysText = document.createElement("span");
 
             keys.className = "volFine volKeys";
             keysBox.type = "checkbox";
-            keysText.textContent = "The Android device's volume buttons move them by 1%, outside the app too while its music plays";
+            keysText.textContent = "The Android device's volume buttons move them a step at a time, outside the app too while its music plays";
             keysBox.addEventListener("change", function () {
                 send("sysVolumeButtons", keysBox.checked);
             });

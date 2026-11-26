@@ -91,7 +91,7 @@ final class SysVolume {
     private static float fineBeforePress = -1;
     private static long finePressAt;
 
-    // The phone's volume buttons moving more steps by 1%, and the level
+    // The phone's volume buttons moving more steps one at a time, and the level
     // in dB of the step in use, for the stats and the volume popup
     private static boolean buttons;
     private static float fineStepDb = Float.NaN;
@@ -161,6 +161,14 @@ final class SysVolume {
     private static int lowStepsFallback = 0;
     private static int lowSteps = 0;
     private static final int LOW_STEPS_MAX = 40;
+
+    // How much louder each press makes it above the first step, in dB:
+    // between two of the phone's steps as many levels as the gap between
+    // them holds, a 6 dB gap twice the levels of a 3 dB one. 0 for one at
+    // each whole percent, as before, which a player too old to send it gets
+    private static float pressDb = 0;
+    private static final float PRESS_DB_MIN = 0.25f;
+    private static final float PRESS_DB_MAX = 6;
     private static int delayFallback = -1;
     private static int stepDelay = -1;
 
@@ -413,8 +421,61 @@ final class SysVolume {
         return lowSteps > 0 ? lowSteps : Math.max(0, Math.round(high) - 1);
     }
 
+    // How many levels from one of the phone's steps up to the next, step
+    // the upper one: the gap between them over the dB a press, at least
+    // one, or one each whole percent when no dB a press is set
+    private static int spanLevels(int step, int max) {
+
+        float lo = stepPct(step - 1, max);
+        float hi = stepPct(step, max);
+        int whole = Math.max(1, Math.round(hi - lo));
+
+        if (pressDb <= 0 || audio == null) {
+            return whole;
+        }
+
+        int type = outputType();
+        boolean own = hasCurve(type, max);
+        float gap = stepDb(step, max, type, own) - stepDb(step - 1, max, type, own);
+
+        if (Float.isNaN(gap) || Float.isInfinite(gap) || gap <= 0) {
+            gap = 6;
+        }
+
+        return Math.max(1, Math.min(200, Math.round(gap / pressDb)));
+    }
+
+    // The step whose span from the one below holds a level above the
+    // first step: up, the span it goes up in, down the one it goes down in
+    private static int spanOf(float p, int max, boolean up) {
+
+        int s = 2;
+
+        while (s < max && (up ? stepPct(s, max) <= p + 0.0001f : stepPct(s, max) < p - 0.0001f)) {
+            s++;
+        }
+
+        return s;
+    }
+
+    // A level above the first step as the nearest level of its span
+    private static float snapSpan(float p, int max) {
+
+        if (p >= 100 - 0.0001f) {
+            return 100;
+        }
+
+        int s = spanOf(p, max, false);
+        float lo = stepPct(s - 1, max);
+        float hi = stepPct(s, max);
+        int n = spanLevels(s, max);
+        int k = Math.max(0, Math.min(n, Math.round((p - lo) * n / (hi - lo))));
+
+        return lo + (hi - lo) * k / n;
+    }
+
     // A level as one of those offered: under the first step the nearest of
-    // the levels set there, above it a whole percent
+    // the levels set there, above it the nearest of its span's levels
     private static float snapFine(float pct, int max) {
 
         float p = Math.max(0, Math.min(100, pct));
@@ -425,7 +486,7 @@ final class SysVolume {
         }
 
         if (p >= high - 0.0001f) {
-            return Math.max(high, Math.round(p));
+            return max >= 2 ? Math.max(high, snapSpan(p, max)) : Math.max(high, Math.round(p));
         }
 
         int n = lowCount(max);
@@ -435,7 +496,7 @@ final class SysVolume {
     }
 
     // The level one up or down from where it is: under the first step by
-    // the levels set there, above it by a whole percent
+    // the levels set there, above it by its span's levels
     private static float fineNext(float pct, int dir, int max) {
 
         float high = stepPct(1, max);
@@ -448,7 +509,7 @@ final class SysVolume {
         if (dir > 0) {
 
             if (pct >= high - 0.001f) {
-                return Math.min(100, Math.round(pct) + 1);
+                return max >= 2 ? spanNext(pct, 1, max) : Math.min(100, Math.round(pct) + 1);
             }
 
             int k = (int) Math.floor(pct * (n + 1) / high + 0.001f) + 1;
@@ -457,12 +518,30 @@ final class SysVolume {
         }
 
         if (pct > high + 0.001f) {
-            return Math.max(high, Math.round(pct) - 1);
+            return max >= 2 ? Math.max(high, spanNext(pct, -1, max)) : Math.max(high, Math.round(pct) - 1);
         }
 
         int k = (int) Math.ceil(pct * (n + 1) / high - 0.001f) - 1;
 
         return high * Math.max(0, k) / (n + 1);
+    }
+
+    // One level up or down above the first step, within the span it is in
+    // or onto the phone's step at its end
+    private static float spanNext(float p, int dir, int max) {
+
+        if (dir > 0 && p >= 100 - 0.001f) {
+            return 100;
+        }
+
+        int s = spanOf(p, max, dir > 0);
+        float lo = stepPct(s - 1, max);
+        float hi = stepPct(s, max);
+        int n = spanLevels(s, max);
+        float at = (p - lo) * n / (hi - lo);
+        int k = dir > 0 ? (int) Math.floor(at + 0.001f) + 1 : (int) Math.ceil(at - 0.001f) - 1;
+
+        return lo + (hi - lo) * Math.max(0, Math.min(n, k)) / n;
     }
 
     // The step for a level in percent and the player's own sound for the
@@ -793,6 +872,10 @@ final class SysVolume {
             int fbLowSteps = o.optInt("fallbackLowSteps", 0);
 
             lowStepsFallback = fbLowSteps > 0 && fbLowSteps <= LOW_STEPS_MAX ? fbLowSteps : 0;
+
+            float press = (float) o.optDouble("pressDb", 0);
+
+            pressDb = press >= PRESS_DB_MIN && press <= PRESS_DB_MAX ? press : 0;
 
             JSONObject caps = o.optJSONObject("caps");
 
@@ -1208,7 +1291,7 @@ final class SysVolume {
         return fineOn ? fineGain : 1;
     }
 
-    // Whether the phone's volume buttons move more steps by 1%: set, and
+    // Whether the phone's volume buttons move more steps one at a time: set, and
     // more steps on
     static boolean buttonsOn() {
         return buttons && fineOn && audio != null;
@@ -1223,7 +1306,7 @@ final class SysVolume {
         }
 
         Hub.setVolButtons(on);
-        Hub.note("Volume", on ? "the volume buttons move more steps by 1%" : "the volume buttons move the phone's own steps");
+        Hub.note("Volume", on ? "the volume buttons move more steps one at a time" : "the volume buttons move the phone's own steps");
         PlayerService.volumeKeys();
     }
 
@@ -1359,6 +1442,7 @@ final class SysVolume {
             }
 
             o.put("lowSteps", lowSteps);
+            o.put("pressDb", pressDb);
 
             if (training) {
 

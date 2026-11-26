@@ -24890,7 +24890,7 @@
         }
 
         if (volFineOn()) {
-            return "Android's media volume in 100 steps, its own " + state.volMax + " evened out by the player, now step " + state.vol;
+            return "Android's media volume in percent with more steps between its own " + state.volMax + ", evened out by the player, now its step " + state.vol;
         }
 
         return "Android's media volume, " + (state.volUnit === "steps" ? "0 to " + max : "in " + max + " steps")
@@ -24988,7 +24988,7 @@
         bar.appendChild(row);
         bar.appendChild(where);
 
-        // The phone's few steps made 100, the player evening out between
+        // More steps between the phone's few, the player evening out between
         if (t.kind === "phone") {
 
             const fine = document.createElement("label");
@@ -24997,7 +24997,7 @@
 
             fine.className = "volFine";
             box.type = "checkbox";
-            text.textContent = "More steps: 100 instead of Android's own, the player evens out between them";
+            text.textContent = "More steps between Android's own, each as much louder, the player evens out between them";
             box.addEventListener("change", function () {
 
                 const on = box.checked;
@@ -25010,14 +25010,14 @@
             fine.appendChild(text);
             bar.appendChild(fine);
 
-            // The phone's own volume buttons moving the 100 steps by 1%
+            // The phone's own volume buttons moving the more steps one at a time
             const keys = document.createElement("label");
             const keysBox = document.createElement("input");
             const keysText = document.createElement("span");
 
             keys.className = "volFine volKeys";
             keysBox.type = "checkbox";
-            keysText.textContent = "The Android device's volume buttons move them by 1%, outside the app too while its music plays";
+            keysText.textContent = "The Android device's volume buttons move them a step at a time, outside the app too while its music plays";
             keysBox.addEventListener("change", function () {
                 send("sysVolumeButtons", keysBox.checked);
             });

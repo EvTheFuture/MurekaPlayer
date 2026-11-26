@@ -2051,7 +2051,7 @@ final class WebViewServer {
                 return;
             }
 
-            // The phone's volume buttons moving more steps by 1%, on or off
+            // The phone's volume buttons moving more steps one at a time, on or off
             if ("sysVolumeButtons".equals(cmd)) {
 
                 SysVolume.setButtons(Boolean.TRUE.equals(arg));
