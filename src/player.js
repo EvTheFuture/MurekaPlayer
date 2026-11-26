@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.344";
+    const VERSION = "2.0.1.345";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -26234,9 +26234,13 @@
 
         fade.timer = setInterval(function () {
 
+            // The new song stopped a moment once it started, on an iPhone,
+            // is silent already: the fade is as good as done
+            const held = audio.paused && iosAnewHolding;
+
             // Another song or a pause meanwhile: the fade is called off and
             // the new song left for a tap
-            if ((currentSong ? currentSong.song_id : null) !== from || audio.paused) {
+            if ((currentSong ? currentSong.song_id : null) !== from || (audio.paused && !held)) {
 
                 dbgLog("Song", "fade called off, the song changed or was paused");
                 endReadyFade();
@@ -26244,7 +26248,7 @@
                 return;
             }
 
-            const k = Math.min(1, (Date.now() - t0) / ms);
+            const k = held ? 1 : Math.min(1, (Date.now() - t0) / ms);
 
             if (k < 1) {
 
@@ -27384,19 +27388,44 @@
     // A swipe on the cover: the song after its fade, and only once the
     // cover has glided all the way, whichever comes last. The fade starts
     // with the glide. Called off, the covers go back
+    // The swipe whose song waits for its fade, to switch it at once
+    let artSwipeCommit = null;
+
     function swipeSwitch(go) {
 
         let landed = false;
         let faded = false;
+        let gone = false;
 
         const tryGo = function () {
 
-            if (landed && faded) {
+            if (landed && faded && !gone) {
+
+                gone = true;
+
+                if (artSwipeCommit === now) {
+                    artSwipeCommit = null;
+                }
 
                 artSwipeLanded = true;
                 go();
             }
         };
+
+        // A new touch on the cover while the fade still runs: the song
+        // switched at once, so swipe after swipe goes song after song
+        const now = function () {
+
+            if (!faded) {
+
+                faded = true;
+                endReadyFade();
+            }
+
+            tryGo();
+        };
+
+        artSwipeCommit = now;
 
         switchSong("swipe", function () {
 
@@ -27404,6 +27433,15 @@
             tryGo();
         }, function () {
 
+            if (artSwipeCommit === now) {
+                artSwipeCommit = null;
+            }
+
+            // A glide still on its way stopped too, else it lands on the
+            // next cover with the old song still playing
+            gone = true;
+            artGlideToken += 1;
+            artGlidePending = null;
             currentSwipeOffset = 0;
             setArtSources();
             positionArt(0);
@@ -35974,9 +36012,15 @@
             }
         }, ART_MENU_HOLD_MS);
 
-        // Finish any glide still animating so its song change is not lost, then
-        // reset to a clean rest layout before the new gesture starts
+        // Finish any glide still animating so its song change is not lost,
+        // and a swipe's song still fading in, then reset to a clean rest
+        // layout before the new gesture starts
         commitArtGlide();
+
+        if (artSwipeCommit) {
+            artSwipeCommit();
+        }
+
         positionArt(0);
 
         artGlideToken += 1;
