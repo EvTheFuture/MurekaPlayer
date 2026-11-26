@@ -30,7 +30,20 @@
         + ".mp-ui-ask-row{display:flex;gap:8px}"
         + ".mp-ui-ask-row .mp-ui-btn{flex:1}"
         + ".mp-ui-btn.yes{background:" + ACCENT + ";color:#000}"
-        + ".mp-ui-btn.yes.danger{background:" + DANGER + ";color:#000}";
+        + ".mp-ui-btn.yes.danger{background:" + DANGER + ";color:#000}"
+        + ".mp-ui-btn.ring{background:transparent;color:var(--ring," + ACCENT + ");box-shadow:inset 0 0 0 2px var(--ring," + ACCENT + ")}"
+        + ".mp-ui-ch{background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;max-width:360px;"
+        + "max-height:100%;overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:10px;color:#fff;"
+        + "font-size:13px;text-align:left}"
+        + ".mp-ui-ch-title{font-weight:600}"
+        + ".mp-ui-ch-text{color:#ccc;font-size:13px;line-height:1.5;white-space:pre-line}"
+        + ".mp-ui-ch-col{display:flex;flex-direction:column;gap:6px}"
+        + ".mp-ui-ch-col .mp-ui-btn{width:100%}"
+        + ".mp-ui-ch-col.tall{gap:8px}"
+        + ".mp-ui-ch-col.tall .mp-ui-btn{min-height:56px;font-size:15px;border-radius:8px}"
+        + ".mp-ui-ch-sub{display:block;font-size:11px;font-weight:400;opacity:0.75;margin-top:2px}"
+        + ".mp-ui-ch-check{display:flex;align-items:center;gap:10px;padding:6px 2px;font-size:14px;color:#ddd;cursor:pointer}"
+        + ".mp-ui-ch-check input{width:20px;height:20px;accent-color:" + ACCENT + ";margin:0}";
 
     // The style sheet, once in a page
     function uiStyle() {
@@ -181,4 +194,77 @@
         card.appendChild(row);
 
         return { yes: yes, no: no, text: text };
+    }
+
+    // The answers of a question one under the other, as the player and the
+    // web view on a phone both ask: a button for each answer, filled in the
+    // accent, or with a look of its own to stand apart, a second smaller
+    // line under it when given, a box to tick under them and Cancel at the
+    // foot. The card around them is .mp-ui-ch, its title .mp-ui-ch-title
+    // and the words about it .mp-ui-ch-text, each side builds those.
+    // col: where the answers go. o: options as [{ label, sub, look, color,
+    // disabled, fn }], look "" filled, "plain" grey, "ring" ringed in color
+    // or the accent; tall, larger
+    // answers where a wrong tap does something else at once; check as
+    // { label, on, change() }, on kept up to date; cancel, Cancel's name
+    // or false for none; pick(fn) runs an answer, onCancel runs on Cancel
+    function uiChoiceButtons(col, o) {
+
+        uiStyle();
+        col.classList.add("mp-ui-ch-col");
+        col.classList.toggle("tall", o.tall === true);
+
+        for (const opt of o.options) {
+
+            const b = uiBtn(opt.label, function () {
+                o.pick(opt.fn);
+            });
+            const look = opt.look || "";
+
+            b.classList.toggle("yes", look === "");
+            b.classList.toggle("ring", look === "ring");
+            b.disabled = opt.disabled === true;
+
+            if (look === "ring" && opt.color) {
+                b.style.setProperty("--ring", opt.color);
+            }
+
+            if (opt.sub) {
+
+                const sub = document.createElement("span");
+
+                sub.className = "mp-ui-ch-sub";
+                sub.textContent = opt.sub;
+                b.appendChild(sub);
+            }
+
+            col.appendChild(b);
+        }
+
+        if (o.check && typeof o.check === "object") {
+
+            const row = document.createElement("label");
+            const box = document.createElement("input");
+            const name = document.createElement("span");
+
+            row.className = "mp-ui-ch-check";
+            box.type = "checkbox";
+            box.checked = o.check.on === true;
+            box.addEventListener("change", function () {
+
+                o.check.on = box.checked;
+
+                if (typeof o.check.change === "function") {
+                    o.check.change();
+                }
+            });
+            name.textContent = o.check.label;
+            row.appendChild(box);
+            row.appendChild(name);
+            col.appendChild(row);
+        }
+
+        if (o.cancel !== false) {
+            col.appendChild(uiBtn(o.cancel || "Cancel", o.onCancel || function () {}, true));
+        }
     }

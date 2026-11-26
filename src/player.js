@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.332";
+    const VERSION = "2.0.1.333";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -16325,7 +16325,20 @@
         + ".mp-ui-ask-row{display:flex;gap:8px}"
         + ".mp-ui-ask-row .mp-ui-btn{flex:1}"
         + ".mp-ui-btn.yes{background:" + ACCENT + ";color:#000}"
-        + ".mp-ui-btn.yes.danger{background:" + DANGER + ";color:#000}";
+        + ".mp-ui-btn.yes.danger{background:" + DANGER + ";color:#000}"
+        + ".mp-ui-btn.ring{background:transparent;color:var(--ring," + ACCENT + ");box-shadow:inset 0 0 0 2px var(--ring," + ACCENT + ")}"
+        + ".mp-ui-ch{background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;max-width:360px;"
+        + "max-height:100%;overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:10px;color:#fff;"
+        + "font-size:13px;text-align:left}"
+        + ".mp-ui-ch-title{font-weight:600}"
+        + ".mp-ui-ch-text{color:#ccc;font-size:13px;line-height:1.5;white-space:pre-line}"
+        + ".mp-ui-ch-col{display:flex;flex-direction:column;gap:6px}"
+        + ".mp-ui-ch-col .mp-ui-btn{width:100%}"
+        + ".mp-ui-ch-col.tall{gap:8px}"
+        + ".mp-ui-ch-col.tall .mp-ui-btn{min-height:56px;font-size:15px;border-radius:8px}"
+        + ".mp-ui-ch-sub{display:block;font-size:11px;font-weight:400;opacity:0.75;margin-top:2px}"
+        + ".mp-ui-ch-check{display:flex;align-items:center;gap:10px;padding:6px 2px;font-size:14px;color:#ddd;cursor:pointer}"
+        + ".mp-ui-ch-check input{width:20px;height:20px;accent-color:" + ACCENT + ";margin:0}";
 
     // The style sheet, once in a page
     function uiStyle() {
@@ -16476,6 +16489,79 @@
         card.appendChild(row);
 
         return { yes: yes, no: no, text: text };
+    }
+
+    // The answers of a question one under the other, as the player and the
+    // web view on a phone both ask: a button for each answer, filled in the
+    // accent, or with a look of its own to stand apart, a second smaller
+    // line under it when given, a box to tick under them and Cancel at the
+    // foot. The card around them is .mp-ui-ch, its title .mp-ui-ch-title
+    // and the words about it .mp-ui-ch-text, each side builds those.
+    // col: where the answers go. o: options as [{ label, sub, look, color,
+    // disabled, fn }], look "" filled, "plain" grey, "ring" ringed in color
+    // or the accent; tall, larger
+    // answers where a wrong tap does something else at once; check as
+    // { label, on, change() }, on kept up to date; cancel, Cancel's name
+    // or false for none; pick(fn) runs an answer, onCancel runs on Cancel
+    function uiChoiceButtons(col, o) {
+
+        uiStyle();
+        col.classList.add("mp-ui-ch-col");
+        col.classList.toggle("tall", o.tall === true);
+
+        for (const opt of o.options) {
+
+            const b = uiBtn(opt.label, function () {
+                o.pick(opt.fn);
+            });
+            const look = opt.look || "";
+
+            b.classList.toggle("yes", look === "");
+            b.classList.toggle("ring", look === "ring");
+            b.disabled = opt.disabled === true;
+
+            if (look === "ring" && opt.color) {
+                b.style.setProperty("--ring", opt.color);
+            }
+
+            if (opt.sub) {
+
+                const sub = document.createElement("span");
+
+                sub.className = "mp-ui-ch-sub";
+                sub.textContent = opt.sub;
+                b.appendChild(sub);
+            }
+
+            col.appendChild(b);
+        }
+
+        if (o.check && typeof o.check === "object") {
+
+            const row = document.createElement("label");
+            const box = document.createElement("input");
+            const name = document.createElement("span");
+
+            row.className = "mp-ui-ch-check";
+            box.type = "checkbox";
+            box.checked = o.check.on === true;
+            box.addEventListener("change", function () {
+
+                o.check.on = box.checked;
+
+                if (typeof o.check.change === "function") {
+                    o.check.change();
+                }
+            });
+            name.textContent = o.check.label;
+            row.appendChild(box);
+            row.appendChild(name);
+            col.appendChild(row);
+        }
+
+        if (o.cancel !== false) {
+            col.appendChild(uiBtn(o.cancel || "Cancel", o.onCancel || function () {}, true));
+        }
     }
     // END SHARED ui
 
@@ -65516,20 +65602,18 @@
         }
 
         const lines = String(title).split("\n");
-        const dialog = makeDialog({
-            onCancel: onCancel,
-            cardCss: "background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;"
-                + "max-width:360px;max-height:100%;overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:10px"
-        });
+        const dialog = makeDialog({ onCancel: onCancel });
         const back = dialog.back;
         const card = dialog.card;
         const head = document.createElement("div");
         const text = document.createElement("div");
         const col = document.createElement("div");
 
+        uiStyle();
+        card.className = "mp-ui-ch";
+        head.className = "mp-ui-ch-title";
         head.textContent = lines[0];
-        head.classList.add("mp-bold");
-        text.style.cssText = "color:#ccc;font-size:13px;line-height:1.5;white-space:pre-line";
+        text.className = "mp-ui-ch-text";
 
         let rest = lines.slice(1).join("\n").trim();
 
@@ -65554,81 +65638,21 @@
         }
 
         text.appendChild(document.createTextNode(rest));
-        col.classList.add("mp-col6");
 
-        const close = dialog.close;
-
-        for (const opt of options) {
-
-            const b = makeButton(opt.label, ACCENT, "#000", function () {
-                close(opt.fn);
-            });
-
-            // A second, smaller line under the choice
-            if (opt.sub) {
-
-                const sub = document.createElement("span");
-
-                sub.textContent = opt.sub;
-                sub.style.cssText = "display:block;font-size:11px;font-weight:400;opacity:0.75;margin-top:2px";
-                b.appendChild(sub);
+        // Ringed rather than filled, so it stands apart from the others, in
+        // a color of its own when given one
+        uiChoiceButtons(col, {
+            options: options.map(function (opt) {
+                return { label: opt.label, sub: opt.sub, look: opt.ring ? "ring" : "", color: opt.color, fn: opt.fn };
+            }),
+            tall: tall === true,
+            check: check,
+            cancel: noCancel === true ? false : "Cancel",
+            pick: dialog.close,
+            onCancel: function () {
+                dialog.close(onCancel);
             }
-
-            // Ringed rather than filled, so it stands apart from the others,
-            // in a color of its own when given one
-            if (opt.ring) {
-
-                const ring = opt.color || ACCENT;
-
-                b.style.background = "transparent";
-                b.style.color = ring;
-                b.style.boxShadow = CTRL_RING + ring;
-            }
-
-            b.style.width = "100%";
-
-            if (tall === true) {
-
-                b.style.minHeight = "56px";
-                b.style.fontSize = "15px";
-                b.style.borderRadius = "8px";
-            }
-
-            col.appendChild(b);
-        }
-
-        if (tall === true) {
-            col.style.gap = "8px";
-        }
-
-        if (check && typeof check === "object") {
-
-            const row = document.createElement("label");
-            const box = document.createElement("input");
-            const name = document.createElement("span");
-
-            row.style.cssText = "display:flex;align-items:center;gap:10px;padding:6px 2px;font-size:14px;color:#ddd;cursor:pointer";
-            box.type = "checkbox";
-            box.checked = check.on === true;
-            box.style.cssText = "width:20px;height:20px;accent-color:" + ACCENT + ";margin:0";
-            box.addEventListener("change", function () {
-                check.on = box.checked;
-            });
-            name.textContent = check.label;
-            row.appendChild(box);
-            row.appendChild(name);
-            col.appendChild(row);
-        }
-
-        if (noCancel !== true) {
-
-            const cancel = makeButton("Cancel", "#444", "#fff", function () {
-                close(onCancel);
-            });
-
-            cancel.style.width = "100%";
-            col.appendChild(cancel);
-        }
+        });
         card.appendChild(head);
 
         if (text.textContent) {
@@ -85640,7 +85664,7 @@
         z-index: 46;
     }
 
-    #menuBox:not(.mp-mn),
+    #menuBox:not(.mp-mn):not(.mp-ui-ch),
     #actionsBox,
     #ssBox,
     #statsBox,
@@ -85761,13 +85785,13 @@
         box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
     }
 
-    #menuBox:not(.mp-mn) {
+    #menuBox:not(.mp-mn):not(.mp-ui-ch) {
         width: min(900px, 94vw);
     }
 
     /* Two columns of choices where there is room, so the whole menu and its
        stars fit on a wide screen without scrolling */
-    #menuBox:not(.mp-mn) #menuItems,
+    #menuBox:not(.mp-mn):not(.mp-ui-ch) #menuItems,
     #actionItems {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -85791,7 +85815,7 @@
 
     @media (max-width: 700px) {
 
-        #menuBox:not(.mp-mn) #menuItems {
+        #menuBox:not(.mp-mn):not(.mp-ui-ch) #menuItems {
             grid-template-columns: minmax(0, 1fr);
         }
 
@@ -85829,7 +85853,7 @@
     /* The song's title over its choices, a heading with a thin line under
        it as in the settings. In the actions menu the playing song's title
        comes after the general choices, so it has room above it */
-    #menuBox:not(.mp-mn) #menuTitle,
+    #menuBox:not(.mp-mn):not(.mp-ui-ch) #menuTitle,
     .actionsSong {
         grid-column: 1 / -1;
         margin: 0 0 6px;
@@ -86257,6 +86281,10 @@
         height: 1.3em;
     }
 
+    #menuCaption {
+        text-align: center;
+    }
+
     #menuBox:not(.mp-mn) #menuStars {
         display: flex;
         justify-content: center;
@@ -86307,6 +86335,29 @@
 
     html.typing #menuBox.mp-mn {
         position: static !important;
+    }
+
+    /* A question on a phone as the mobile player asks it, its look from
+       the shared src/shared/ui.js: the title, the words about it, then the
+       answers one under the other and Cancel */
+    #menuBox.mp-ui-ch {
+        width: calc(100% - 32px);
+        max-height: calc(100% - 32px);
+    }
+
+    #menuBox.mp-ui-ch #menuTitle {
+        order: -2;
+        padding: 0;
+    }
+
+    #menuBox.mp-ui-ch #menuCaption {
+        order: -1;
+        padding: 0;
+        text-align: left;
+    }
+
+    #menuBox.mp-ui-ch .popX {
+        display: none;
     }
 
     #menuBox:not(.mp-mn) #menuStars .star svg {
@@ -89417,7 +89468,7 @@
             <button class="chip" id="titleSave" type="button">Save</button>
         </div>
         <div id="menuStars" class="mp-mn-stars"></div>
-        <div id="menuCaption" class="ceLabel" style="text-align:center"></div>
+        <div id="menuCaption" class="ceLabel"></div>
     </div>
 </div>
 <div id="fromPop">
@@ -94036,7 +94087,20 @@
         + ".mp-ui-ask-row{display:flex;gap:8px}"
         + ".mp-ui-ask-row .mp-ui-btn{flex:1}"
         + ".mp-ui-btn.yes{background:" + ACCENT + ";color:#000}"
-        + ".mp-ui-btn.yes.danger{background:" + DANGER + ";color:#000}";
+        + ".mp-ui-btn.yes.danger{background:" + DANGER + ";color:#000}"
+        + ".mp-ui-btn.ring{background:transparent;color:var(--ring," + ACCENT + ");box-shadow:inset 0 0 0 2px var(--ring," + ACCENT + ")}"
+        + ".mp-ui-ch{background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;max-width:360px;"
+        + "max-height:100%;overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:10px;color:#fff;"
+        + "font-size:13px;text-align:left}"
+        + ".mp-ui-ch-title{font-weight:600}"
+        + ".mp-ui-ch-text{color:#ccc;font-size:13px;line-height:1.5;white-space:pre-line}"
+        + ".mp-ui-ch-col{display:flex;flex-direction:column;gap:6px}"
+        + ".mp-ui-ch-col .mp-ui-btn{width:100%}"
+        + ".mp-ui-ch-col.tall{gap:8px}"
+        + ".mp-ui-ch-col.tall .mp-ui-btn{min-height:56px;font-size:15px;border-radius:8px}"
+        + ".mp-ui-ch-sub{display:block;font-size:11px;font-weight:400;opacity:0.75;margin-top:2px}"
+        + ".mp-ui-ch-check{display:flex;align-items:center;gap:10px;padding:6px 2px;font-size:14px;color:#ddd;cursor:pointer}"
+        + ".mp-ui-ch-check input{width:20px;height:20px;accent-color:" + ACCENT + ";margin:0}";
 
     // The style sheet, once in a page
     function uiStyle() {
@@ -94187,6 +94251,79 @@
         card.appendChild(row);
 
         return { yes: yes, no: no, text: text };
+    }
+
+    // The answers of a question one under the other, as the player and the
+    // web view on a phone both ask: a button for each answer, filled in the
+    // accent, or with a look of its own to stand apart, a second smaller
+    // line under it when given, a box to tick under them and Cancel at the
+    // foot. The card around them is .mp-ui-ch, its title .mp-ui-ch-title
+    // and the words about it .mp-ui-ch-text, each side builds those.
+    // col: where the answers go. o: options as [{ label, sub, look, color,
+    // disabled, fn }], look "" filled, "plain" grey, "ring" ringed in color
+    // or the accent; tall, larger
+    // answers where a wrong tap does something else at once; check as
+    // { label, on, change() }, on kept up to date; cancel, Cancel's name
+    // or false for none; pick(fn) runs an answer, onCancel runs on Cancel
+    function uiChoiceButtons(col, o) {
+
+        uiStyle();
+        col.classList.add("mp-ui-ch-col");
+        col.classList.toggle("tall", o.tall === true);
+
+        for (const opt of o.options) {
+
+            const b = uiBtn(opt.label, function () {
+                o.pick(opt.fn);
+            });
+            const look = opt.look || "";
+
+            b.classList.toggle("yes", look === "");
+            b.classList.toggle("ring", look === "ring");
+            b.disabled = opt.disabled === true;
+
+            if (look === "ring" && opt.color) {
+                b.style.setProperty("--ring", opt.color);
+            }
+
+            if (opt.sub) {
+
+                const sub = document.createElement("span");
+
+                sub.className = "mp-ui-ch-sub";
+                sub.textContent = opt.sub;
+                b.appendChild(sub);
+            }
+
+            col.appendChild(b);
+        }
+
+        if (o.check && typeof o.check === "object") {
+
+            const row = document.createElement("label");
+            const box = document.createElement("input");
+            const name = document.createElement("span");
+
+            row.className = "mp-ui-ch-check";
+            box.type = "checkbox";
+            box.checked = o.check.on === true;
+            box.addEventListener("change", function () {
+
+                o.check.on = box.checked;
+
+                if (typeof o.check.change === "function") {
+                    o.check.change();
+                }
+            });
+            name.textContent = o.check.label;
+            row.appendChild(box);
+            row.appendChild(name);
+            col.appendChild(row);
+        }
+
+        if (o.cancel !== false) {
+            col.appendChild(uiBtn(o.cancel || "Cancel", o.onCancel || function () {}, true));
+        }
     }
     // END SHARED ui
 
@@ -103359,13 +103496,8 @@
                 }
             } });
 
+            items[items.length - 1].cls = "rememberBox" + (keep ? " accent" : "");
             openChoice(song.title || "Untitled", items);
-
-            const box = $("menuItems").querySelector(".rememberBox");
-
-            if (box) {
-                box.classList.toggle("accent", keep);
-            }
 
             if (remembered()) {
 
@@ -103655,8 +103787,7 @@
             // tap that went wrong
             if (song.playWhenReady) {
 
-                openChoice("Still generating: " + song.title + ". " + (song.playAfter ? "Plays after the playing song once it is ready."
-                    : "Plays as soon as it is ready."), [
+                openChoice("Still generating", [
                     song.playAfter
                         ? { icon: "play", label: "Play when ready instead", cls: "tall", fn: function () {
 
@@ -103680,6 +103811,9 @@
                         });
                     } }
                 ]);
+                $("menuCaption").textContent = "\"" + song.title + "\" " + (song.playAfter ? "plays after the playing song once it is ready."
+                    : "plays as soon as it is ready.");
+                $("menuCaption").style.display = "";
                 return;
             }
 
@@ -103717,7 +103851,10 @@
                 });
             } });
 
-            openChoice("Still generating: " + song.title, choices);
+            openChoice("Still generating", choices);
+            $("menuCaption").textContent = "\"" + song.title + "\" is not finished on Mureka yet. It can start playing as soon"
+                + " as it is ready, or once the playing song has ended.";
+            $("menuCaption").style.display = "";
         };
 
         row.addEventListener("click", tap);
@@ -108190,14 +108327,13 @@
             items.pop();
         }
 
-        openChoice("Sort the list", items);
-
         const current = sortInfo(listSort);
-        const rows = $("menuItems").querySelectorAll(".menuItem");
 
-        for (let i = 0; i < items.length; i += 1) {
-            rows[i].classList.toggle("accent", items[i].sort === current.sort);
+        for (const item of items) {
+            item.cls = item.sort === current.sort ? "accent" : "";
         }
+
+        openChoice("Sort the list", items);
     });
 
     $("viewAlpha").addEventListener("click", function () {
@@ -112903,7 +113039,7 @@
 
         markMenuRow(null);
         $("menuBox").classList.remove("switchBox");
-        placeSongMenu(false);
+        menuLook("");
         $("songMenu").style.display = "none";
         $("bpmRow").style.display = "none";
         $("titleRow").style.display = "none";
@@ -113200,7 +113336,6 @@
         }
     }
 
-    // The song menu's box used for a plain question, with no song behind it
     // A question that replaces an open menu takes no tap for a moment, so a
     // tap meant for the menu before does not answer it
     let menuGuardUntil = 0;
@@ -113214,7 +113349,44 @@
         }
     }, true);
 
-    function openChoice(title, items) {
+    // The colors a choice has in a car as the look of its button on a
+    // phone: in the accent filled, ringed in the accent, grey or a color
+    // of its own, red for one that takes something away. The rest filled
+    // too, as the mobile player's answers, or grey where some are lit in
+    // the accent, the one picked now or ticked
+    const CHOICE_RINGS = { danger: DANGER, warn: "var(--gold)", warmText: "var(--gold)", hotText: "#f08c32",
+        veryHotText: "#ff6b5f", cool: "#7ab8ff", insetGrey: "#b8b8c0" };
+
+    function choiceLook(item, lit) {
+
+        const cls = " " + (item.cls || "") + " ";
+        const ring = Object.keys(CHOICE_RINGS).find(function (k) {
+            return cls.indexOf(" " + k + " ") >= 0;
+        });
+        let look = lit ? "plain" : "";
+        let color = "";
+
+        if (/ accent /.test(cls)) {
+            look = "";
+        } else if (/ inset /.test(cls)) {
+            look = "ring";
+        } else if (/ set(Ring|Text) /.test(cls) && item.color) {
+
+            look = "ring";
+            color = item.color;
+        } else if (ring) {
+
+            look = "ring";
+            color = CHOICE_RINGS[ring];
+        }
+
+        return { label: item.label, sub: item.sub, look: look, color: color, disabled: item.disabled === true, fn: item.fn };
+    }
+
+    // The song menu's box used for a plain question, with no song behind
+    // it. tall: on a phone the answers larger, where a wrong tap does
+    // something else at once, in a car they always are
+    function openChoice(title, items, tall) {
 
         const box = $("menuItems");
 
@@ -113231,12 +113403,42 @@
         menuSong = null;
         box.textContent = "";
         $("menuBox").classList.remove("switchBox");
-        placeSongMenu(false);
         $("menuTitle").textContent = title;
         $("bpmRow").style.display = "none";
         $("titleRow").style.display = "none";
         $("menuStars").style.display = "none";
         $("menuCaption").style.display = "none";
+
+        // On a phone as the mobile player asks: the answers as buttons, a
+        // look of their own kept apart, Remember my choice a box to tick,
+        // and Cancel
+        if (menuLook("choice")) {
+
+            const remember = items.find(function (item) {
+                return item && / rememberBox /.test(" " + (item.cls || "") + " ");
+            });
+            const answers = items.filter(function (item) {
+                return item && item !== remember;
+            });
+
+            const lit = answers.some(function (item) {
+                return / accent /.test(" " + (item.cls || "") + " ");
+            });
+
+            uiChoiceButtons(box, {
+                options: answers.map(function (item) {
+                    return choiceLook(item, lit);
+                }),
+                tall: tall === true,
+                check: remember ? { label: remember.label, on: remember.icon === "check", change: remember.fn } : null,
+                pick: function (fn) {
+                    fn();
+                },
+                onCancel: closeSongMenu
+            });
+            $("songMenu").style.display = "flex";
+            return;
+        }
 
         // A question's answers are tall, so a finger does not land on the
         // one beside the one it meant
@@ -116901,7 +117103,7 @@
 
             return send("playlistAdd", Object.assign({ ids: ids }, value));
         };
-        const items = [{ icon: "pencil", label: "New playlist", fn: function () {
+        const items = [{ icon: "pencil", label: "New playlist", cls: "inset", fn: function () {
 
             closeSongMenu();
             askText("New playlist", one ? title || "" : "", "Create", function (typed) {
@@ -116928,7 +117130,9 @@
             send("readPlaylists");
         }
 
-        openChoice("Add " + (one ? "\"" + (title || "the song") + "\"" : ids.length + " songs") + " to a playlist", items);
+        openChoice("Add to playlist", items, true);
+        $("menuCaption").textContent = one ? title || "Untitled" : ids.length + " songs";
+        $("menuCaption").style.display = "";
     }
 
     // Picked songs that went into a playlist are let go
@@ -117673,8 +117877,8 @@
             pick.paste();
         } }];
 
-        openChoice("New cover for \"" + (m.title || "Untitled") + "\"", items);
-        $("menuCaption").textContent = pick.caption;
+        openChoice("New cover", items);
+        $("menuCaption").textContent = "For \"" + (m.title || "Untitled") + "\". " + pick.caption;
         $("menuCaption").style.display = "";
 
         // Put away without a choice, nothing pasted is taken any more
@@ -118208,24 +118412,37 @@
         lastPress = { x: ev.clientX, y: ev.clientY, at: Date.now() };
     }, true);
 
-    // A song's menu on a phone as the mobile player's small card, at the
-    // press that opened it a moment ago or else in the middle. Anything
-    // else in the menu's place, a question or a panel, keeps its own look
-    function placeSongMenu(song) {
+    // The look of what is in the menu's place on a phone, as in the mobile
+    // player: "song" a song's small menu, at the press that opened it a
+    // moment ago or else in the middle, "choice" a question with its
+    // answers one under the other over the dimmed page. Anything else, and
+    // everything in a car, keeps the page's own look. Answers whether it
+    // is a question on a phone
+    function menuLook(kind) {
 
         const box = $("menuBox");
-        const card = song === true && isPhone();
+        const phone = isPhone();
+        const song = phone && kind === "song";
+        const choice = phone && kind === "choice";
 
         mnStyle();
-        box.classList.toggle("mp-mn", card);
+        uiStyle();
+        box.classList.toggle("mp-mn", song);
+        box.classList.toggle("mp-ui-ch", choice);
+        $("songMenu").classList.toggle("veil", choice);
+        $("menuTitle").classList.toggle("mp-ui-ch-title", choice);
+        $("menuCaption").classList.toggle("mp-ui-ch-text", choice);
+        $("menuItems").classList.remove("mp-ui-ch-col", "tall");
         box.style.position = "";
         box.style.left = "";
         box.style.top = "";
         $("menuItems").style.maxHeight = "";
 
-        if (card && lastPress && Date.now() - lastPress.at < 3000) {
+        if (song && lastPress && Date.now() - lastPress.at < 3000) {
             mnPlace(box, $("menuItems"), lastPress.x, lastPress.y);
         }
+
+        return choice;
     }
 
     function openSongMenu(id, bpm, title, queueIndex) {
@@ -118242,7 +118459,7 @@
             drawMenu(m, typeof queueIndex === "number" ? queueIndex : -1);
             $("bpmRow").style.display = "none";
             $("songMenu").style.display = "flex";
-            placeSongMenu(true);
+            menuLook("song");
 
             // Opened for one of its fields, from the actions menu
             if (bpm && m.canSetBpm) {
@@ -119959,7 +120176,9 @@
 
     function typingField(el) {
 
-        return !!(el && el.matches && el.matches("#songMenu input, #confirmPop input"));
+        const typed = "input:not([type=checkbox]):not([type=radio]):not([type=range])";
+
+        return !!(el && el.matches && el.matches("#songMenu " + typed + ", #confirmPop " + typed));
     }
 
     function fitTypingRoom() {
