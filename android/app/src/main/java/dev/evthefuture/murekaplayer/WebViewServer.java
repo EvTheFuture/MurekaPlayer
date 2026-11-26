@@ -950,6 +950,11 @@ final class WebViewServer {
                 // This is the player, for a script finding the phone's
                 // address; with the key it says the key is right
                 send(out, 200, "application/json", bytes("{\"player\":\"Mureka Player\",\"key\":" + script + "}"));
+            } else if ("GET".equals(method) && "/clock".equals(path)) {
+
+                // The phone's time, the player's clock too, for a browser
+                // heard at once with the phone to keep in step with it
+                send(out, 200, "application/json", bytes("{\"t\":" + System.currentTimeMillis() + "}"));
             } else if ("GET".equals(method) && "/state".equals(path)) {
 
                 // With since, the answer waits for the next state, so a tap

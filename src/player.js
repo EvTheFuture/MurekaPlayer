@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.364";
+    const VERSION = "2.0.1.365";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -22261,7 +22261,7 @@
         // there was an element to set it on: a new element plays at its
         // whole sound, and the same share sent again changes nothing, so
         // the song played louder than the level shown after each start
-        audio.volume = hostCarAudio ? CAR_SHADOW_VOLUME : volScale();
+        audio.volume = phoneHushed() ? CAR_SHADOW_VOLUME : volScale();
 
         // Asked for with CORS from the start while sound profiles are on, so
         // the first song streamed can go through the profile as well
@@ -26179,7 +26179,7 @@
 
 
     function volScale() {
-        return hostCarAudio ? 1 : fineGain;
+        return phoneHushed() ? 1 : fineGain;
     }
 
     // A new level from the app, the sound moved to it at once unless a fade
@@ -26204,7 +26204,7 @@
 
         fineGain = v;
 
-        if (audio && !iosGain && !hostCarAudio) {
+        if (audio && !iosGain && !phoneHushed()) {
             audio.volume = Math.max(0, Math.min(1, level * volScale()));
         }
     }
@@ -26309,7 +26309,7 @@
 
         const same = currentSong && currentSong.song_id === resumeFadeId;
         const ms = fadeMs("resume");
-        const target = hostCarAudio ? CAR_SHADOW_VOLUME : 1;
+        const target = phoneHushed() ? CAR_SHADOW_VOLUME : 1;
 
         resumeFadeId = null;
 
@@ -26381,7 +26381,7 @@
 
             const k = Math.max(0, Math.min(1, (Date.now() - t0) / ms));
 
-            audio.volume = target * k * (hostCarAudio ? 1 : volScale());
+            audio.volume = target * k * (phoneHushed() ? 1 : volScale());
 
             if (k >= 1) {
 
@@ -26489,7 +26489,7 @@
     // fade in of its own there
     function seekFadeIn(fade, len, from) {
 
-        const target = hostCarAudio ? CAR_SHADOW_VOLUME : 1;
+        const target = phoneHushed() ? CAR_SHADOW_VOLUME : 1;
         const el = audio;
         let ready = false;
         const same = function () {
@@ -26532,7 +26532,7 @@
 
                 const k = Math.min(1, (Date.now() - t0) / len);
 
-                audio.volume = target * k * (hostCarAudio ? 1 : volScale());
+                audio.volume = target * k * (phoneHushed() ? 1 : volScale());
 
                 if (k >= 1) {
                     endSeekFade();
@@ -39304,7 +39304,7 @@
         }
 
         if (hostCarAudio) {
-            add("Heard in", "A web view, the Android device plays along silently");
+            add("Heard in", hostDual ? "A web view and here, in step" : "A web view, the Android device plays along silently");
         }
 
         add("Time to first sound", trackHeardMs ? trackHeardMs + " ms" : "");
@@ -39319,9 +39319,9 @@
             add("Loaded", loaded + " %");
             add("Ready state", ["Nothing", "Metadata", "Current data", "Future data", "Enough data"][audio.readyState] || audio.readyState);
             add("Network state", ["Empty", "Idle", "Loading", "No source"][audio.networkState] || audio.networkState);
-            add("Volume", hostCarAudio ? "Silent here, the web view sets its own" : Math.round((audio.volume || 0) * 100) + " %");
+            add("Volume", phoneHushed() ? "Silent here, the web view sets its own" : Math.round((audio.volume || 0) * 100) + " %");
 
-            if (!hostCarAudio && audio.muted) {
+            if (!phoneHushed() && audio.muted) {
                 sub("Muted", "Yes");
             }
 
@@ -43617,6 +43617,15 @@
     // in charge of the queue, and the web view follows its position
     let hostCarAudio = false;
 
+    // Heard in the browser and here at once, in step, the browser keeping
+    // to this phone's place, see dualStep in the web view
+    let hostDual = false;
+
+    // Whether the phone plays along silently, the browser alone heard
+    function phoneHushed() {
+        return hostCarAudio && !hostDual;
+    }
+
     // Where the music played and whether it played, with the song and its
     // place, kept while the app runs. An update of the app ends it without
     // warning and starts it again, and the sound then came back on the
@@ -43692,7 +43701,7 @@
         }
 
         audio.muted = false;
-        audio.volume = hostCarAudio ? CAR_SHADOW_VOLUME : volScale();
+        audio.volume = phoneHushed() ? CAR_SHADOW_VOLUME : volScale();
 
         // The gain of a fade on an iPhone back to whole
         if (iosGain) {
@@ -43887,6 +43896,12 @@
             soundSetNight: soundSetFor().night,
             repeat: repeatMode,
             carAudio: hostCarAudio,
+            dual: hostCarAudio && hostDual,
+
+            // How long after its play head this phone's sound is heard, its
+            // way out, Bluetooth say, as the sound engine tells it, for a
+            // browser heard at once to keep in step
+            heardMs: Math.round(heardLag() * 1000),
             fade: hostFade,
             seeks: hostSeeks,
             signedIn: authState,
@@ -50081,7 +50096,7 @@
 
         const playing = !!(audio && audio.src && !audio.paused);
         const id = currentSong ? String(currentSong.song_id) : "";
-        const key = hostCarAudio + "|" + playing + "|" + id;
+        const key = hostCarAudio + "|" + hostDual + "|" + playing + "|" + id;
         const now = Date.now();
 
         if (key === sessionWritten && now - sessionWrittenAt < (playing ? 3000 : 30000)) {
@@ -50094,6 +50109,7 @@
         try {
             localStorage.setItem(SESSION_KEY, JSON.stringify({
                 carAudio: hostCarAudio,
+                dual: hostDual,
                 playing: playing,
                 id: id,
                 time: audio && audio.src && isFinite(audio.currentTime) ? audio.currentTime : 0,
@@ -50930,16 +50946,19 @@
             }
         } else if (cmd === "carAudio") {
 
-            hostCarAudio = arg === true || arg === "true" || arg === 1;
+            // "both" heard in the browser and here at once
+            hostDual = arg === "both";
+            hostCarAudio = hostDual || arg === true || arg === "true" || arg === 1;
             applyCarAudioVolume();
 
-            setStatus(hostCarAudio ? "Music plays in the browser" : "Music plays on the Android device");
+            setStatus(hostDual ? "Music plays in the browser and here, in step" : (hostCarAudio ? "Music plays in the browser" : "Music plays on the Android device"));
         } else if (cmd === "carGone") {
 
             // The browser playing the music stopped asking for the state,
             // left the car or lost the hotspot, so the phone plays it again.
             // Said here and to that browser once it is back
             hostCarAudio = false;
+            hostDual = false;
             carGoneAt = Date.now();
             applyCarAudioVolume();
             setStatus("Music plays on the Android device, the browser stopped answering");
@@ -50999,6 +51018,7 @@
             if (hostCarAudio) {
 
                 hostCarAudio = false;
+                hostDual = false;
                 applyCarAudioVolume();
                 setStatus("Music plays on the Android device, Bluetooth took it back");
             }
@@ -51055,7 +51075,7 @@
         // A new song must not come in at full volume while the browser plays
         document.addEventListener("play", function () {
 
-            if (hostCarAudio && audio && audio.volume !== CAR_SHADOW_VOLUME) {
+            if (phoneHushed() && audio && audio.volume !== CAR_SHADOW_VOLUME) {
                 applyCarAudioVolume();
             }
         }, true);
@@ -51067,6 +51087,7 @@
         if (resumeAfterUpdate && resumeAfterUpdate.carAudio === true) {
 
             hostCarAudio = true;
+            hostDual = resumeAfterUpdate.dual === true;
             applyCarAudioVolume();
             dbgLog("App", "Updated, the music stays in the browser");
         }
@@ -89112,6 +89133,29 @@
         font-variant-numeric: tabular-nums;
     }
 
+    /* This browser earlier or later than the phone, both heard at once */
+    .volDual {
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+    }
+
+    .volDualRow {
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    .volDualRow .chip {
+        min-width: 3em;
+        justify-content: center;
+    }
+
+    .volDualNow {
+        min-width: 5em;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+    }
+
     .volFine {
         display: flex;
         align-items: center;
@@ -101806,7 +101850,9 @@
         const alone = !s || Number(s.clients) < 2;
 
         paintPhoneSound(s);
-        $("soundPhone").classList.toggle("on", !carAudio && !localMute);
+        const dual = carAudio && s.dual === true;
+
+        $("soundPhone").classList.toggle("on", (!carAudio || dual) && !localMute);
         $("soundCar").classList.toggle("on", carAudio && !localMute);
         $("soundNone").classList.toggle("on", localMute);
         $("soundNone").classList.toggle("off", alone && !localMute);
@@ -103704,6 +103750,254 @@
         requestAnimationFrame(tick);
     }
 
+    // The music heard here and on the Android device at once, both in the
+    // same room. The phone stays the clock: this page works out the phone's
+    // time to the millisecond, by asking for it a few times and going by the
+    // quickest answer, then where the phone's sound is heard now, its play
+    // head less the delay of its way out, Bluetooth say. This page's sound
+    // is kept on that place, plus the delay of its own way out where the
+    // browser tells it, and plus how much later this browser is set to be,
+    // set by ear, see dualMs. Small differences are made up by playing a
+    // little faster or slower, at most 2 percent, unheard; only a
+    // difference of a quarter second or more jumps
+    const DUAL_JUMP_S = 0.25;
+    const DUAL_RATE_MOST = 0.02;
+    const DUAL_RATE_PER_S = 0.5;
+    const DUAL_STILL_S = 0.004;
+    const DUAL_STEP_MS = 100;
+    let dualTimer = 0;
+    let dualClockTimer = 0;
+    let dualClock = [];
+    let dualOffset = null;
+    let dualErr = null;
+    let dualSettle = 0;
+    let dualLogged = 0;
+
+    // How much later this browser's sound is set to be heard than the
+    // phone's, in ms, kept in this browser. Less is earlier
+    let dualMs = 0;
+
+    try {
+        dualMs = Math.max(-1000, Math.min(1000, Math.round(Number(localStorage.getItem("murekaDualMs")) || 0)));
+    } catch (e) {
+        dualMs = 0;
+    }
+
+    function setDualMs(ms) {
+
+        dualMs = Math.max(-1000, Math.min(1000, Math.round(ms)));
+
+        try {
+            localStorage.setItem("murekaDualMs", String(dualMs));
+        } catch (e) {
+            // A browser that keeps nothing, kept this visit
+        }
+
+        dualErr = null;
+
+        if (volOpen()) {
+            paintVol(false);
+        }
+    }
+
+    // The phone's time asked for, and the difference to this browser's
+    // kept from the quickest answer of the last two minutes: the time there
+    // and back split in two is all it can be off by
+    function dualClockAsk() {
+
+        const t0 = performance.now();
+        const sent = Date.now();
+
+        fetchJson("/clock", 3000).then(function (d) {
+
+            const took = performance.now() - t0;
+
+            if (!d || typeof d.t !== "number" || took > 1500) {
+                return;
+            }
+
+            const now = Date.now();
+
+            dualClock.push({ took: took, off: d.t - (sent + took / 2), at: now });
+            dualClock = dualClock.filter(function (c) {
+                return now - c.at < 120000;
+            }).slice(-40);
+
+            let best = dualClock[0];
+
+            for (const c of dualClock) {
+
+                if (c.took < best.took) {
+                    best = c;
+                }
+            }
+
+            if (dualOffset === null) {
+                dbgLog("Audio", "the Android device's clock " + Math.round(best.off) + " ms from this one, within " + Math.round(best.took / 2) + " ms");
+            }
+
+            dualOffset = best.off;
+        }, function () {
+            // Asked again shortly
+        });
+    }
+
+    // The phone's time now, by its clock as worked out
+    function dualPhoneNow() {
+        return Date.now() + (dualOffset === null ? 0 : dualOffset);
+    }
+
+    // The delay of this browser's own way out, where it tells it
+    function dualOwnLag() {
+
+        if (gainCtx && gainNode && gainCtx.state === "running") {
+            return Math.max(0, Math.min(1, (Number(gainCtx.baseLatency) || 0) + (Number(gainCtx.outputLatency) || 0)));
+        }
+
+        return 0;
+    }
+
+    // The phone's place on its clock, each state a new reading. A reading
+    // near where the last one says the phone is now only moves it half way
+    // there, as the phone reads its play head a few hundredths off now and
+    // then; one far off, a jump or a new song, is taken whole
+    let dualAnchor = null;
+
+    function dualPhonePlace() {
+
+        const s = state;
+
+        if (!dualAnchor || dualAnchor.src !== s.src || dualAnchor.playing !== s.playing) {
+            dualAnchor = { src: s.src, playing: s.playing, at: s.at, pos: s.position || 0, seen: s.at };
+        } else if (s.at !== dualAnchor.seen) {
+
+            const told = s.position || 0;
+            const said = dualAnchor.pos + (s.playing ? (s.at - dualAnchor.at) / 1000 : 0);
+
+            dualAnchor.seen = s.at;
+            dualAnchor.at = s.at;
+            dualAnchor.pos = Math.abs(told - said) < 0.2 ? said + (told - said) * 0.5 : told;
+        }
+
+        let p = dualAnchor.pos;
+
+        if (s.playing) {
+            p += Math.max(0, dualPhoneNow() - dualAnchor.at) / 1000;
+        }
+
+        return s.duration ? Math.min(p, s.duration) : p;
+    }
+
+    // Where this page's song should be now to be heard with the phone's
+    function dualTarget() {
+        return dualPhonePlace() - (Number(state.heardMs) || 0) / 1000 + dualOwnLag() - dualMs / 1000;
+    }
+
+    function dualStart() {
+
+        if (dualTimer) {
+            return;
+        }
+
+        dbgLog("Audio", "heard here and on the Android device, kept in step, this browser " + dualMs + " ms later");
+        dualClock = [];
+        dualOffset = null;
+        dualAnchor = null;
+        dualErr = null;
+        dualSettle = 0;
+
+        // A few answers at once for a first good one, then now and then
+        for (let i = 0; i < 6; i++) {
+            setTimeout(dualClockAsk, i * 250);
+        }
+
+        dualClockTimer = setInterval(dualClockAsk, 3000);
+        dualTimer = setInterval(dualStep, DUAL_STEP_MS);
+
+        try {
+            audio.preservesPitch = true;
+        } catch (e) {
+            // Older browsers keep the pitch anyway or not at all
+        }
+    }
+
+    function dualStop() {
+
+        if (!dualTimer) {
+            return;
+        }
+
+        clearInterval(dualTimer);
+        clearInterval(dualClockTimer);
+        dualTimer = 0;
+        dualClockTimer = 0;
+
+        if (audio.playbackRate !== 1) {
+            audio.playbackRate = 1;
+        }
+    }
+
+    function dualStep() {
+
+        const s = state;
+
+        if (!s || !s.dual || !s.playing || dualOffset === null || audio.paused || audio.seeking || audio.readyState < 3
+            || audio.dataset.src !== s.src) {
+
+            dualErr = null;
+
+            if (audio.playbackRate !== 1) {
+                audio.playbackRate = 1;
+            }
+
+            return;
+        }
+
+        const target = dualTarget();
+        const err = audio.currentTime - target;
+        const now = Date.now();
+
+        // Far off, a new song or a jump on the phone: there at once, then
+        // left to settle before it is steered
+        if (Math.abs(err) > DUAL_JUMP_S) {
+
+            dbgLog("Audio", "in step with the Android device again, " + (err > 0 ? "back " : "on ") + Math.round(Math.abs(err) * 1000) + " ms");
+            audio.playbackRate = 1;
+            dualErr = null;
+            dualSettle = now + 700;
+
+            try {
+                audio.currentTime = Math.max(0, target + 0.05);
+            } catch (e) {
+                // Tried again on the next step
+            }
+
+            return;
+        }
+
+        if (now < dualSettle) {
+            return;
+        }
+
+        // The play head read in steps on some browsers, so the difference
+        // is smoothed a little before it steers
+        dualErr = dualErr === null ? err : dualErr * 0.7 + err * 0.3;
+
+        const rate = Math.abs(dualErr) < DUAL_STILL_S ? 1
+            : 1 - Math.max(-DUAL_RATE_MOST, Math.min(DUAL_RATE_MOST, dualErr * DUAL_RATE_PER_S));
+
+        if (Math.abs(audio.playbackRate - rate) > 0.0005) {
+            audio.playbackRate = rate;
+        }
+
+        if (now - dualLogged > 30000) {
+
+            dualLogged = now;
+            dbgLog("Audio", "in step with the Android device within " + Math.round(Math.abs(dualErr) * 1000) + " ms, playing at "
+                + (rate * 100).toFixed(1) + " %");
+        }
+    }
+
     // With the sound here, this element follows the phone, which stays in
     // charge of the queue and plays along nearly silent
     function syncAudio() {
@@ -103711,6 +104005,8 @@
         const s = state;
 
         if (!s || !s.carAudio || !unlocked || localMute) {
+
+            dualStop();
 
             if (!audio.paused) {
                 audio.pause();
@@ -103729,17 +104025,25 @@
 
         const want = phonePosition();
 
+        // Heard here and on the phone at once: kept in step to the
+        // millisecond by dualStep, the phone never set to this page's place
+        if (s.dual) {
+            dualStart();
+        } else {
+            dualStop();
+        }
+
         // A stuck phone is not followed back to where it froze. It is given
         // this page's place instead, now and then, which can also get its
-        // loading going again
-        if (phoneFrozen() && hereAudible()) {
+        // loading going again. Not while heard on both, see dualStep
+        if (!s.dual && phoneFrozen() && hereAudible()) {
 
             if (Date.now() - phoneKickAt > 10000) {
 
                 phoneKickAt = Date.now();
                 send("seek", audio.currentTime);
             }
-        } else if (audio.readyState > 0 && Math.abs(audio.currentTime - want) > 1.2) {
+        } else if (!s.dual && audio.readyState > 0 && Math.abs(audio.currentTime - want) > 1.2) {
 
             const drift = audio.currentTime - want;
             const jumped = typeof s.seeks !== "number" || s.seeks !== seeksFollowed;
@@ -108024,6 +108328,11 @@
             list.unshift(here);
         }
 
+        // Heard on the phone too, its volume last
+        if (state.dual === true) {
+            list.push({ key: "phone", kind: "phone", name: "The Android device" });
+        }
+
         return list;
     }
 
@@ -108473,6 +108782,50 @@
             bar.appendChild(fineHint);
         }
 
+        // Heard on the phone too: this browser set earlier or later by ear,
+        // until the two sound as one
+        if (t.kind === "here") {
+
+            const dual = document.createElement("div");
+            const head = document.createElement("div");
+            const steps = document.createElement("div");
+            const shown = document.createElement("span");
+            const hint = document.createElement("div");
+            const by = function (label, ms) {
+
+                const b = document.createElement("button");
+
+                b.type = "button";
+                b.className = "chip";
+                b.textContent = label;
+                b.addEventListener("click", function () {
+                    setDualMs(dualMs + ms);
+                });
+                b.setAttribute("aria-label", (ms < 0 ? "Earlier by " : "Later by ") + Math.abs(ms) + " ms");
+
+                return b;
+            };
+
+            dual.className = "volDual";
+            head.className = "volName";
+            head.textContent = "In step with the Android device";
+            steps.className = "volRow volDualRow";
+            shown.className = "volNow volDualNow";
+            steps.appendChild(by("-50", -50));
+            steps.appendChild(by("-10", -10));
+            steps.appendChild(by("-1", -1));
+            steps.appendChild(shown);
+            steps.appendChild(by("+1", 1));
+            steps.appendChild(by("+10", 10));
+            steps.appendChild(by("+50", 50));
+            hint.className = "ceLabel";
+            hint.textContent = "How much later this browser plays than the Android device, kept in this browser. Listen where both are heard and move it until they sound as one: a flam or an echo means it is off. Less is earlier.";
+            dual.appendChild(head);
+            dual.appendChild(steps);
+            dual.appendChild(hint);
+            bar.appendChild(dual);
+        }
+
         return bar;
     }
 
@@ -108533,6 +108886,14 @@
 
             bar.querySelector(".volWhere").textContent = volWhereText(t);
             bar.querySelector(".volRow").style.display = known ? "" : "none";
+
+            const dualBox = bar.querySelector(".volDual");
+
+            if (dualBox) {
+
+                dualBox.style.display = state && state.dual === true ? "" : "none";
+                dualBox.querySelector(".volDualNow").textContent = (dualMs > 0 ? "+" : "") + dualMs + " ms";
+            }
 
             const fineRow = bar.querySelector(".volFine");
 
@@ -115562,11 +115923,36 @@
         }
     }, true);
 
+    // The music into this browser: from the Android device, asked whether
+    // it moves here or plays on both, in step, see dualStep. From another
+    // browser it moves here
     $("soundCar").addEventListener("click", function () {
 
-        setLocalMute(false);
+        const fromPhone = !!state && (!state.carAudio || state.dual === true);
+        const go = function (both) {
+
+            setLocalMute(false);
+            unlockAudio();
+            send("carAudio", both ? "both" : true);
+        };
+
+        if (!fromPhone) {
+
+            go(false);
+            return;
+        }
+
+        // The tap lets the browser play, the answer comes after it
         unlockAudio();
-        send("carAudio", true);
+        openChoice("Music in this browser", [
+            { label: "Move it here", sub: "The Android device goes quiet", now: !!state && state.carAudio && !state.dual, fn: function () {
+                go(false);
+            } },
+            { label: "Play on both", sub: "Here and on the Android device, in step. Set this browser earlier or later under the volume, by ear",
+                now: !!state && state.dual === true, fn: function () {
+                    go(true);
+                } }
+        ]);
     });
 
     $("soundPhone").addEventListener("click", function () {
@@ -115581,6 +115967,7 @@
         }
 
         setLocalMute(false);
+        dualStop();
         audio.pause();
         send("carAudio", false);
     });

@@ -1017,7 +1017,8 @@ public class PlayerService extends Service implements Hub.Listener {
         }
 
         loudKnown = true;
-        soundInBrowser = s.optBoolean("carAudio", false);
+        // Heard in a browser and on the phone at once counts as the phone's
+        soundInBrowser = s.optBoolean("carAudio", false) && !s.optBoolean("dual", false);
         durationMs = (long) (s.optDouble("duration", 0) * 1000);
 
         long positionMs = (long) (s.optDouble("position", 0) * 1000);
