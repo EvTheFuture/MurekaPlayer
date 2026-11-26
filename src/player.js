@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.341";
+    const VERSION = "2.0.1.342";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -72417,11 +72417,14 @@
     }
 
     // A style written out from the one given and the lyrics: "match" keeps to
-    // it, "surprise" goes somewhere new. The remix page says so. Turned down
-    // at once for the song page's own word, the remix page's is tried
+    // it, "surprise" goes somewhere new from it, as Mureka's own Surprise me
+    // sends the style in the field. The scene is "remix" on the remix page
+    // and "general" on the song page, both as Mureka's pages send them.
+    // Turned down at once for the song page's word, the remix page's is
+    // tried
     async function createAiStyle(style, lyrics, mode, remix, heard) {
 
-        const body = { prompt: { content: style }, lyrics: lyrics, mode: mode, scene: remix ? "remix" : "custom" };
+        const body = { prompt: { content: style }, lyrics: lyrics, mode: mode, scene: remix ? "remix" : "general" };
 
         try {
             return await createStream("/api/pgc/style-stream/enhance", body, heard);
@@ -75559,6 +75562,9 @@
             }), CTRL_ACCENT),
             createRing(act("Surprise me", function () {
                 createAiFromPage("surprise");
+            }), CTRL_ACCENT),
+            createRing(act("Random", function () {
+                createAiFromPage("random");
             }), CTRL_ACCENT)
         ]));
         createEl.appendChild(createButtonRow([
@@ -76098,8 +76104,9 @@
     }
 
     // The writing helpers, for the page and the web view alike. kind:
-    // "theme" with the theme, "polish", "match" or "surprise". The text
-    // fills in as it comes
+    // "theme" with the theme, "polish", "match", "surprise" or "random",
+    // Surprise me from nothing, the style left out of what is sent. The
+    // text fills in as it comes
     async function createAi(kind, theme) {
 
         const d = loadCreateDraft();
@@ -76185,9 +76192,11 @@
             return false;
         }
 
-        const got = await createRun(kind === "surprise" ? "Mureka thinks of a style" : "Mureka writes the style out", function () {
+        const fresh = kind === "surprise" || kind === "random";
+        const got = await createRun(fresh ? "Mureka thinks of a style" : "Mureka writes the style out", function () {
 
-            return createAiStyle(before.trim(), d.kind === "song" ? d.lyrics.trim() : "", kind === "surprise" ? "surprise" : "match", !!d.remix, function (part) {
+            return createAiStyle(kind === "random" ? "" : before.trim(), d.kind === "song" ? d.lyrics.trim() : "", fresh ? "surprise" : "match",
+                !!d.remix, function (part) {
 
                 createDraft.style = part.text.replace(/^\s+/, "").slice(0, CREATE_STYLE_MAX);
                 saveCreateDraft();
@@ -78339,7 +78348,7 @@
             }, failed);
         } else if (op === "ai") {
 
-            const kind = ["theme", "polish", "match", "surprise"].indexOf(a.kind) >= 0 ? a.kind : "";
+            const kind = ["theme", "polish", "match", "surprise", "random"].indexOf(a.kind) >= 0 ? a.kind : "";
 
             if (!kind) {
 
@@ -116299,6 +116308,9 @@
             }, "ring"),
             crChip("Surprise me", function () {
                 crHelp("surprise");
+            }, "ring"),
+            crChip("Random", function () {
+                crHelp("random");
             }, "ring"),
             crChip("My styles", function () {
                 openCrPick("prompts");
