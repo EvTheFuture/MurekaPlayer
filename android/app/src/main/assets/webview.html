@@ -4976,41 +4976,9 @@
         justify-content: flex-end;
     }
 
-    html.phone #panelBody .pCtl .pBtn {
-        padding: 8px 14px;
-    }
-
     html.phone #panelBody .pCtl {
         max-width: 58%;
-        margin: 0 0 10px 14px;
-    }
-
-    /* On a phone the control stays level with the name, at the right, and
-       the explanation runs the full width under both, rather than in a
-       narrow column beside the control */
-    html.phone #panelBody .pRow.float > .pCol {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) fit-content(62%);
-        column-gap: 12px;
-        align-items: center;
-    }
-
-    html.phone #panelBody .pRow.float > .pCol > .pText {
-        grid-column: 1 / -1;
-    }
-
-    html.phone #panelBody .pRow.float > .pCol > .pCtl {
-        float: none;
-        grid-column: 2;
-        grid-row: 1;
-        justify-self: end;
-        max-width: none;
-        margin: 0;
-    }
-
-    html.phone #panelBody .pRow.float > .pCol > .pCtl + .pText {
-        grid-column: 1;
-        grid-row: 1;
+        margin: 0 0 6px 12px;
     }
 
     /* A name with its control and no explanation: the name wraps rather
@@ -7008,6 +6976,133 @@
     html.phone .sheetInner .sheetTop,
     html.phone #panelBody {
         padding-right: 14px;
+    }
+
+    /* The settings on a phone as the mobile player draws them: its small
+       words, the title over them with Done, the controls 30 pixels high
+       with small corners and no border, the links to the pages a little
+       taller, and the explanation running on under a control floating
+       at the right */
+    html.phone #panel .sheetInner {
+        padding-left: 12px;
+    }
+
+    html.phone #panel .sheetTop,
+    html.phone #panelBody {
+        padding-right: 12px;
+    }
+
+    html.phone #panel .sheetTop {
+        align-items: center;
+    }
+
+    html.phone #panelTitle {
+        font-size: 12px;
+        font-weight: 600;
+        color: #fff;
+    }
+
+    html.phone #closePanel {
+        height: 30px;
+        padding: 6px 14px;
+        border: none;
+        border-radius: 6px;
+        background: var(--accent);
+        color: #000;
+        font-weight: 600;
+    }
+
+    html.phone #closePanel .ico {
+        display: none;
+    }
+
+    html.phone #closePanel::after {
+        content: "Done";
+    }
+
+    html.phone #panelScroll {
+        font-size: 12px;
+        line-height: 1.4;
+    }
+
+    html.phone #panelBody {
+        --pctl-h: 30px;
+    }
+
+    html.phone #panelBody .pText,
+    html.phone #panelBody .pRow > .pText,
+    html.phone #panelBody .pCol > .pText {
+        padding-left: 0;
+        padding-right: 0;
+        color: #fff;
+    }
+
+    html.phone #panelBody .pText.small {
+        font-size: 11px;
+        color: #888;
+    }
+
+    html.phone #panelBody .pText.head {
+        padding: 0 0 4px;
+        color: #bbb;
+        font-size: 12px;
+        text-transform: none;
+        letter-spacing: 0;
+    }
+
+    html.phone #panelBody .pBtn,
+    html.phone #panelBody .pClick {
+        padding: 6px 12px;
+        margin: 0;
+        border: none;
+        border-radius: 6px;
+        background: #333;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 600;
+        line-height: normal;
+    }
+
+    html.phone #panelBody .pBtn.on,
+    html.phone #panelBody .pClick.on {
+        background: var(--accent);
+        color: #000;
+    }
+
+    html.phone #panelBody .pBtn.wide {
+        min-height: 35px;
+        padding: 10px 12px;
+        margin: 6px 0 12px;
+    }
+
+    html.phone #panelBody .pBtn.pVal {
+        min-width: 56px;
+    }
+
+    html.phone #panelBody .pCtl .pRow > .pBtn:not(.pVal) {
+        min-width: 40px;
+    }
+
+    html.phone #panelBody input.pNumIn {
+        width: 56px;
+    }
+
+    html.phone #panelBody .pSelBox,
+    html.phone #panelBody input.pNumIn,
+    html.phone #panelBody .pField {
+        border-radius: 6px;
+        font-size: 12px;
+    }
+
+    html.phone #panelBody .pSelBox {
+        padding: 0 8px;
+        border-color: #555;
+        background: #333;
+    }
+
+    html.phone #panelBody .pRow {
+        gap: 8px;
+        padding: 4px 0;
     }
     /* The trimmer, a page over everything with the song's two waveforms */
     #trimPage {
@@ -24964,6 +25059,29 @@
 
             col.insertBefore(ctl, col.firstChild);
             row.classList.add("float");
+        }
+
+        // On a phone a drop-down under a name and its words floats beside
+        // them as well, as in the mobile player
+        for (const col of isPhone() ? Array.from(box.querySelectorAll(":scope > .pCol")) : []) {
+
+            const next = col.nextElementSibling;
+
+            if (!next || !next.classList.contains("pSelBox") || Array.from(col.children).some(function (el) {
+                return !el.classList.contains("pText");
+            })) {
+                continue;
+            }
+
+            const row = document.createElement("div");
+            const ctl = document.createElement("div");
+
+            row.className = "pRow top float";
+            ctl.className = "pCtl";
+            col.before(row);
+            row.appendChild(col);
+            ctl.appendChild(next);
+            col.insertBefore(ctl, col.firstChild);
         }
 
         for (const sb of box.querySelectorAll(".pSelBox")) {
