@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.362";
+    const VERSION = "2.0.1.363";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -4590,12 +4590,13 @@
     }
 
     // An order of the web view's badges kept or sent, as known badge names,
-    // each once. The names in the order they come without one set: online,
-    // heat, battery, WireGuard and hotspot. Kept in here, as the settings
-    // are read before the constants further down are set
+    // each once. The names in the order they come without one set: the
+    // notifications, online, heat, battery, WireGuard and hotspot. Kept in
+    // here, as the settings are read before the constants further down
+    // are set
     function badgeOrderFrom(v) {
 
-        const known = ["net", "heat", "battery", "wg", "hotspot"];
+        const known = ["msg", "net", "heat", "battery", "wg", "hotspot"];
         const list = Array.isArray(v) ? v : String(v || "").split(",");
         const seen = {};
 
@@ -100737,8 +100738,8 @@
 
     // The badges that can be moved, by the names the phone keeps, in the
     // order they come without one set. The account name stays first
-    const BADGES = { net: "netBadge", heat: "heatBadge", battery: "batteryBadge", wg: "wgBadge", hotspot: "hotspotBadge" };
-    const BADGE_ORDER = ["net", "heat", "battery", "wg", "hotspot"];
+    const BADGES = { msg: "msgBadge", net: "netBadge", heat: "heatBadge", battery: "batteryBadge", wg: "wgBadge", hotspot: "hotspotBadge" };
+    const BADGE_ORDER = ["msg", "net", "heat", "battery", "wg", "hotspot"];
 
     let badgesKey = "";
     let pendingBadges = null;
