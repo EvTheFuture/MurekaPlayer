@@ -6747,9 +6747,12 @@
         background: linear-gradient(to bottom, rgba(29, 29, 34, 0.85), rgba(29, 29, 34, 0));
     }
 
+    /* The same short shading behind the title as the mobile player's, the
+       lyrics carry their own dark outline, so the covers above it stay as
+       bright as there */
     html.phone #main::after {
         bottom: 0;
-        height: 88%;
+        height: 20%;
         background: linear-gradient(to top, rgba(29, 29, 34, 0.95) 0%, rgba(29, 29, 34, 0.75) 40%, rgba(29, 29, 34, 0.35) 70%, rgba(29, 29, 34, 0) 100%);
     }
 
@@ -10537,7 +10540,7 @@
     const LOCAL_ROWS = [
         { label: "Show up next", page: "Web view", key: "upNext", kind: "bool" },
         { label: "Waveform seek bar", page: "Web view", key: "wave", kind: "bool" },
-        { label: "Names under the buttons", page: "Web view", key: "names", kind: "bool" },
+        { label: "Names under the buttons", page: "Control buttons", key: "names", kind: "bool" },
         { label: "Waveform from", page: "Web view", key: "waveSource", kind: "select", values: ["mureka", "song"] },
         { label: "Remember the waveform zoom level", page: "Web view", key: "waveZoomKeep", kind: "bool" },
         { label: "Play head zoomed in", page: "Web view", key: "headMode", kind: "select", values: PLAY_HEAD_MODES },
@@ -38186,6 +38189,9 @@
     const SIDE_SCALE = 0.8;
     const SIDE_DIM = 0.55;
     const SIDE_BLUR = 2;
+
+    // The mobile player's side covers, ART_SIDE_BLUR there
+    const PHONE_SIDE_BLUR = 3;
     const HIDE_SCALE = 0.85;
     const FLOW_GLIDE = 220;
     const FLOW_AUTO = 300;
@@ -38608,7 +38614,8 @@
     // own fade at the screen edge does the rest
     function restMask(side, k) {
 
-        if (k <= 0.01) {
+        // On a phone as in the mobile player, the side covers whole
+        if (k <= 0.01 || document.documentElement.classList.contains("phone")) {
             return "none";
         }
 
@@ -38680,8 +38687,14 @@
         tile.style.top = g.top + "px";
         tile.style.zIndex = String(z);
         tile.style.opacity = opacity.toFixed(3);
+        // On a phone as in the mobile player: not dimmed, blurred a little more
+        const phone = document.documentElement.classList.contains("phone");
+        const dim = phone ? 1 : SIDE_DIM;
+        const blur = phone ? PHONE_SIDE_BLUR : SIDE_BLUR;
+
         tile.style.filter = k > 0.01
-            ? "brightness(" + (1 - (1 - SIDE_DIM) * Math.min(1, k)).toFixed(3) + ") blur(" + (SIDE_BLUR * Math.min(1, k)).toFixed(2) + "px)"
+            ? (dim < 1 ? "brightness(" + (1 - (1 - dim) * Math.min(1, k)).toFixed(3) + ") " : "")
+                + "blur(" + (blur * Math.min(1, k)).toFixed(2) + "px)"
             : "none";
         tile.style.webkitMaskImage = mask;
         tile.style.maskImage = mask;

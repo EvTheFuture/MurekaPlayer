@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.351";
+    const VERSION = "2.0.1.352";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -34804,6 +34804,29 @@
             commit();
         };
 
+        // A tap on a chip: out of the bar, or into it at the end
+        const tapChip = function (name) {
+
+            if (activeNames.indexOf(name) >= 0) {
+
+                activeNames = activeNames.filter(function (n) {
+                    return n !== name;
+                });
+                disabledNames = allNames.filter(function (n) {
+                    return activeNames.indexOf(n) === -1;
+                });
+            } else {
+
+                activeNames = activeNames.concat([name]);
+                disabledNames = disabledNames.filter(function (n) {
+                    return n !== name;
+                });
+            }
+
+            render(true);
+            commit();
+        };
+
         const makeChip = function (name) {
 
             const chip = document.createElement("div");
@@ -34913,8 +34936,18 @@
                     dragTo(e.clientX, e.clientY);
                 };
 
-                onDocUp = function () {
+                onDocUp = function (e) {
+
+                    // Let go before the hold lifted it and without moving:
+                    // a tap, which takes it out of the bar or puts it in at
+                    // the end, as in the web view
+                    const tapped = !!holdTimer && e.type === "pointerup";
+
                     endDrag();
+
+                    if (tapped) {
+                        tapChip(name);
+                    }
                 };
 
                 document.addEventListener("pointermove", onDocMove, true);
@@ -34991,9 +35024,9 @@
         // Let the panel abandon a drag that is somehow still open when it closes
         endControlDrag = endDrag;
 
-        wrap.appendChild(makeLabel(inGroup ? "In the group, long press a button to move it" : "Transport bar, long press a button to move it"));
+        wrap.appendChild(makeLabel(inGroup ? "In the group, drag a button to move it, tap to take it out" : "Transport bar, drag a button to move it, tap to take it out"));
         wrap.appendChild(activeRow);
-        wrap.appendChild(makeLabel("Not shown"));
+        wrap.appendChild(makeLabel("Not shown, tap or drag to add"));
         wrap.appendChild(disabledRow);
 
         return wrap;
@@ -60590,9 +60623,24 @@
         mobilePage.appendChild(lyricAheadRow);
         mobilePage.appendChild(lyricShiftRow);
         mobilePage.appendChild(makeHint("The lyrics turn on a drum, every line the same size, the line being sung facing you and drawn thicker, each with a thin dark outline so it reads on a light cover. Lyric size is the line being sung, in pixels. The lines before and after it are as the drum turns them, smaller and squashed only by its turn. Drum size is the drum's radius in percent of a line. The lines sit a line apart along the drum, so a small drum turns them far round and bends the line being sung across its height, and a big one shows more lines, flatter. Lyrics ahead starts each line's roll that many milliseconds before it is sung, so it stands in the middle as it is heard, here and in the web view. Lyric position moves the whole block up or down. A break of 10 s or more between two lines shows three dots that light up as it goes, the line after it shows two bars ahead, and a new section of the song stands a little apart."));
-        mobilePage.appendChild(makeLabel("Control buttons"));
-        mobilePage.appendChild(withHint(controlLabelRow, "A short name under each icon. Below, press and hold a button to move it, or drag it between the bar and the spare buttons."));
-        mobilePage.appendChild(controlOrderRow);
+        // The control buttons have a page of their own with the groups. It
+        // shows the bar of the player it is open in: the mobile player's
+        // here, never copied to the web view, which puts its own in their
+        // place, see webCtlBox
+        const mobileCtlBox = document.createElement("div");
+        const webCtlBox = document.createElement("div");
+
+        mobileCtlBox.classList.add("mp-col12");
+        mobileCtlBox.dataset.hostSkip = "1";
+        mobileCtlBox.appendChild(controlLabelRow);
+        mobileCtlBox.appendChild(controlOrderRow);
+        webCtlBox.classList.add("mp-col12");
+        webCtlBox.style.display = "none";
+        webCtlBox.dataset.webOnly = "1";
+        groupsPage.appendChild(makeHint("The buttons under the cover, and the groups any bar can use. The bar here is the one of the player this is open in: the mobile player's in the mobile player, the web view's in the web view, and that browser's own while its Settings for this browser is on."));
+        groupsPage.appendChild(mobileCtlBox);
+        groupsPage.appendChild(webCtlBox);
+        groupsPage.appendChild(makeHint("Names under the buttons puts a short name under each icon. Press and hold a button to move it, or drag it between the bar and the spare buttons, a tap takes it out or puts it in."));
 
         // Button groups, each with its buttons, the one it looks like and a
         // way to remove it. Drawn again when groups come and go
@@ -60738,8 +60786,8 @@
         drawGroups();
         settingsRefreshers.push(drawGroups);
 
-        // The groups are shared by every view, made on a page of their own
-        mobilePage.appendChild(makeHint("Button groups, made under Button groups on the main page, are put in the bar like any button."));
+        // The groups are shared by every bar, listed under it
+        groupsPage.appendChild(makeLabel("Button groups"));
         groupsPage.appendChild(makeHint("A group is one button in a bar standing for several. In the bar it looks like the button chosen and shows what that button shows, and a tap opens all its buttons. A button can be in a bar and in any number of groups, once in each. The groups are the same for the mobile player and the web view, and each puts any of them in its own bar, on its own page."));
         groupsPage.appendChild(groupsBox);
         groupsPage.appendChild(withHint(makeDropRow("Closes by itself", [
@@ -61236,10 +61284,10 @@
             webPage.appendChild(webLyricShiftRow);
             webPage.appendChild(makeHint("Lyric size is the line being sung, 20 is as big as the second line under the title, and it grows and shrinks with the page, so it looks the same on a small and a large screen. Drum size works as on the mobile player and starts out as it has it."));
 
-            webPage.appendChild(makeLabel("Control buttons"));
-            webPage.appendChild(withHint(webNamesRow, "A short name under each icon. The web view has its own button bar, press and hold a button there or here to move it."));
-            webPage.appendChild(webControlRow);
-            webPage.appendChild(makeHint("Button groups, made under Button groups on the main page, are put in the bar like any button."));
+            // The web view's bar on the page of the control buttons, only
+            // in the web view, in place of the mobile player's
+            webCtlBox.appendChild(webNamesRow);
+            webCtlBox.appendChild(webControlRow);
 
             // The badges along the top
             webPage.appendChild(makeLabel("Badges"));
@@ -63674,7 +63722,7 @@
             [libraryPage, "Library", "Which songs the player opens on, how it keeps them up to date and how they are numbered."],
             [playbackPage, "Playback", "How the music plays."],
             [nowPage, "Now playing", "What the lock screen, the notification and screens connected over Bluetooth show, and how lyrics are written everywhere."],
-            [groupsPage, "Button groups", null],
+            [groupsPage, "Control buttons", null],
             [soundPage, "Sound profiles", "The bass, mids and treble, a volume below the device's lowest step and a compressor, a profile of its own and a night profile for each Bluetooth speaker."],
             [publishPage, "Publishing", "What happens when you publish one of your own songs, from the song menu here or in the web view."],
             [setsPage, "Song sets", "The versions of a song kept together, to compare them and listen them through. Kept on this device and carried by song tweaks."],
@@ -63709,7 +63757,7 @@
         // this device, the music, the data and the tools
         mainPage.appendChild(makeLabel("Views"));
         mainPage.appendChild(makeHint("How the player looks in each place it can be shown."));
-        mainPage.appendChild(makePageButton("Button groups", "groups"));
+        mainPage.appendChild(makePageButton("Control buttons", "groups"));
         mainPage.appendChild(makePageButton("Mobile player", "mobile"));
 
         if (webPageBtn) {
@@ -89799,9 +89847,12 @@
         background: linear-gradient(to bottom, rgba(29, 29, 34, 0.85), rgba(29, 29, 34, 0));
     }
 
+    /* The same short shading behind the title as the mobile player's, the
+       lyrics carry their own dark outline, so the covers above it stay as
+       bright as there */
     html.phone #main::after {
         bottom: 0;
-        height: 88%;
+        height: 20%;
         background: linear-gradient(to top, rgba(29, 29, 34, 0.95) 0%, rgba(29, 29, 34, 0.75) 40%, rgba(29, 29, 34, 0.35) 70%, rgba(29, 29, 34, 0) 100%);
     }
 
@@ -93589,7 +93640,7 @@
     const LOCAL_ROWS = [
         { label: "Show up next", page: "Web view", key: "upNext", kind: "bool" },
         { label: "Waveform seek bar", page: "Web view", key: "wave", kind: "bool" },
-        { label: "Names under the buttons", page: "Web view", key: "names", kind: "bool" },
+        { label: "Names under the buttons", page: "Control buttons", key: "names", kind: "bool" },
         { label: "Waveform from", page: "Web view", key: "waveSource", kind: "select", values: ["mureka", "song"] },
         { label: "Remember the waveform zoom level", page: "Web view", key: "waveZoomKeep", kind: "bool" },
         { label: "Play head zoomed in", page: "Web view", key: "headMode", kind: "select", values: PLAY_HEAD_MODES },
@@ -121238,6 +121289,9 @@
     const SIDE_SCALE = 0.8;
     const SIDE_DIM = 0.55;
     const SIDE_BLUR = 2;
+
+    // The mobile player's side covers, ART_SIDE_BLUR there
+    const PHONE_SIDE_BLUR = 3;
     const HIDE_SCALE = 0.85;
     const FLOW_GLIDE = 220;
     const FLOW_AUTO = 300;
@@ -121660,7 +121714,8 @@
     // own fade at the screen edge does the rest
     function restMask(side, k) {
 
-        if (k <= 0.01) {
+        // On a phone as in the mobile player, the side covers whole
+        if (k <= 0.01 || document.documentElement.classList.contains("phone")) {
             return "none";
         }
 
@@ -121732,8 +121787,14 @@
         tile.style.top = g.top + "px";
         tile.style.zIndex = String(z);
         tile.style.opacity = opacity.toFixed(3);
+        // On a phone as in the mobile player: not dimmed, blurred a little more
+        const phone = document.documentElement.classList.contains("phone");
+        const dim = phone ? 1 : SIDE_DIM;
+        const blur = phone ? PHONE_SIDE_BLUR : SIDE_BLUR;
+
         tile.style.filter = k > 0.01
-            ? "brightness(" + (1 - (1 - SIDE_DIM) * Math.min(1, k)).toFixed(3) + ") blur(" + (SIDE_BLUR * Math.min(1, k)).toFixed(2) + "px)"
+            ? (dim < 1 ? "brightness(" + (1 - (1 - dim) * Math.min(1, k)).toFixed(3) + ") " : "")
+                + "blur(" + (blur * Math.min(1, k)).toFixed(2) + "px)"
             : "none";
         tile.style.webkitMaskImage = mask;
         tile.style.maskImage = mask;
