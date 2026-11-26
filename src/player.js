@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.350";
+    const VERSION = "2.0.1.351";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -100985,7 +100985,7 @@
         } else if (s && s.offline === true) {
             bad = { text: "Offline", title: "The Android device has no internet, only songs stored on it play" };
         } else if (browserNet === false) {
-            bad = { text: "Browser offline", title: "This browser cannot reach Mureka, only songs stored on the Android device play here" };
+            bad = { text: "Offline", title: "This browser cannot reach the internet, only songs stored on the Android device play here" };
         }
 
         if (!s && !bad) {
