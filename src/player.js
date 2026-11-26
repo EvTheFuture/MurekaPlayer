@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.339";
+    const VERSION = "2.0.1.340";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -75248,7 +75248,11 @@
 
     function buildCreate() {
 
+        // Its choices and switches are the trimmer's, styled under .mp-tr
+        // by the shared src/shared/trimui.js
+        trimStyle();
         createEl = document.createElement("div");
+        createEl.className = "mp-tr";
         createEl.style.cssText = [
             "position:absolute",
             "inset:0",
