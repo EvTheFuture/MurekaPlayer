@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.333";
+    const VERSION = "2.0.1.334";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -10670,7 +10670,6 @@
         const run = leftOutRunFrom(song);
         const title = (song.title || "").trim() || "Untitled";
         const more = run.length - 1;
-        const after = more === 1 ? "the song after it" : "the " + more + " songs after it";
 
         // Play from here plays down the list from the song, the songs after
         // it the filters leave out included, as they are shown
@@ -10696,12 +10695,7 @@
             } });
         }
 
-        askChoices("Left out by the filters\n\"" + title + "\" is not one the filters let through. Play now plays only it,"
-            + " then the queue goes on as it was. Play from here plays on down the list from it"
-            + (more > 0 ? ", " + after + " the filters leave out too." : ".")
-            + " Play after this song puts it right after the song playing"
-            + (more > 0 ? ", Play all after this song it and " + after + "." : "."),
-            options, null, false, true);
+        askChoices("Left out by the filters\n" + leftOutText(title, more), options, null, false, true);
     }
 
     // A tap on a song of the Sets view the filters leave out asks, as in the
@@ -10712,9 +10706,7 @@
 
         const title = (song.title || "").trim() || "Untitled";
 
-        askChoices("Left out by the filters\n\"" + title + "\" is not one the filters let through. Play now plays it at once,"
-            + " then the queue goes on as it was. Play the set from here plays it and every other song of the set, then the"
-            + " queue goes on. Play after this song puts it right after the song playing.", [
+        askChoices("Left out by the filters\n" + setLeftOutText(title), [
             { label: "Play now", fn: function () {
                 playLeftOutNow(song, false);
             } },
@@ -15830,6 +15822,28 @@
         }
 
         return (Math.floor(n / 100000) / 10).toFixed(1) + "M";
+    }
+
+    // What a tap on a song the filters leave out asks about, the same words
+    // in the player and the web view. more: how many left out songs follow
+    // it in the list
+    function leftOutText(title, more) {
+
+        const after = more === 1 ? "the song after it" : "the " + more + " songs after it";
+
+        return "\"" + title + "\" is not one the filters let through. Play now plays only it,"
+            + " then the queue goes on as it was. Play from here plays on down the list from it"
+            + (more > 0 ? ", " + after + " the filters leave out too." : ".")
+            + " Play after this song puts it right after the song playing"
+            + (more > 0 ? ", Play all after this song it and " + after + "." : ".");
+    }
+
+    // The same for a song of the Sets view, where the set goes on from it
+    function setLeftOutText(title) {
+
+        return "\"" + title + "\" is not one the filters let through. Play now plays it at once,"
+            + " then the queue goes on as it was. Play the set from here plays it and every other song of the set, then the"
+            + " queue goes on. Play after this song puts it right after the song playing.";
     }
     // END SHARED misc
 
@@ -93593,6 +93607,28 @@
 
         return (Math.floor(n / 100000) / 10).toFixed(1) + "M";
     }
+
+    // What a tap on a song the filters leave out asks about, the same words
+    // in the player and the web view. more: how many left out songs follow
+    // it in the list
+    function leftOutText(title, more) {
+
+        const after = more === 1 ? "the song after it" : "the " + more + " songs after it";
+
+        return "\"" + title + "\" is not one the filters let through. Play now plays only it,"
+            + " then the queue goes on as it was. Play from here plays on down the list from it"
+            + (more > 0 ? ", " + after + " the filters leave out too." : ".")
+            + " Play after this song puts it right after the song playing"
+            + (more > 0 ? ", Play all after this song it and " + after + "." : ".");
+    }
+
+    // The same for a song of the Sets view, where the set goes on from it
+    function setLeftOutText(title) {
+
+        return "\"" + title + "\" is not one the filters let through. Play now plays it at once,"
+            + " then the queue goes on as it was. Play the set from here plays it and every other song of the set, then the"
+            + " queue goes on. Play after this song puts it right after the song playing.";
+    }
     // END SHARED misc
 
     // BEGIN SHARED songrow
@@ -104079,7 +104115,7 @@
         // A song of the Sets view: the set goes on from it
         if (song.inSets) {
 
-            openChoice("\"" + song.title + "\" is left out by the filters", [
+            openChoice("Left out by the filters", [
                 { icon: "play", label: "Play now", fn: function () {
 
                     closeSongMenu();
@@ -104097,7 +104133,9 @@
                     closeSongMenu();
                     send("playNext", song.id);
                 } }
-            ]);
+            ], true);
+            $("menuCaption").textContent = setLeftOutText(song.title);
+            $("menuCaption").style.display = "";
             return;
         }
 
@@ -104132,7 +104170,9 @@
             } });
         }
 
-        openChoice("\"" + song.title + "\" is left out by the filters", choices);
+        openChoice("Left out by the filters", choices, true);
+        $("menuCaption").textContent = leftOutText(song.title, song.more > 0 ? song.more : 0);
+        $("menuCaption").style.display = "";
     }
 
     function makeRow(song, place) {
@@ -108293,7 +108333,7 @@
             const now = setSortNow();
             const choices = SET_SORTS.map(function (item) {
 
-                return { icon: item.icon, label: item.label, cls: item.value === now ? "accent" : "", fn: function () {
+                return { icon: item.icon, label: item.label, cls: item.value === now ? "accent" : "", now: item.value === now, fn: function () {
 
                     closeSongMenu();
                     sortSets(item.value);
@@ -108330,7 +108370,9 @@
         const current = sortInfo(listSort);
 
         for (const item of items) {
-            item.cls = item.sort === current.sort ? "accent" : "";
+
+            item.now = item.sort === current.sort;
+            item.cls = item.now ? "accent" : "";
         }
 
         openChoice("Sort the list", items);
@@ -111827,14 +111869,14 @@
                 closeSongMenu();
                 send("together");
             } },
-            { icon: "settings", label: "Settings", fn: function () {
+            { icon: "settings", label: "Settings", cls: "inset", fn: function () {
 
                 closeSongMenu();
                 togetherPage();
             } }
         ].filter(function (x) {
             return x;
-        }));
+        }), true);
         togetherCaption(String(state.togetherStatus || ""), room, String(state.togetherWho || ""));
     }
 
@@ -111877,7 +111919,7 @@
                 });
             } });
 
-            openChoice("Active rooms", items);
+            openChoice("Active rooms", items, true);
             $("menuCaption").textContent = !came ? "The phone did not answer."
                 : state.togetherRoomsError ? "No list of rooms: " + state.togetherRoomsError + "."
                     : rooms.length === 0 ? "No room is active. A new one opens when you join it."
@@ -111892,7 +111934,7 @@
 
         if (state && state.togetherReady === false) {
 
-            openChoice("Listening together needs the address of the listening together relay on the VPN first.", [
+            openChoice("Listening together", [
                 { icon: "settings", label: "Open the settings", cls: "tall", fn: function () {
 
                     send("togetherSettings");
@@ -111900,7 +111942,9 @@
                         showPanel("settings");
                     }, 150);
                 } }
-            ]);
+            ], true);
+            $("menuCaption").textContent = "It needs the address of the listening together relay on the VPN first.";
+            $("menuCaption").style.display = "";
             return;
         }
 
@@ -112155,9 +112199,11 @@
             return p.id === (state.nightOn && setNight ? setNight : setDay);
         });
 
-        openChoice("Sound profile for " + (state.soundWhere || "the Android device") + ". Used until another speaker or headphones take over, or it is set back. Tweak the sound now changes it live, to save or forget.", [{
+        openChoice("Sound profile for " + (state.soundWhere || "the Android device"), [{
             icon: picked || live ? "close" : "check",
             label: "As set for " + (state.soundWhere || "the Android device") + (asSet ? ": " + asSet.name : ""),
+            cls: "inset",
+            now: !picked && !live,
             fn: function () {
 
                 closeSongMenu();
@@ -112169,6 +112215,7 @@
             icon: live ? "check" : "eq",
             label: live ? "Tweaked live from " + live + ", go on" : "Tweak the sound now",
             cls: live ? "accent" : "",
+            now: !!live,
             fn: function () {
 
                 closeSongMenu();
@@ -112190,6 +112237,7 @@
                 label: p.name + (ticked && p.night ? " (night)" : "") + (forDay && forNight ? ", set for " + here + " day and night"
                     : (forDay ? ", set for " + here : (forNight ? ", set for " + here + " at night" : ""))),
                 cls: forDay || forNight ? "inset" : (ticked ? "accent" : ""),
+                now: ticked && !live,
                 fn: function () {
 
                     closeSongMenu();
@@ -112197,6 +112245,9 @@
                 }
             };
         })));
+        $("menuCaption").textContent = "Used until another speaker or headphones take over, or it is set back."
+            + " Tweak the sound now changes it live, to save or forget.";
+        $("menuCaption").style.display = "";
     });
 
     // The playing song into the playlist songs went into last, or picked
@@ -113350,23 +113401,25 @@
     }, true);
 
     // The colors a choice has in a car as the look of its button on a
-    // phone: in the accent filled, ringed in the accent, grey or a color
-    // of its own, red for one that takes something away. The rest filled
-    // too, as the mobile player's answers, or grey where some are lit in
-    // the accent, the one picked now or ticked
+    // phone: ringed in the accent, grey or a color of its own, red for one
+    // that takes something away, the rest filled as the mobile player's
+    // answers. The one in use (now) is ticked before its name, and of
+    // choices that are each on or off (tick) the ones off are grey
     const CHOICE_RINGS = { danger: DANGER, warn: "var(--gold)", warmText: "var(--gold)", hotText: "#f08c32",
         veryHotText: "#ff6b5f", cool: "#7ab8ff", insetGrey: "#b8b8c0" };
 
-    function choiceLook(item, lit) {
+    function choiceLook(item) {
 
         const cls = " " + (item.cls || "") + " ";
         const ring = Object.keys(CHOICE_RINGS).find(function (k) {
             return cls.indexOf(" " + k + " ") >= 0;
         });
-        let look = lit ? "plain" : "";
+        let look = "";
         let color = "";
 
-        if (/ accent /.test(cls)) {
+        if (item.tick === true || item.tick === false) {
+            look = item.tick ? "" : "plain";
+        } else if (/ accent /.test(cls)) {
             look = "";
         } else if (/ inset /.test(cls)) {
             look = "ring";
@@ -113380,7 +113433,15 @@
             color = CHOICE_RINGS[ring];
         }
 
-        return { label: item.label, sub: item.sub, look: look, color: color, disabled: item.disabled === true, fn: item.fn };
+        return { label: (item.now === true || item.tick === true ? "\u2713 " : "") + (item.phoneLabel || item.label), sub: item.sub, look: look, color: color,
+            disabled: item.disabled === true, fn: item.fn };
+    }
+
+    // The words under a question's title, as the mobile player has them
+    function choiceText(text) {
+
+        $("menuCaption").textContent = text;
+        $("menuCaption").style.display = text ? "" : "none";
     }
 
     // The song menu's box used for a plain question, with no song behind
@@ -113421,14 +113482,8 @@
                 return item && item !== remember;
             });
 
-            const lit = answers.some(function (item) {
-                return / accent /.test(" " + (item.cls || "") + " ");
-            });
-
             uiChoiceButtons(box, {
-                options: answers.map(function (item) {
-                    return choiceLook(item, lit);
-                }),
+                options: answers.map(choiceLook),
                 tall: tall === true,
                 check: remember ? { label: remember.label, on: remember.icon === "check", change: remember.fn } : null,
                 pick: function (fn) {
@@ -113757,7 +113812,7 @@
                         return;
                     }
 
-                    openChoice((played === 1 ? "1 song was" : played + " songs were") + " played before the playing song", [
+                    openChoice((played === 1 ? "1 song was" : played + " songs were") + " played already", [
                         { icon: "check", label: played === 1 ? "Take it too" : "Take them too", fn: function () {
 
                             closeSongMenu();
@@ -113769,6 +113824,9 @@
                             finishQueueImport(r, [mode, false]);
                         } }
                     ]);
+                    choiceText("Where it was copied, " + (played === 1 ? "it was" : "they were")
+                        + " played before the song that was playing. Take " + (played === 1 ? "it" : "them")
+                        + " too, or start from the song that was playing?");
                 };
 
                 // Songs someone picked to share: where in the queue they go,
@@ -113794,7 +113852,8 @@
                     } });
                 }
 
-                openChoice(r.what + ", where in the queue?", choices);
+                openChoice(r.what, choices);
+                choiceText("Where in the queue do they go?");
                 return;
             }
 
@@ -113925,6 +113984,7 @@
                     icon: on[type.key] ? "check" : "circle",
                     label: type.label + ", " + type.count,
                     cls: on[type.key] ? "inset" : "",
+                    tick: on[type.key] === true,
                     fn: function () {
 
                         on[type.key] = !on[type.key];
@@ -114644,6 +114704,7 @@
                     icon: on[t.key] ? "check" : "circle",
                     label: t.label,
                     cls: on[t.key] ? "inset" : "",
+                    tick: on[t.key] === true,
                     fn: function () {
 
                         on[t.key] = !on[t.key];
@@ -117157,13 +117218,14 @@
 
         if (!m.set) {
 
-            askSetPickHere(m, "Add \"" + m.title + "\" to a set");
+            askSetPickHere(m, "Add \"" + m.title + "\" to a set", "Songs in a set are kept together in the list, under the best"
+                + " rated one, so the versions of a song can be compared and listened through.");
             return;
         }
 
         const set = m.set;
 
-        openChoice("Set \"" + set.name + "\", " + set.count + (set.count === 1 ? " song" : " songs") + (set.songKept ? ", this one kept" : ""), [
+        openChoice("Set \"" + set.name + "\"", [
             { icon: "check", label: set.songKept ? "Not kept" : "Mark as kept", fn: function () {
 
                 closeSongMenu();
@@ -117185,7 +117247,8 @@
             { icon: "sets", label: "The whole set", cls: "setRing", color: set.color, fn: function () {
                 askSetMenuHere(m);
             } }
-        ]);
+        ], true);
+        choiceText(set.count + (set.count === 1 ? " song" : " songs") + ". \"" + m.title + "\" is one of them" + (set.songKept ? ", kept." : "."));
     }
 
     // What can be done with a set as a whole, sent for one of its songs
@@ -117193,9 +117256,7 @@
 
         const set = m.set;
 
-        openChoice("Set \"" + set.name + "\", " + set.count + (set.count === 1 ? " song" : " songs")
-            + (set.kept > 0 ? ", " + set.kept + " kept" : "") + (set.leftOut > 0 ? ", " + set.leftOut + " left out by the filters" : "")
-            + (set.done ? ", done" : ""), [
+        openChoice("Set \"" + set.name + "\"", [
             { icon: "play", label: "Play the set", fn: function () {
 
                 closeSongMenu();
@@ -117252,7 +117313,7 @@
                     return;
                 }
 
-                openChoice("Merge \"" + set.name + "\" into", items);
+                openChoice("Merge \"" + set.name + "\" into", items, true);
             } },
             { icon: "trash", label: "Dissolve the set", cls: "danger", fn: function () {
 
@@ -117264,11 +117325,13 @@
                         toast("Set dissolved", "ok");
                     });
             } }
-        ]));
+        ]), true);
+        choiceText(set.count + (set.count === 1 ? " song" : " songs") + (set.kept > 0 ? ", " + set.kept + " kept" : "")
+            + (set.leftOut > 0 ? ", " + set.leftOut + " left out by the filters" : "") + (set.done ? ". Done." : "."));
     }
 
     // A new set, or one of the latest used ones
-    function askSetPickHere(m, title) {
+    function askSetPickHere(m, title, text) {
 
         const items = [{ icon: "listPlus", label: "New set with this song", fn: function () {
 
@@ -117307,7 +117370,8 @@
             } });
         }
 
-        openChoice(title, items);
+        openChoice(title, items, true);
+        choiceText(text || "");
     }
 
     // One of the ready colors, or any from the color picker
@@ -117324,7 +117388,7 @@
         const items = colors.map(function (c) {
 
             return { icon: c === set.color ? "check" : "dot", label: c === set.color ? "In use" : "",
-                cls: "setRing", color: c, fn: function () {
+                phoneLabel: c === set.color ? "\u25CF  in use" : "\u25CF", cls: "setRing", color: c, fn: function () {
 
                     closeSongMenu();
                     setAction(m, "setColor", c);
@@ -117399,6 +117463,7 @@
                     icon: on[x.id] ? "check" : "circle",
                     label: x.title + (x.published ? "" : " (draft)") + (x.link ? "" : ", no link yet"),
                     cls: on[x.id] ? "inset" : "",
+                    tick: on[x.id] === true,
                     fn: function () {
 
                         on[x.id] = !on[x.id];
@@ -117537,6 +117602,7 @@
                     icon: on[f.id] ? "check" : "circle",
                     label: f.title + " (" + f.why + ", " + f.date + ")",
                     cls: on[f.id] ? "inset" : "",
+                    tick: on[f.id] === true,
                     fn: function () {
 
                         on[f.id] = !on[f.id];
@@ -118175,7 +118241,8 @@
 
             if (!r || !r.ok) {
 
-                openChoice("A song on Mureka, not in this library", [open]);
+                openChoice("A song on Mureka", [open], true);
+                choiceText("Not in this library.");
                 return;
             }
 
@@ -118206,7 +118273,8 @@
                     openSongMenu(r.id);
                 } },
                 open
-            ]);
+            ], true);
+            choiceText("A song from the chat");
         });
     }
 
@@ -120686,7 +120754,7 @@
             send("newAnswer", { n: n, mode: mode });
         };
 
-        newAsking = ask.title + ". " + ask.text;
+        newAsking = ask.title;
         openChoice(newAsking, [
             { icon: "play", label: "Play now", fn: function () {
                 answer("now");
@@ -120694,40 +120762,42 @@
             { icon: "listPlusTop", label: "Play next", fn: function () {
                 answer("next");
             } },
-            { icon: "listPlus", label: "Add to the end", fn: function () {
+            { icon: "listPlus", label: "Add to the end", cls: "inset", fn: function () {
                 answer("end");
             } }
         ].concat((ask.sets || []).length > 0 ? [
-            { icon: "sets", label: "Put in a set first", fn: function () {
+            { icon: "sets", label: "Put in a set first", cls: "inset", fn: function () {
 
                 // The sets to pick from, then the phone asks again where in
                 // the play queue
-                newAsking = "Which set? The new songs go in it, then where in the play queue is asked again.";
-                openChoice(newAsking, ask.sets.map(function (o) {
+                newAsking = "Which set?";
+                openChoice(newAsking, ask.sets.map(function (o, i) {
 
                     return {
                         icon: o.key === "setnew" ? "listPlus" : "sets",
                         label: o.label,
-                        cls: o.color ? "setRing" : "",
+                        cls: i > 0 && o.key !== "setnew" ? (o.color ? "setRing" : "inset") : "",
                         color: o.color || "",
                         fn: function () {
                             answer(o.key);
                         }
                     };
                 }));
+                choiceText("The new songs go in it, then where in the play queue is asked again.");
             } }
         ] : [], [
-            { icon: "queue", label: "Replace the queue", fn: function () {
+            { icon: "queue", label: "Replace the queue", cls: "danger", fn: function () {
                 answer("replace");
             } },
-            { icon: "close", label: "Leave out for now", fn: function () {
+            { icon: "close", label: "Leave out for now", cls: "insetGrey", fn: function () {
                 answer("skip");
             } }
         ], ask.making > 0 ? [
-            { icon: "close", label: "Leave out these and the " + ask.making + " still being made", fn: function () {
+            { icon: "close", label: "Leave out these and the " + ask.making + " still being made", cls: "insetGrey", fn: function () {
                 answer("skipall");
             } }
         ] : []));
+        choiceText(ask.text);
     }
 
     // New songs a load found offered for a set, the likeliest set first. The
@@ -121272,13 +121342,17 @@
             return;
         }
 
-        setAsking = ask.title + " " + ask.text;
-        openChoice(setAsking, (ask.options || []).map(function (o) {
+        setAsking = ask.title;
+        openChoice(setAsking, (ask.options || []).map(function (o, i) {
+
+            // The first answer filled, the rest ringed, in the set's color
+            // or grey for the ones that put nothing in a set
+            const grey = o.key === "no" || o.key === "noall" || o.key === "import";
 
             return {
                 icon: o.icon || (o.key === "new" ? "listPlus" : (o.key === "no" ? "close" : "sets")),
                 label: o.label,
-                cls: o.color ? "setRing" : "",
+                cls: i > 0 && o.key !== "new" ? (grey ? "insetGrey" : (o.color ? "setRing" : "inset")) : "",
                 color: o.color || "",
                 fn: function () {
 
@@ -121300,6 +121374,7 @@
                 }
             };
         }));
+        choiceText(ask.text);
     }
 
     // Whether a queue put together by hand follows the list after its filter
@@ -121338,15 +121413,16 @@
             send("followAnswer", { n: n, mode: mode });
         };
 
-        followAsking = ask.title + " " + ask.text;
+        followAsking = ask.title;
         openChoice(followAsking, [
-            { icon: "filter", label: "Follow the list", fn: function () {
+            { icon: "filter", label: "Follow the list", cls: "inset", fn: function () {
                 answer("follow");
             } },
             { icon: "queue", label: "Keep the queue", fn: function () {
                 answer("keep");
             } }
         ]);
+        choiceText(ask.text);
     }
 
     // A change on Mureka that did not go through: Retry or Cancel. The phone

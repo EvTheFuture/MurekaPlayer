@@ -627,3 +627,25 @@
 
         return (Math.floor(n / 100000) / 10).toFixed(1) + "M";
     }
+
+    // What a tap on a song the filters leave out asks about, the same words
+    // in the player and the web view. more: how many left out songs follow
+    // it in the list
+    function leftOutText(title, more) {
+
+        const after = more === 1 ? "the song after it" : "the " + more + " songs after it";
+
+        return "\"" + title + "\" is not one the filters let through. Play now plays only it,"
+            + " then the queue goes on as it was. Play from here plays on down the list from it"
+            + (more > 0 ? ", " + after + " the filters leave out too." : ".")
+            + " Play after this song puts it right after the song playing"
+            + (more > 0 ? ", Play all after this song it and " + after + "." : ".");
+    }
+
+    // The same for a song of the Sets view, where the set goes on from it
+    function setLeftOutText(title) {
+
+        return "\"" + title + "\" is not one the filters let through. Play now plays it at once,"
+            + " then the queue goes on as it was. Play the set from here plays it and every other song of the set, then the"
+            + " queue goes on. Play after this song puts it right after the song playing.";
+    }
