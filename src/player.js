@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.352";
+    const VERSION = "2.0.1.353";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -34096,6 +34096,9 @@
     let resyncPlayAt = 0;
     const RESYNC_PLAY_GAP_MS = 1500;
 
+    // A second look a moment after a tab shown without the focus yet
+    let resyncFocusRetry = 0;
+
     // The watchdog interval and the position it last sampled
     let watchdogTimer = null;
     let watchdogLast = -1;
@@ -34138,6 +34141,39 @@
         }
 
         if (audio.paused) {
+
+            // In a browser only the tab in front plays on by itself: a focus
+            // or a page shown can come to a tab in the background too, and
+            // music starting there out of nowhere is not wanted. It plays on
+            // once the tab is brought to the front, which sends these again
+            if (!isApkHost() && (document.hidden || (typeof document.hasFocus === "function" && !document.hasFocus()))) {
+
+                dbgLog("Audio", "not played on by itself, the tab is in the background");
+
+                // Shown but the focus not given yet, as a tab brought to the
+                // front may be for a moment: asked once more a little later,
+                // once each time it is shown
+                if (document.hidden) {
+
+                    clearTimeout(resyncFocusRetry);
+                    resyncFocusRetry = 0;
+                } else if (!resyncFocusRetry) {
+
+                    resyncFocusRetry = setTimeout(function () {
+
+                        resyncFocusRetry = -1;
+                        resyncPlayback();
+                    }, 500);
+                }
+
+                return;
+            }
+
+            if (resyncFocusRetry > 0) {
+                clearTimeout(resyncFocusRetry);
+            }
+
+            resyncFocusRetry = 0;
 
             // Focus, visible and page shown come together, one play on for
             // all of them. Each would be one more play Safari may hold back
@@ -53618,6 +53654,12 @@
                     resyncTimer = null;
                 }
 
+                // Shown again later, a second look may come again
+                if (resyncFocusRetry > 0) {
+                    clearTimeout(resyncFocusRetry);
+                }
+
+                resyncFocusRetry = 0;
                 saveQueue();
                 saveSessionNow();
                 return;
