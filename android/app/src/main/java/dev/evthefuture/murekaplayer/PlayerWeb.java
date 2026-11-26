@@ -50,6 +50,7 @@ import android.provider.Settings;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -134,6 +135,11 @@ final class PlayerWeb {
 
         // Back from the Mureka page to the web view on a tablet
         void showWebView();
+
+        // The microphone for Mureka's page, a recording to remix. Android
+        // is asked first when the app may not use it yet, which only an
+        // activity can do; the request is granted or denied after
+        void askMicrophone(PermissionRequest request);
     }
 
     // Whether the phone has a working internet connection, as Android last
@@ -1870,6 +1876,36 @@ final class PlayerWeb {
             if (host != null) {
                 host.hideFullscreen();
             }
+        }
+
+        // The microphone, for a recording made in Create to remix. Only
+        // Mureka's own page over https gets it, and nothing but sound
+        @Override
+        public void onPermissionRequest(PermissionRequest request) {
+
+            boolean audio = false;
+
+            for (String r : request.getResources()) {
+
+                if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(r)) {
+                    audio = true;
+                }
+            }
+
+            Uri origin = request.getOrigin();
+            String host = origin != null ? String.valueOf(origin.getHost()) : "";
+            boolean mureka = origin != null && "https".equals(origin.getScheme())
+                && (host.equals("mureka.ai") || host.endsWith(".mureka.ai"));
+            Host h = hostRef.get();
+
+            if (!audio || !mureka || h == null) {
+
+                Hub.note("Microphone", "not given to " + origin);
+                request.deny();
+                return;
+            }
+
+            h.askMicrophone(request);
         }
 
         // Import from file in the player's settings

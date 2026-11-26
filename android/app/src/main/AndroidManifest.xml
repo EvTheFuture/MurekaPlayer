@@ -32,6 +32,10 @@
         android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
+    <!-- A recording made in Create to remix, asked for when first made -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
     <!-- Turns a WireGuard tunnel back on when the public address goes
          away, Android runs one VPN at a time. Asked for only when a tunnel
          is named in the settings -->

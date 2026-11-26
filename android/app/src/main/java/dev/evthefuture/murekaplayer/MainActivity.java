@@ -38,6 +38,7 @@ import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.window.OnBackInvokedDispatcher;
 import android.webkit.CookieManager;
+import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -83,6 +84,10 @@ public class MainActivity extends Activity implements PlayerWeb.Host, AppScreen.
     private static final int SAVE_FILE = 9;
     private static final int ASK_BLUETOOTH = 10;
     private static final int ASK_WIREGUARD = 11;
+    private static final int ASK_MICROPHONE = 12;
+
+    // The page's wish for the microphone while Android is asked
+    private PermissionRequest micRequest;
 
     private FrameLayout root;
     private WebView web;
@@ -766,8 +771,28 @@ public class MainActivity extends Activity implements PlayerWeb.Host, AppScreen.
         requestPermissions(new String[] { WireGuard.PERMISSION }, ASK_WIREGUARD);
     }
 
+    // The microphone for Mureka's page, at once when the app may use it,
+    // else after Android's question
+    @Override
+    public void askMicrophone(PermissionRequest request) {
+
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+
+            request.grant(new String[] { PermissionRequest.RESOURCE_AUDIO_CAPTURE });
+            return;
+        }
+
+        // An older wish still waiting is turned down, the new one asks
+        if (micRequest != null) {
+            micRequest.deny();
+        }
+
+        micRequest = request;
+        requestPermissions(new String[] { Manifest.permission.RECORD_AUDIO }, ASK_MICROPHONE);
+    }
+
     // Given or not, the Bluetooth watch starts again, and the player's
-    // settings show the answer
+    // settings show the answer. The microphone goes to the page or not
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
 
@@ -775,6 +800,20 @@ public class MainActivity extends Activity implements PlayerWeb.Host, AppScreen.
 
         if (requestCode == ASK_BLUETOOTH) {
             ChargeWatch.startBluetooth();
+        }
+
+        if (requestCode == ASK_MICROPHONE && micRequest != null) {
+
+            PermissionRequest r = micRequest;
+
+            micRequest = null;
+
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                r.grant(new String[] { PermissionRequest.RESOURCE_AUDIO_CAPTURE });
+            } else {
+                Hub.note("Microphone", "Android said no");
+                r.deny();
+            }
         }
     }
 
