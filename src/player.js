@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.340";
+    const VERSION = "2.0.1.341";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -17525,6 +17525,86 @@
         card.style.top = Math.max(viewTop + 8, top) + "px";
     }
     // END SHARED menu
+
+    // BEGIN SHARED actions
+    // Written by embed-webview.sh from src/shared/actions.js. Change that
+    // file and run make embed, never the lines up to END SHARED actions
+    // The actions as the player shows them from the menu button under its
+    // title, and the web view on a phone: a card of rows of tiles, each an
+    // icon over a short name on dark grey, a few to a row. Shared by the
+    // player and the web view's page, src/shared/actions.js, inlined into
+    // both by embed-webview.sh
+    const ACT_CSS = ""
+        + ".mp-act-card{background:#26262c;color:#fff;font:13px/1.4 sans-serif;border:1px solid #3a3a42;border-radius:8px;"
+        + "box-shadow:0 8px 24px rgba(0,0,0,0.5);padding:8px;box-sizing:border-box;display:flex;flex-direction:column;gap:6px}"
+        + ".mp-act-row{display:flex;gap:6px}"
+        + ".mp-act{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-width:0;"
+        + "margin:0;padding:9px 4px;border:none;border-radius:8px;background:#444;color:#fff;font:600 11px/1 sans-serif;cursor:pointer}"
+        + ".mp-act-icon{display:flex;align-items:center;justify-content:center;height:18px}"
+        + ".mp-act-icon svg{width:18px;height:18px}"
+        + ".mp-act-label{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+        + ".mp-act.on{background:" + ACCENT + ";color:#000}"
+        + ".mp-act.danger{color:#ff8a8a;box-shadow:inset 0 0 0 2px " + DANGER + "}";
+
+    // The style sheet, once in a page
+    function actStyle() {
+
+        if (document.getElementById("mp-act-style")) {
+            return;
+        }
+
+        const style = document.createElement("style");
+
+        style.id = "mp-act-style";
+        style.textContent = ACT_CSS;
+        (document.head || document.documentElement).appendChild(style);
+    }
+
+    // One tile, its icon over its name. Answers the button with iconEl and
+    // labelEl, to change them later
+    function actTile(iconNode, label, fn) {
+
+        const b = document.createElement("button");
+        const iconEl = document.createElement("span");
+        const labelEl = document.createElement("span");
+
+        actStyle();
+        b.type = "button";
+        b.className = "mp-act";
+        iconEl.className = "mp-act-icon";
+        labelEl.className = "mp-act-label";
+        labelEl.textContent = label;
+
+        if (iconNode) {
+            iconEl.appendChild(iconNode);
+        }
+
+        b.appendChild(iconEl);
+        b.appendChild(labelEl);
+        b.addEventListener("click", fn);
+        b.iconEl = iconEl;
+        b.labelEl = labelEl;
+
+        return b;
+    }
+
+    // A row of tiles side by side, sharing its width
+    function actRow(tiles) {
+
+        const row = document.createElement("div");
+
+        row.className = "mp-act-row";
+
+        for (const t of tiles) {
+
+            if (t) {
+                row.appendChild(t);
+            }
+        }
+
+        return row;
+    }
+    // END SHARED actions
 
     // BEGIN SHARED marquee
     // Written by embed-webview.sh from src/shared/marquee.js. Change that
@@ -54798,43 +54878,17 @@
     // The label never wraps, so a long name does not push the tile to two lines
     function makeActionButton(iconNode, label, bg, fg, handler) {
 
-        const b = document.createElement("button");
+        // The tile is the shared one, src/shared/actions.js, its colours
+        // given here when not the usual grey and white
+        const b = actTile(iconNode, label, handler);
 
-        b.style.cssText = [
-            "flex:1",
-            "display:flex",
-            "flex-direction:column",
-            "align-items:center",
-            "justify-content:center",
-            "gap:5px",
-            "min-width:0",
-            "padding:9px 4px",
-            "border:none",
-            "border-radius:8px",
-            "background:" + bg,
-            "color:" + fg,
-            "font:600 11px/1 sans-serif",
-            "cursor:pointer"
-        ].join(";");
-
-        const iconEl = document.createElement("span");
-        iconEl.style.cssText = "display:flex;align-items:center;justify-content:center;height:18px";
-
-        if (iconNode) {
-            iconEl.appendChild(iconNode);
+        if (bg !== "#444") {
+            b.style.background = bg;
         }
 
-        const labelEl = document.createElement("span");
-        labelEl.textContent = label;
-        labelEl.style.cssText = "white-space:nowrap";
-
-        b.appendChild(iconEl);
-        b.appendChild(labelEl);
-        b.addEventListener("click", handler);
-
-        // Expose the parts so callers can update the label or swap the icon
-        b.iconEl = iconEl;
-        b.labelEl = labelEl;
+        if (fg !== "#fff") {
+            b.style.color = fg;
+        }
 
         return b;
     }
@@ -85800,7 +85854,7 @@
     }
 
     #menuBox:not(.mp-mn):not(.mp-ui-ch),
-    #actionsBox,
+    #actionsBox:not(.mp-act-card),
     #ssBox,
     #statsBox,
     #helpBox {
@@ -85927,7 +85981,7 @@
     /* Two columns of choices where there is room, so the whole menu and its
        stars fit on a wide screen without scrolling */
     #menuBox:not(.mp-mn):not(.mp-ui-ch) #menuItems,
-    #actionItems {
+    #actionsBox:not(.mp-act-card) #actionItems {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 4px 12px;
@@ -86466,6 +86520,38 @@
 
     #menuBox.mp-mn #menuCaption {
         padding: 2px 0 6px;
+    }
+
+    /* The actions on a phone as the mobile player's: its card of tiles from
+       the shared src/shared/actions.js, under the header across the page,
+       over the page as it is */
+    html.phone #actionsPop.tiles {
+        align-items: flex-start;
+        background: none;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+
+    #actionsBox.mp-act-card {
+        width: calc(100% - 16px);
+        max-height: calc(100% - 16px);
+        overflow-y: auto;
+    }
+
+    #actionsBox.mp-act-card #actionsTitle,
+    #actionsBox.mp-act-card .popX,
+    #actionsBox.mp-act-card .versionLine {
+        display: none;
+    }
+
+    #actionsBox.mp-act-card > :first-child {
+        padding-right: 0;
+    }
+
+    #actionsBox.mp-act-card #actionItems {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
     }
 
     html.typing #menuBox.mp-mn {
@@ -88796,8 +88882,11 @@
         height: 22px;
     }
 
-    html.phone #controls.names .ctl {
-        height: 56px;
+    /* With their names the buttons keep the mobile player's height, the
+       icon and the small bold name sharing it */
+    html.phone #controls.names .ctl,
+    html.phone .groupDrop.names .ctl {
+        gap: 3px;
     }
 
     html.phone #controls.names .ctl svg,
@@ -88806,7 +88895,7 @@
     }
 
     html.phone .ctlLbl {
-        font-size: 12px;
+        font: 600 10px/1 sans-serif;
     }
 
     /* The song list stays open under the player, as on the phone */
@@ -95563,6 +95652,86 @@
         card.style.top = Math.max(viewTop + 8, top) + "px";
     }
     // END SHARED menu
+
+    // BEGIN SHARED actions
+    // Written by embed-webview.sh from src/shared/actions.js. Change that
+    // file and run make embed, never the lines up to END SHARED actions
+    // The actions as the player shows them from the menu button under its
+    // title, and the web view on a phone: a card of rows of tiles, each an
+    // icon over a short name on dark grey, a few to a row. Shared by the
+    // player and the web view's page, src/shared/actions.js, inlined into
+    // both by embed-webview.sh
+    const ACT_CSS = ""
+        + ".mp-act-card{background:#26262c;color:#fff;font:13px/1.4 sans-serif;border:1px solid #3a3a42;border-radius:8px;"
+        + "box-shadow:0 8px 24px rgba(0,0,0,0.5);padding:8px;box-sizing:border-box;display:flex;flex-direction:column;gap:6px}"
+        + ".mp-act-row{display:flex;gap:6px}"
+        + ".mp-act{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-width:0;"
+        + "margin:0;padding:9px 4px;border:none;border-radius:8px;background:#444;color:#fff;font:600 11px/1 sans-serif;cursor:pointer}"
+        + ".mp-act-icon{display:flex;align-items:center;justify-content:center;height:18px}"
+        + ".mp-act-icon svg{width:18px;height:18px}"
+        + ".mp-act-label{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+        + ".mp-act.on{background:" + ACCENT + ";color:#000}"
+        + ".mp-act.danger{color:#ff8a8a;box-shadow:inset 0 0 0 2px " + DANGER + "}";
+
+    // The style sheet, once in a page
+    function actStyle() {
+
+        if (document.getElementById("mp-act-style")) {
+            return;
+        }
+
+        const style = document.createElement("style");
+
+        style.id = "mp-act-style";
+        style.textContent = ACT_CSS;
+        (document.head || document.documentElement).appendChild(style);
+    }
+
+    // One tile, its icon over its name. Answers the button with iconEl and
+    // labelEl, to change them later
+    function actTile(iconNode, label, fn) {
+
+        const b = document.createElement("button");
+        const iconEl = document.createElement("span");
+        const labelEl = document.createElement("span");
+
+        actStyle();
+        b.type = "button";
+        b.className = "mp-act";
+        iconEl.className = "mp-act-icon";
+        labelEl.className = "mp-act-label";
+        labelEl.textContent = label;
+
+        if (iconNode) {
+            iconEl.appendChild(iconNode);
+        }
+
+        b.appendChild(iconEl);
+        b.appendChild(labelEl);
+        b.addEventListener("click", fn);
+        b.iconEl = iconEl;
+        b.labelEl = labelEl;
+
+        return b;
+    }
+
+    // A row of tiles side by side, sharing its width
+    function actRow(tiles) {
+
+        const row = document.createElement("div");
+
+        row.className = "mp-act-row";
+
+        for (const t of tiles) {
+
+            if (t) {
+                row.appendChild(t);
+            }
+        }
+
+        return row;
+    }
+    // END SHARED actions
 
     // BEGIN SHARED marquee
     // Written by embed-webview.sh from src/shared/marquee.js. Change that
@@ -121918,6 +122087,18 @@
         const close = function () {
             $("actionsPop").style.display = "none";
         };
+        const asTiles = isPhone();
+
+        $("actionsBox").classList.toggle("mp-act-card", asTiles);
+        $("actionsPop").classList.toggle("tiles", asTiles);
+
+        if (asTiles) {
+
+            drawActionTiles(box, s, close);
+            fetchExports();
+            return;
+        }
+
         const group = function (name) {
 
             const h = document.createElement("div");
@@ -122112,6 +122293,110 @@
         tiles.appendChild(tile("paste", "Import", pasteImportHere));
         box.appendChild(tiles);
         fetchExports();
+    }
+
+    // The actions on a phone as the mobile player's tiles, in its rows: the
+    // library, where the songs come from, making them and the bell, the
+    // songs kept and the night, the screen, then copy and import. The
+    // playing song's menu on top, the debug log's copy and send at the foot
+    function drawActionTiles(box, s, close) {
+
+        const t = function (iconName, label, fn, cls) {
+
+            const b = actTile(icon(iconName), label, function () {
+
+                close();
+                fn();
+            });
+
+            if (cls) {
+                b.classList.add(cls);
+            }
+
+            return b;
+        };
+
+        box.textContent = "";
+
+        if (s.id) {
+
+            box.appendChild(actRow([t("play", s.title || "The playing song", function () {
+                openSongMenu(s.id);
+            })]));
+        }
+
+        box.appendChild(actRow([
+            t("refresh", s.loading ? "Loading" : "Load", function () {
+                send("refresh", { queue: queueInView() });
+            }),
+            t("refresh", "Rescan", function () {
+                send("rescan");
+            }),
+            t("trash", "Clear", function () {
+
+                askConfirm("Clear the song list on the Android device? It is loaded again on the next Load.", "Clear", true, function () {
+                    send("clearCache");
+                });
+            }, "danger")
+        ]));
+        box.appendChild(actRow([
+            t("filter", "Playing from", openFrom),
+            t("playlists", "Playlists", openPlPop),
+            t("person", "Creators", function () {
+                showPanel("creators");
+            })
+        ]));
+        box.appendChild(actRow([
+            t("create", "Create songs", openCreatePop),
+            t("bell", "Notifications" + (Number(s.msgUnread) > 0 ? " (" + s.msgUnread + ")" : ""), openNotifications)
+        ]));
+        box.appendChild(actRow([
+            t("cache", s.caching ? "Stop caching" : "Cache all", function () {
+
+                if (s.caching) {
+
+                    send("cacheAll");
+                    return;
+                }
+
+                askConfirm("Store every song on the Android device for offline play? This downloads the whole library.", "Cache all", false, function () {
+                    send("cacheAll");
+                });
+            }),
+            t("moon", "Night mode", function () {
+                send("night");
+            }, s.nightOn ? "on" : "")
+        ]));
+        box.appendChild(actRow([
+            fullscreenOffered ? t("fullscreen", fullscreenOn() ? "Leave" : "Fullscreen", function () {
+                $("fullBtn").click();
+            }) : null,
+            t("moon", "Screen off", showBlackout),
+            t("settings", "Screen saver", openScreenSaver),
+            appScreen ? t(inPage ? "phone" : "mureka", inPage ? "Player" : "Mureka", function () {
+                window.MurekaApp.showMureka();
+            }) : null
+        ]));
+        box.appendChild(actRow([
+            t("copy", "Copy tweaks", function () {
+                askCopy("tweaks", [], "copy");
+            }),
+            t("copy", "Copy songs", function () {
+                copyExportNow("library");
+            }),
+            t("copy", "Copy queue", function () {
+                askCopy("queue", [], "copy");
+            }),
+            t("paste", "Import", pasteImportHere)
+        ]));
+
+        if (debugOn) {
+
+            box.appendChild(actRow([
+                t("info", "Copy debug log", copyDebugLog),
+                t("download", "Send debug log", sendDebugLog)
+            ]));
+        }
     }
 
     // The exports fetched as the actions open, so a tap on Copy copies at
@@ -122448,6 +122733,10 @@
 
         drawActions();
         paintVersion();
+
+        // On a phone the tiles just under the button, as the mobile player
+        // shows them
+        $("actionsPop").style.paddingTop = isPhone() ? Math.round($("actionsBtn").getBoundingClientRect().bottom + 4) + "px" : "";
         $("actionsPop").style.display = "flex";
     });
 
