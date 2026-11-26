@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.357";
+    const VERSION = "2.0.1.358";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -85011,6 +85011,37 @@
         opacity: 0.5;
     }
 
+    /* A row of buttons all as wide, as many across as fit */
+    .plEdActs.crEven {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    }
+
+    html.phone .plEdActs.crEven {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    }
+
+    .plEdActs.crEven > .chip {
+        justify-content: center;
+        text-align: center;
+        min-width: 0;
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+
+    /* Reset and Create at the top as wide as each other */
+    #crReset,
+    #crMake {
+        min-width: 112px;
+        justify-content: center;
+        text-align: center;
+    }
+
+    html.phone #crReset,
+    html.phone #crMake {
+        min-width: 76px;
+    }
+
     /* Ringed in grey, apart from the ringed helpers beside it */
     .chip.crGrey {
         color: #b8b8c0;
@@ -118220,11 +118251,13 @@
         return b;
     }
 
-    function crRow(buttons) {
+    // A row of buttons; even, all as wide, as many across as fit, each
+    // its name in the middle
+    function crRow(buttons, even) {
 
         const row = document.createElement("div");
 
-        row.className = "plEdActs crActs";
+        row.className = "plEdActs crActs" + (even ? " crEven" : "");
 
         for (const b of buttons) {
             row.appendChild(b);
@@ -118512,7 +118545,7 @@
             crChip("Refine", function () {
                 crHelp("polish");
             }, "ring")
-        ]));
+        ], true));
         words.appendChild(ui.lyricsBox);
 
         // The style, with Mureka's two ways and the kept prompts
@@ -118548,7 +118581,7 @@
                     return crAsk({ op: "savePrompt" });
                 }).then(crAnswered);
             }, "crGrey")
-        ]));
+        ], true));
 
         // Who sings
         ui.voiceBox = crCard(form);
@@ -118602,7 +118635,7 @@
             ui.remixPart,
             ui.remixStyle,
             ui.remixClear
-        ]));
+        ], true));
 
         // The length on a slider, all the way left automatic, with a step
         // of ten seconds either way on the buttons, and the wildness
@@ -122703,6 +122736,12 @@
         }, cross: true },
         { pop: "fromPop", box: "fromBox", close: closeFrom, cross: false },
         { pop: "volPop", box: "volBox", close: closeVol, cross: false },
+
+        // Create, while no list of its own is open over the form and no
+        // answer is awaited
+        { pop: "crPop", box: "crBox", close: closeCreatePop, cross: false, when: function () {
+            return $("crPick").style.display !== "flex" && $("crWait").style.display !== "flex";
+        } },
         { pop: "panel", box: "panelInner", close: panelBackOrClose, cross: false, mover: function () {
 
             // On a page of the settings only the page slides away, the
