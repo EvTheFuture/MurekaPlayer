@@ -162,13 +162,13 @@ final class SysVolume {
     private static int lowSteps = 0;
     private static final int LOW_STEPS_MAX = 40;
 
-    // Whether the levels between two of the phone's steps follow the gap
-    // between them for a speaker whose steps are set, trained or by hand:
-    // as many as a whole percent each would give for a gap of the
-    // speaker's usual size, more for a wider gap and fewer for a narrower
-    // one, a 6 dB gap twice the levels of a 3 dB one. The same number in
-    // all as before, spread by the gaps. A speaker with nothing set, or a
-    // player too old to ask for it, has one at each whole percent
+    // Whether the levels between two of the phone's steps follow the dB
+    // between them: the levels from the first step to the top as many as
+    // the percents there, each the same dB, the dB from the first step to
+    // the top over their number, so a gap of 6 dB has twice the levels of
+    // one of 3 dB. The steps' dB are those trained or set by hand for the
+    // speaker, else Android's curve. A player too old to ask for it has
+    // one at each whole percent
     private static boolean byGap = false;
     private static int delayFallback = -1;
     private static int stepDelay = -1;
@@ -423,35 +423,34 @@ final class SysVolume {
     }
 
     // How many levels from one of the phone's steps up to the next, step
-    // the upper one: one each whole percent, or for a speaker with its
-    // steps set, as many as that gives for the usual gap of the output,
-    // Android's own curve between its first step and its top, times this
-    // gap over that one
+    // the upper one: one each whole percent, or the dB between the two
+    // over the dB a level, which is the dB from the first step to the top
+    // over the percents there
     private static int spanLevels(int step, int max) {
 
         float lo = stepPct(step - 1, max);
         float hi = stepPct(step, max);
         int whole = Math.max(1, Math.round(hi - lo));
-        boolean set = (gaps != null && !gaps.isEmpty()) || handDb > 0;
 
-        if (!byGap || !set || audio == null || max < 2) {
+        if (!byGap || audio == null || max < 2) {
             return whole;
         }
 
         int type = outputType();
         boolean own = hasCurve(type, max);
-        float usual = (curveDb(max, max, type, own) - curveDb(1, max, type, own)) / (max - 1);
+        float range = stepDb(max, max, type, own) - stepDb(1, max, type, own);
+        float each = range / (stepPct(max, max) - stepPct(1, max));
         float gap = stepDb(step, max, type, own) - stepDb(step - 1, max, type, own);
 
-        if (Float.isNaN(usual) || Float.isInfinite(usual) || usual <= 0) {
-            usual = 4;
+        if (Float.isNaN(each) || Float.isInfinite(each) || each <= 0) {
+            return whole;
         }
 
         if (Float.isNaN(gap) || Float.isInfinite(gap) || gap <= 0) {
-            gap = usual;
+            gap = each * (hi - lo);
         }
 
-        return Math.max(1, Math.min(200, Math.round(100f / max * gap / usual)));
+        return Math.max(1, Math.min(200, Math.round(gap / each)));
     }
 
     // The step whose span from the one below holds a level above the

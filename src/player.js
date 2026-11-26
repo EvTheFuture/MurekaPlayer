@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.355";
+    const VERSION = "2.0.1.356";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -62738,7 +62738,7 @@
                     fineAsk("buttons", v);
                     window.MurekaHost.volumeButtons(v ? "1" : "0");
                 }));
-                soundBox.appendChild(makeHint("More volume steps puts about 100 steps in place of Android's few media volume steps, the player's own sound evening out between them. For a speaker with its volume steps set, trained or by hand, they follow its steps: a gap between two of Android's steps as wide as usual has as many as before, a wider one more and a narrower one fewer, a 6 dB gap twice as many as a 3 dB one, so each step is about as much louder. Under Android's first step, the steps set for the speaker. With the volume buttons on as well, they move it a step at a time, with the app on screen and, while its music plays, outside it too, where Android shows its own slider."));
+                soundBox.appendChild(makeHint("More volume steps puts about 100 steps in place of Android's few media volume steps, the player's own sound evening out between them. Each is the same dB louder, so a gap between two of Android's steps has as many as its dB holds, a 6 dB gap twice as many as a 3 dB one, by the speaker's volume steps, trained or set by hand, else Android's own curve. Under Android's first step, the steps set for the speaker. With the volume buttons on as well, they move it a step at a time, with the app on screen and, while its music plays, outside it too, where Android shows its own slider."));
 
                 // Android's warning before loud music, confirmed for it
                 // through the hotspot helper, so the car can turn it up
