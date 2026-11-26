@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.338";
+    const VERSION = "2.0.1.339";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -21495,6 +21495,12 @@
         }
 
         audio = new Audio();
+
+        // The more volume steps' share, which the app may have sent before
+        // there was an element to set it on: a new element plays at its
+        // whole sound, and the same share sent again changes nothing, so
+        // the song played louder than the level shown after each start
+        audio.volume = hostCarAudio ? CAR_SHADOW_VOLUME : volScale();
 
         // Asked for with CORS from the start while sound profiles are on, so
         // the first song streamed can go through the profile as well
