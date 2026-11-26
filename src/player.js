@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.366";
+    const VERSION = "2.0.1.367";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -89854,6 +89854,7 @@
     }
 
     #toPhone,
+    #overlayOther,
     #overlayNone {
         background: #333;
         color: #fff;
@@ -91378,10 +91379,11 @@
     </div>
 </div>
 <div id="overlay">
-    <div>The music is set to play in this browser. Tap to start it here.</div>
+    <div id="overlayText">The music is set to play in this browser. Tap to start it here.</div>
     <div id="overlayChoices">
-        <button id="resume" type="button">Play the music here</button>
-        <button id="toPhone" type="button">Use the phone instead</button>
+        <button id="resume" type="button">Play only here</button>
+        <button id="overlayOther" type="button">Play on both</button>
+        <button id="toPhone" type="button">Play only on the Android device</button>
         <button id="overlayNone" type="button">No music in this browser</button>
     </div>
 </div>
@@ -101887,12 +101889,29 @@
         $("signin").style.display = online && s && s.signedIn === "no" ? "block" : "none";
 
         // The phone asks for the sound here but this page has not been
-        // allowed to play since it loaded, so a tap is needed first
+        // allowed to play since it loaded, so a tap is needed first. The
+        // browser is asked first whether it plays without one, and the
+        // question waits for its answer
         if (!carAudio) {
+
             overlayAway = false;
+            autoTried = false;
         }
 
-        $("overlay").style.display = online && carAudio && !unlocked && !localMute && !teslaTheater && !overlayAway ? "flex" : "none";
+        const ask = online && carAudio && !unlocked && !localMute && !teslaTheater && !overlayAway;
+
+        if (ask) {
+            autoStart();
+        }
+
+        $("overlay").style.display = ask && !autoPending ? "flex" : "none";
+
+        // The way set now first and in the accent, starting it here, the
+        // other way here next, then the Android device alone
+        $("overlayText").textContent = dual ? "The music is set to play here and on the Android device. Tap to start it here."
+            : "The music is set to play in this browser. Tap to start it here.";
+        $("resume").textContent = dual ? "Play on both" : "Play only here";
+        $("overlayOther").textContent = dual ? "Play only here" : "Play on both";
         $("overlayNone").style.display = alone ? "none" : "block";
 
         syncAudio();
@@ -104431,6 +104450,61 @@
                 // A position the browser finds out of range, left out
             }
         }
+    }
+
+    // Before the question over the page, whether the browser lets the page
+    // play without a tap, as Chrome does on a site often played from, or
+    // Safari set to allow it for the site. Tried once while the music is
+    // here, again after it went back to the phone and came back. Only
+    // while the phone plays, a paused song has nothing to try with
+    let autoTried = false;
+    let autoPending = false;
+
+    function autoStart() {
+
+        if (autoTried || unlocked || !state || !state.playing || !state.src) {
+            return;
+        }
+
+        autoTried = true;
+
+        // Already touched in this page, which lets it play from now on
+        if (navigator.userActivation && navigator.userActivation.hasBeenActive) {
+
+            dbgLog("Audio", "allowed, the page was touched already");
+            unlockAudio();
+            setTimeout(render, 0);
+            return;
+        }
+
+        autoPending = true;
+        audio.dataset.src = state.src;
+        audio.src = songAt(state.src);
+        applyWebVolume();
+
+        // Refused or not, the answer comes, but not always soon: a second
+        // at most before the question shows
+        const giveUp = setTimeout(function () {
+
+            autoPending = false;
+            render();
+        }, 1000);
+
+        audio.play().then(function () {
+
+            clearTimeout(giveUp);
+            autoPending = false;
+            unlocked = true;
+            gainWake();
+            dbgLog("Audio", "started without a tap");
+            render();
+        }, function () {
+
+            clearTimeout(giveUp);
+            autoPending = false;
+            dbgLog("Audio", "needs a tap to start");
+            render();
+        });
     }
 
     // Called straight from a tap, the only moment the browser allows play
@@ -116121,7 +116195,21 @@
     }, true);
 
     $("toPhone").addEventListener("click", function () {
+
+        dualStop();
+        audio.pause();
         send("carAudio", false);
+    });
+
+    // The other way of playing here: on both when only here, only here
+    // when on both, started here within the tap
+    $("overlayOther").addEventListener("click", function () {
+
+        const both = !(state && state.dual === true);
+
+        unlockAudio();
+        send("carAudio", both ? "both" : true);
+        render();
     });
 
     // Another browser plays the music, this one stays quiet, and the phone
