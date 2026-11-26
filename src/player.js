@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.358";
+    const VERSION = "2.0.1.359";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -25716,17 +25716,22 @@
     function shownPending() {
 
         // Only published songs or another creator's: the songs being made
-        // only when asked to play next
+        // only when asked to play, the rows of a send asked to play too,
+        // before Mureka lists its songs
         if (creatorSource || publishFilter === "published") {
-            return pendingList().filter(askedToPlay);
+
+            return sendingSongs.filter(function (x) {
+                return x.__play === "now" || x.__play === "after";
+            }).concat(pendingList().filter(askedToPlay));
         }
 
         return sendingSongs.concat(pendingList());
     }
 
     // Two rows for a send to Mureka, named as asked, until its songs are
-    // listed, in the set asked for. Answers the send's own number
-    function addSending(title, setId) {
+    // listed, in the set asked for, with how they are asked to play, now,
+    // after or not. Answers the send's own number
+    function addSending(title, setId, play) {
 
         sendingSeq += 1;
 
@@ -25743,6 +25748,7 @@
                 __sending: send,
                 __feed: "",
                 __set: setId || "",
+                __play: play || "",
                 __until: Date.now() + SENDING_LONGEST_MS
             });
         }
@@ -74302,7 +74308,7 @@
         // on Mureka's own page, also while the lyrics are checked first
         const body = createBody(d);
         const into = createSetNow(d, body.title || "");
-        const sending = addSending(body.title || "", into.setId);
+        const sending = addSending(body.title || "", into.setId, d.playMode);
 
         if (d.kind === "song" && asIs !== true) {
 
@@ -85189,6 +85195,17 @@
         display: flex;
     }
 
+    /* Its choices all as wide as the widest */
+    .crSeg.crEvenSeg {
+        display: inline-grid;
+        grid-auto-flow: column;
+        grid-auto-columns: 1fr;
+    }
+
+    html.phone .crSeg.crEvenSeg button {
+        padding: 0 12px;
+    }
+
     .crSeg.crWide button {
         flex: 1 1 0;
     }
@@ -87991,11 +88008,20 @@
         font-size: clamp(18px, 1.9vw, 26px);
     }
 
-    html:not(.phone) #confirmBtns {
+    /* Buttons of a question's own over Cancel and the answer, as a
+       template's Listen and Copy, and the bar of what is heard */
+    #confirmMore:empty,
+    #confirmSlot:empty {
+        display: none;
+    }
+
+    html:not(.phone) #confirmBtns,
+    html:not(.phone) #confirmMore {
         gap: 2vw;
     }
 
-    html:not(.phone) #confirmBtns .mp-ui-btn {
+    html:not(.phone) #confirmBtns .mp-ui-btn,
+    html:not(.phone) #confirmMore .mp-ui-btn {
         min-height: 2.4em;
         border-radius: 12px;
         font-size: 0.85em;
@@ -91153,6 +91179,8 @@
     <div id="confirmBox" class="mp-ui-ask">
         <div id="confirmText" class="mp-ui-ask-text"></div>
         <input class="mp-ui-field" id="confirmField" type="text" autocomplete="off" spellcheck="false">
+        <div id="confirmMore" class="mp-ui-ask-row"></div>
+        <div id="confirmSlot"></div>
         <div id="confirmBtns" class="mp-ui-ask-row">
             <button class="mp-ui-btn dim cancel" id="confirmNo" type="button">Cancel</button>
             <button class="mp-ui-btn yes" id="confirmYes" type="button">Yes</button>
@@ -118590,6 +118618,7 @@
             { label: "Female", value: "female" },
             { label: "Character", value: "character" }
         ], "voice");
+        ui.voice.classList.add("crEvenSeg");
         ui.voiceBox.appendChild(crLine("Voice", [ui.voice]));
         ui.characterName = document.createElement("span");
         ui.characterName.className = "crName";
@@ -119425,8 +119454,19 @@
         el.addEventListener("ended", function () {
             crStopHear();
         });
-        el.play().catch(function () {
 
+        // What this browser makes of it, to find out why one is not heard
+        dbgLog("Create", "template " + x.title + " listened to here, " + x.audio);
+        el.addEventListener("playing", function () {
+            dbgLog("Create", "template playing here, volume " + el.volume + (el.muted ? ", muted" : "")
+                + ", " + (el.duration ? Math.round(el.duration) + " s" : "length not known"));
+        });
+        el.addEventListener("error", function () {
+            dbgLog("Create", "template could not be read here, " + (el.error ? "error " + el.error.code : "no error told"));
+        });
+        el.play().catch(function (e) {
+
+            dbgLog("Create", "template not played here: " + (e && e.name ? e.name : "refused"));
             toast("The template's song could not play", "bad");
             crStopHear();
         });
@@ -119598,11 +119638,31 @@
 
             const written = !!(crDraft && String(crDraft.style || "").trim());
 
+            // Listened to and its style copied from the question too, the
+            // listening stopped as it is put away
+            const more = [];
+
+            if (x.audio) {
+
+                more.push({ label: "Listen", fn: function (btn, slot) {
+                    crHear(x, btn, slot);
+                } });
+            }
+
+            more.push({ label: "Copy", fn: function () {
+                crCopyStyle(x);
+            } });
+
             askConfirm("Use the template " + x.title + "? Its style goes into the style prompt"
                 + (written ? ", in place of the style written there" : "") + ".", "Use it", false, function () {
 
                 showCrPick(false);
                 crAsk({ op: "template", id: x.id }).then(crAnswered);
+            }, null, more, function () {
+
+                if (crHearing && crHearing.slot && crHearing.slot.id === "confirmSlot") {
+                    crStopHear();
+                }
             });
         }, "", x.cover, x.audio ? function (btn, slot) {
             crHear(x, btn, slot);
@@ -124350,15 +124410,33 @@
     let confirmGuardUntil = 0;
     const ASK_GUARD_MS = 700;
 
-    function askConfirm(text, yesLabel, danger, then, onNo) {
+    // more: buttons of the question's own over Cancel and the answer, as
+    // [{ label, fn(button, slot) }], slot a place for a bar under them;
+    // gone, told when the question is put away however
+    function askConfirm(text, yesLabel, danger, then, onNo, more, gone) {
 
         if (isShown("confirmPop")) {
             confirmGuardUntil = Date.now() + ASK_GUARD_MS;
         }
 
+        confirmGone();
         confirmSeq += 1;
         confirmAction = then;
         confirmNoAction = onNo || null;
+        confirmGoneAction = gone || null;
+        $("confirmMore").textContent = "";
+        $("confirmSlot").textContent = "";
+        $("confirmSlot").style.display = "";
+
+        for (const m of more || []) {
+
+            const b = uiBtn(m.label, function () {
+                m.fn(b, $("confirmSlot"));
+            }, true);
+
+            $("confirmMore").appendChild(b);
+        }
+
         $("confirmField").style.display = "none";
         $("confirmText").className = "mp-ui-ask-text";
         $("confirmText").textContent = text;
@@ -124399,8 +124477,23 @@
         }
     });
 
+    // What a question asked to be told once it is put away
+    let confirmGoneAction = null;
+
+    function confirmGone() {
+
+        const gone = confirmGoneAction;
+
+        confirmGoneAction = null;
+
+        if (gone) {
+            gone();
+        }
+    }
+
     function closeConfirm() {
 
+        confirmGone();
         confirmAction = null;
         confirmNoAction = null;
         $("confirmPop").style.display = "none";
