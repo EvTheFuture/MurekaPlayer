@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.359";
+    const VERSION = "2.0.1.360";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -118291,7 +118291,57 @@
             row.appendChild(b);
         }
 
+        if (even) {
+            crEvenWatch(row);
+        }
+
         return row;
+    }
+
+    // An even row's buttons never narrower than its longest name needs,
+    // at the size the screen gives the words: measured again whenever the
+    // row changes width, fewer across when the names need it
+    const crEvenSeen = typeof ResizeObserver === "function" ? new ResizeObserver(function (list) {
+
+        for (const e of list) {
+            crEvenFit(e.target);
+        }
+    }) : null;
+
+    function crEvenWatch(row) {
+
+        if (crEvenSeen) {
+            crEvenSeen.observe(row);
+        }
+    }
+
+    function crEvenFit(row) {
+
+        const room = row.clientWidth;
+
+        if (!room) {
+            return;
+        }
+
+        let widest = 0;
+
+        for (const b of row.children) {
+
+            if (b.offsetParent === null) {
+                continue;
+            }
+
+            // The name's own width, measured at no width of the button's
+            const was = b.style.width;
+
+            b.style.width = "max-content";
+            widest = Math.max(widest, Math.ceil(b.getBoundingClientRect().width));
+            b.style.width = was;
+        }
+
+        if (widest > 0) {
+            row.style.gridTemplateColumns = "repeat(auto-fill, minmax(" + Math.min(room, widest) + "px, 1fr))";
+        }
     }
 
     // Chips of which one is on, a choice of the form
