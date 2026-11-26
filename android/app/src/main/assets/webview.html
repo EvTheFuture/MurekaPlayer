@@ -4712,6 +4712,36 @@
         overflow-wrap: anywhere;
     }
 
+    /* A song's cover beside its title, the song's information */
+    .pImg {
+        flex: 0 0 auto;
+        width: 3.3em;
+        height: 3.3em;
+        border-radius: 6px;
+        object-fit: cover;
+        background: #000;
+    }
+
+    .pText.title {
+        font-weight: 600;
+        font-size: 1.15em;
+        overflow-wrap: anywhere;
+    }
+
+    html.phone #panelBody .pImg {
+        width: 56px;
+        height: 56px;
+    }
+
+    html.phone #panelBody .pText.title {
+        font-size: 15px;
+    }
+
+    html.phone #panelBody .pRow.kv > .pText:first-child {
+        flex-basis: 96px;
+        font-size: 12px;
+    }
+
     .pText.pre {
         white-space: pre-wrap;
         overflow-wrap: anywhere;
@@ -25398,6 +25428,18 @@
             return panelSlider(node);
         }
 
+        // A song's cover, read through the phone
+        if (node.t === "img") {
+
+            const img = document.createElement("img");
+
+            img.className = "pImg";
+            img.alt = "";
+            img.src = coverAt(node.src);
+
+            return img;
+        }
+
         const text = document.createElement("div");
 
         // Lyrics and the style prompt keep their lines and capitals
@@ -25416,7 +25458,7 @@
 
         // A line of its own that is not a hint is a section heading
         text.className = node.status ? "pText status" : "pText" + (node.small ? " small" : "")
-            + (top && !node.small && !node.plain ? " head" : "") + (node.line ? " line" : "");
+            + (top && !node.small && !node.plain ? " head" : "") + (node.line ? " line" : "") + (node.head ? " title" : "");
         text.textContent = node.s || "";
 
         return text;

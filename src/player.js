@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.336";
+    const VERSION = "2.0.1.337";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -45275,6 +45275,16 @@
             return;
         }
 
+        // A song's cover, the web view reads it through the phone
+        if (tag === "IMG") {
+
+            if (el.dataset.hostCover) {
+                out.push({ t: "img", src: el.dataset.hostCover });
+            }
+
+            return;
+        }
+
         // The transport bar editor is dragged about, which a plain copy of
         // its chips cannot do, so the web view gets the lists and draws its own
         if (el.dataset.hostControls) {
@@ -45540,6 +45550,7 @@
                     small: parseFloat(ownStyle(el, "fontSize") || "13") <= 12 || grey,
                     line: el.dataset.sectionLine === "1",
                     plain: el.dataset.hostPlain === "1",
+                    head: el.dataset.hostHead === "1",
                     status: el.dataset.hostStatus === "1"
                 });
             }
@@ -67752,12 +67763,14 @@
 
             const img = document.createElement("img");
             img.src = cover;
+            img.dataset.hostCover = cover;
             img.style.cssText = "width:56px;height:56px;flex:0 0 auto;border-radius:6px;object-fit:cover;background:#000";
             header.appendChild(img);
         }
 
         const titleEl = document.createElement("div");
         titleEl.textContent = song.title || "Untitled";
+        titleEl.dataset.hostHead = "1";
         titleEl.style.cssText = "font-weight:600;font-size:15px;word-break:break-word";
         header.appendChild(titleEl);
         infoBodyEl.appendChild(header);
@@ -86640,6 +86653,36 @@
         flex: 1 1 auto;
         min-width: 0;
         overflow-wrap: anywhere;
+    }
+
+    /* A song's cover beside its title, the song's information */
+    .pImg {
+        flex: 0 0 auto;
+        width: 3.3em;
+        height: 3.3em;
+        border-radius: 6px;
+        object-fit: cover;
+        background: #000;
+    }
+
+    .pText.title {
+        font-weight: 600;
+        font-size: 1.15em;
+        overflow-wrap: anywhere;
+    }
+
+    html.phone #panelBody .pImg {
+        width: 56px;
+        height: 56px;
+    }
+
+    html.phone #panelBody .pText.title {
+        font-size: 15px;
+    }
+
+    html.phone #panelBody .pRow.kv > .pText:first-child {
+        flex-basis: 96px;
+        font-size: 12px;
     }
 
     .pText.pre {
@@ -107328,6 +107371,18 @@
             return panelSlider(node);
         }
 
+        // A song's cover, read through the phone
+        if (node.t === "img") {
+
+            const img = document.createElement("img");
+
+            img.className = "pImg";
+            img.alt = "";
+            img.src = coverAt(node.src);
+
+            return img;
+        }
+
         const text = document.createElement("div");
 
         // Lyrics and the style prompt keep their lines and capitals
@@ -107346,7 +107401,7 @@
 
         // A line of its own that is not a hint is a section heading
         text.className = node.status ? "pText status" : "pText" + (node.small ? " small" : "")
-            + (top && !node.small && !node.plain ? " head" : "") + (node.line ? " line" : "");
+            + (top && !node.small && !node.plain ? " head" : "") + (node.line ? " line" : "") + (node.head ? " title" : "");
         text.textContent = node.s || "";
 
         return text;
