@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.349";
+    const VERSION = "2.0.1.350";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -90106,6 +90106,10 @@
         left: 8px;
         right: 8px;
         z-index: 20;
+        box-sizing: border-box;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
         display: flex;
         flex-direction: column;
         gap: 6px;
@@ -90114,6 +90118,10 @@
         border-radius: 10px;
         background: #26262c;
         box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+    }
+
+    html.phone #viewMenu > * {
+        flex: 0 0 auto;
     }
 
     /* Three across, the icon over the name, as the mobile player's */
@@ -107089,11 +107097,36 @@
 
     function setViewMenu(open) {
 
+        const menu = $("viewMenu");
+
         $("browse").classList.toggle("viewOpen", open);
 
-        if (open) {
-            $("viewMenu").style.top = ($("viewBar").offsetTop + $("viewBar").offsetHeight + 4) + "px";
+        if (!open) {
+            return;
         }
+
+        menu.style.top = ($("viewBar").offsetTop + $("viewBar").offsetHeight + 4) + "px";
+        menu.style.maxHeight = "";
+
+        // Brought into view as far as the page scrolls, then no taller than
+        // what is left of the screen under the bar, a browser's own bars
+        // left out, the rest scrolled inside it
+        try {
+            menu.scrollIntoView({ block: "nearest" });
+        } catch (e) {
+            // Left where it is
+        }
+
+        requestAnimationFrame(function () {
+
+            const vv = window.visualViewport;
+            const bottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+            const room = Math.floor(bottom - menu.getBoundingClientRect().top - 8);
+
+            if (room < menu.scrollHeight) {
+                menu.style.maxHeight = Math.max(140, room) + "px";
+            }
+        });
     }
 
     $("viewBar").addEventListener("click", function (ev) {
