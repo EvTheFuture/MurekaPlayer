@@ -5795,6 +5795,32 @@
         font-variant-numeric: tabular-nums;
     }
 
+    /* The delay of this browser against the phone, in its own box */
+    .dualDelayNow {
+        text-align: center;
+        font-size: 1.3em;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        padding: 6px 0;
+    }
+
+    .dualDelayRow {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 6px;
+    }
+
+    .dualDelayRow .mp-ui-btn {
+        padding-left: 0;
+        padding-right: 0;
+    }
+
+    #menuItems .dualDelay {
+        grid-column: 1 / -1;
+        padding: 4px 8px 8px;
+        min-width: min(300px, 100%);
+    }
+
     /* This browser earlier or later than the phone, both heard at once */
     .volDual {
         margin-top: 12px;
@@ -32604,18 +32630,97 @@
             return;
         }
 
-        // The tap lets the browser play, the answer comes after it
+        // The tap lets the browser play, the answer comes after it. The way
+        // chosen now ringed, the others plain
+        const only = !!state && state.carAudio && !state.dual;
+        const both = !!state && state.dual === true;
+
         unlockAudio();
         openChoice("Music in this browser", [
-            { label: "Move it here", sub: "The Android device goes quiet", now: !!state && state.carAudio && !state.dual, fn: function () {
-                go(false);
-            } },
-            { label: "Play on both", sub: "Here and on the Android device, in step. Set this browser earlier or later under the volume, by ear",
-                now: !!state && state.dual === true, fn: function () {
+            { label: "Play only here", sub: "The Android device goes quiet", cls: only ? "inset" : "", tick: only ? undefined : false,
+                fn: function () {
+
+                    closeSongMenu();
+                    go(false);
+                } },
+            { label: "Play on both", sub: "Here and on the Android device, in step", cls: both ? "inset" : "", tick: both ? undefined : false,
+                fn: function () {
+
+                    closeSongMenu();
                     go(true);
-                } }
+                } },
+            { label: "Delay in this browser", sub: dualMsText() + ", set by ear until both sound as one", tick: false, fn: function () {
+
+                closeSongMenu();
+                openDualDelay();
+            } }
         ]);
     });
+
+    // How much later this browser plays than the phone, in words
+    function dualMsText() {
+        return dualMs === 0 ? "In step" : Math.abs(dualMs) + " ms " + (dualMs > 0 ? "later" : "earlier");
+    }
+
+    // The delay of this browser against the phone, set by ear: how much
+    // later it plays, a press moving it 1, 10 or 50 ms, kept in this
+    // browser. In the song menu's box like a question
+    function openDualDelay() {
+
+        const box = $("menuItems");
+        const col = document.createElement("div");
+        const row = document.createElement("div");
+        const shown = document.createElement("div");
+        const paint = function () {
+            shown.textContent = dualMsText();
+        };
+        const by = function (label, ms) {
+
+            const b = uiBtn(label, function () {
+
+                setDualMs(dualMs + ms);
+                paint();
+            }, true);
+
+            b.setAttribute("aria-label", (ms < 0 ? "Earlier by " : "Later by ") + Math.abs(ms) + " ms");
+
+            return b;
+        };
+
+        if (isShown("songMenu")) {
+            menuGuardUntil = Date.now() + 700;
+        }
+
+        menuSong = null;
+        box.textContent = "";
+        $("menuBox").classList.remove("switchBox");
+        $("menuTitle").textContent = "Delay in this browser";
+        $("bpmRow").style.display = "none";
+        $("titleRow").style.display = "none";
+        $("menuStars").style.display = "none";
+        menuLook("choice");
+        choiceText("How much later this browser plays than the Android device, both heard at once. Listen where both are heard and move it until they sound as one: a double beat or an echo means it is off. Less is earlier.");
+        col.className = "mp-ui-ch-col dualDelay";
+        row.className = "dualDelayRow";
+        shown.className = "dualDelayNow";
+        row.appendChild(by("-50", -50));
+        row.appendChild(by("-10", -10));
+        row.appendChild(by("-1", -1));
+        row.appendChild(by("+1", 1));
+        row.appendChild(by("+10", 10));
+        row.appendChild(by("+50", 50));
+        col.appendChild(shown);
+        col.appendChild(row);
+        col.appendChild(uiBtn("Back to 0 ms", function () {
+
+            setDualMs(0);
+            paint();
+        }, true));
+        col.appendChild(uiBtn("Done", closeSongMenu));
+        box.appendChild(col);
+        paint();
+        $("songMenu").style.display = "flex";
+    }
 
     $("soundPhone").addEventListener("click", function () {
 
