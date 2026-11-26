@@ -289,3 +289,117 @@
         layout();
         slider.focus();
     }
+
+    // The largest picture file taken for a cover, what the storage can still
+    // work on
+    const COVER_FILE_MAX = 20 * 1024 * 1024;
+
+    // The first picture in a paste, as a file, or null
+    function pastedPicture(ev) {
+
+        const items = ev && ev.clipboardData ? Array.from(ev.clipboardData.items || []) : [];
+
+        for (const item of items) {
+
+            if (item.kind === "file" && /^image\//.test(item.type)) {
+                return item.getAsFile();
+            }
+        }
+
+        return null;
+    }
+
+    // The picture of the clipboard, as a file, or null. Asked of the
+    // browser, which may ask whether to allow it
+    async function clipboardPicture() {
+
+        if (!navigator.clipboard || typeof navigator.clipboard.read !== "function") {
+            return null;
+        }
+
+        const items = await navigator.clipboard.read();
+
+        for (const item of items) {
+
+            const type = item.types.find(function (t) {
+                return /^image\//.test(t);
+            });
+
+            if (type) {
+
+                const blob = await item.getType(type);
+
+                return new File([blob], "pasted." + (type.split("/")[1] || "png"), { type: type });
+            }
+        }
+
+        return null;
+    }
+
+    // A place to paste a picture into, where the page may not read the
+    // clipboard itself: pressed and held, the browser's own Paste puts the
+    // picture there, as Ctrl+V does with a keyboard
+    function pasteBox(where, touch, onFile, say) {
+
+        const host = where || document.body;
+        const back = document.createElement("div");
+        const card = document.createElement("div");
+        const text = document.createElement("div");
+        const field = document.createElement("div");
+        const cancel = uiBtn("Cancel", function () {
+            close();
+        }, true);
+        const close = function () {
+            back.remove();
+        };
+
+        back.setAttribute("data-mureka-notice", "1");
+        back.setAttribute("data-mureka-dialog", "panel");
+        back.style.cssText = "position:" + (host === document.body ? "fixed" : "absolute") + ";inset:0;background:rgba(0,0,0,0.6);"
+            + "display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;z-index:2147483600";
+        back.__cancel = close;
+        back.addEventListener("click", function (ev) {
+
+            if (ev.target === back) {
+                close();
+            }
+        });
+        uiStyle();
+        card.className = "mp-ui-ask";
+        text.textContent = touch ? "Press and hold in the box, then Paste" : "Click in the box and press Ctrl+V, or use Paste";
+        text.style.cssText = "color:#ccc;line-height:1.5";
+        field.contentEditable = "true";
+        field.setAttribute("aria-label", "Paste the picture here");
+        field.style.cssText = "min-height:90px;border:2px dashed " + ACCENT + ";border-radius:8px;outline:none;color:transparent;"
+            + "caret-color:" + ACCENT + ";overflow:hidden";
+        cancel.style.alignSelf = "flex-end";
+
+        field.addEventListener("paste", function (ev) {
+
+            const file = pastedPicture(ev);
+
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            if (!file) {
+
+                say("No picture in what was pasted");
+                return;
+            }
+
+            close();
+            onFile(file);
+        });
+
+        // Typed or dropped text is not kept
+        field.addEventListener("input", function () {
+            field.textContent = "";
+        });
+
+        card.appendChild(text);
+        card.appendChild(field);
+        card.appendChild(cancel);
+        back.appendChild(card);
+        host.appendChild(back);
+        field.focus();
+    }
