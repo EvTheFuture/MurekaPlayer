@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.348";
+    const VERSION = "2.0.1.349";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -36305,6 +36305,9 @@
     // once, and a right click opens it on a computer
     const ART_MENU_HOLD_MS = 550;
     const ART_DOUBLE_TAP_MS = 320;
+
+    // How far a finger may move in a tap, in pixels
+    const ART_TAP_SLOP = 10;
     let artMenuTimer = 0;
     let artHoldTimer = 0;
     let artHeld = false;
@@ -36440,10 +36443,12 @@
             ev.preventDefault();
         }
 
-        // Lock the gesture direction on the first real movement
+        // Lock the gesture direction on the first real movement. A finger
+        // moves a little in a tap too, which stays a tap, so a double tap
+        // on the lyrics is not taken for a turn of them
         if (swipeDir === 0) {
 
-            if (Math.abs(dx) < 6 && Math.abs(dy) < 6) {
+            if (Math.abs(dx) < ART_TAP_SLOP && Math.abs(dy) < ART_TAP_SLOP) {
                 return;
             }
 
@@ -36524,6 +36529,10 @@
             return;
         }
 
+        if (swipeDir === 2) {
+            dbgLog("Cover", "up or down" + (lyricHit ? " on the lyrics, nothing to turn" : ", left to the page"));
+        }
+
         if (swipeDir !== 1) {
 
             // No swipe direction was locked, so this was a tap. Two taps close
@@ -36543,6 +36552,7 @@
                         lastArtTapT = 0;
                         clearTimeout(artMenuTimer);
                         artMenuTimer = 0;
+                        dbgLog("Cover", "double tap, the overlay switched" + (lyricHit ? ", on the lyrics" : ""));
                         cycleOverlayMode();
 
                     } else {
@@ -36569,6 +36579,9 @@
         const moved = currentSwipeOffset;
         const step = artStep();
         const threshold = Math.max(40, step * 0.3);
+
+        dbgLog("Cover", "swiped " + Math.round(moved) + " px" + (lyricHit ? " on the lyrics" : "")
+            + (Math.abs(moved) >= threshold ? "" : ", not far enough, " + Math.round(threshold) + " needed"));
 
         if (moved <= -threshold && neighborSong(1)) {
 
@@ -83240,14 +83253,6 @@
         position: relative;
         overflow: visible;
         touch-action: none;
-        cursor: ns-resize;
-    }
-
-    /* Over the cover, and over it on a phone, only the lyrics themselves
-       take a finger, to turn them */
-    #lyricsOver .lyricRoll,
-    #lyrics .lyricRoll {
-        pointer-events: auto;
     }
 
     #info {
@@ -102897,7 +102902,69 @@
     // The lyrics turned up or down with a finger or the mouse, see
     // cylDragStart: let go on a line, the phone moves the song there with
     // its fade for it, and the drum waits on that line until the song is
-    // there
+    // there. Over the covers the covers' own press does it, see
+    // lyricBoxAt, so a swipe sideways on the lyrics still turns the
+    // covers. Beside the covers the lyrics take the press themselves
+    function lyricDragGo(box) {
+
+        if (!cylDragStart(box.cyl)) {
+            return false;
+        }
+
+        box.dragWait = null;
+
+        return true;
+    }
+
+    function lyricDragRelease(box, cancelled) {
+
+        let to = cylDragEnd(box.cyl);
+
+        if (cancelled) {
+            to = -1;
+        }
+
+        box.dragWait = { to: to, at: Date.now(), from: shownPos * 1000 };
+
+        if (to >= 0) {
+
+            dbgLog("Lyrics", "turned to " + dbgNum(to / 1000) + " s, the song moved there");
+            send("lyricSeek", Math.round(to) / 1000);
+        }
+    }
+
+    // The lyrics shown at a point, with lines to turn, or null
+    function lyricBoxAt(x, y) {
+
+        for (const key of ["cover", "info"]) {
+
+            const box = lyricBoxes[key];
+            const holder = key === "cover" ? $("lyricsOver") : $("lyrics");
+
+            if (holder.style.display !== "block" || holder.style.visibility === "hidden" || !box.cyl.steps.length || box.cyl.drag) {
+                continue;
+            }
+
+            const r = box.roll.getBoundingClientRect();
+
+            if (r.width > 0 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+                return box;
+            }
+        }
+
+        return null;
+    }
+
+    // Whether the lyrics lie over the covers, where the covers' press
+    // turns them
+    function lyricsOverStage(box) {
+
+        const r = box.roll.getBoundingClientRect();
+        const s = $("artStage").getBoundingClientRect();
+
+        return r.left < s.right && r.right > s.left && r.top < s.bottom && r.bottom > s.top;
+    }
+
     function watchLyricDrag(box) {
 
         let press = null;
@@ -102905,7 +102972,7 @@
 
         el.addEventListener("pointerdown", function (ev) {
 
-            if (ev.button > 0 || !box.cyl.steps.length || box.cyl.drag) {
+            if (ev.button > 0 || !box.cyl.steps.length || box.cyl.drag || lyricsOverStage(box)) {
                 return;
             }
 
@@ -102928,14 +102995,13 @@
                 }
 
                 // Sideways is not a turn
-                if (Math.abs(dx) > Math.abs(dy) || !cylDragStart(box.cyl)) {
+                if (Math.abs(dx) > Math.abs(dy) || !lyricDragGo(box)) {
 
                     press = null;
                     return;
                 }
 
                 press.on = true;
-                box.dragWait = null;
 
                 try {
                     el.setPointerCapture(ev.pointerId);
@@ -102958,22 +103024,8 @@
 
             press = null;
 
-            if (!was.on) {
-                return;
-            }
-
-            let to = cylDragEnd(box.cyl);
-
-            if (ev.type === "pointercancel") {
-                to = -1;
-            }
-
-            box.dragWait = { to: to, at: Date.now(), from: shownPos * 1000 };
-
-            if (to >= 0) {
-
-                dbgLog("Lyrics", "turned to " + dbgNum(to / 1000) + " s, the song moved there");
-                send("lyricSeek", Math.round(to) / 1000);
+            if (was.on) {
+                lyricDragRelease(box, ev.type === "pointercancel");
             }
         };
 
@@ -103011,7 +103063,6 @@
     }
 
     watchLyricDrag(lyricBoxes.info);
-    watchLyricDrag(lyricBoxes.cover);
 
     // The layout the phone sends, with the phone's defaults. The size is
     // not in pixels but against the second line under the title, 20 being
@@ -121938,6 +121989,13 @@
         flowDrag = null;
         clearTimeout(flowHoldTimer);
 
+        // The lyrics turned, the song moves to the line let go on
+        if (d.turning) {
+
+            lyricDragRelease(d.lyric, ev.type === "pointercancel");
+            return;
+        }
+
         // Held long enough to open the song menu, so not a tap as well
         if (d.held) {
             return;
@@ -121984,7 +122042,7 @@
 
         glideToken += 1;
         flowDrag = { x: ev.clientX, y: ev.clientY, t: Date.now(), moved: false, target: ev.target, lastX: ev.clientX,
-            miniWasOpen: miniOpen };
+            miniWasOpen: miniOpen, lyric: lyricBoxAt(ev.clientX, ev.clientY), turning: false };
 
         // Held still, the song menu of the cover under the finger opens
         const held = flowDrag;
@@ -122014,6 +122072,27 @@
 
         const dx = ev.clientX - flowDrag.x;
         const dy = ev.clientY - flowDrag.y;
+
+        // Up or down on the lyrics turns them, see lyricDragGo
+        if (flowDrag.turning) {
+
+            ev.preventDefault();
+            cylDragMove(flowDrag.lyric.cyl, dy);
+            return;
+        }
+
+        if (!flowDrag.moved && flowDrag.lyric && Math.abs(dy) >= 6 && Math.abs(dy) > Math.abs(dx)) {
+
+            clearTimeout(flowHoldTimer);
+
+            if (lyricDragGo(flowDrag.lyric)) {
+
+                flowDrag.turning = true;
+                ev.preventDefault();
+                cylDragMove(flowDrag.lyric.cyl, dy);
+                return;
+            }
+        }
 
         if (!flowDrag.moved && Math.abs(dx) < 8) {
             return;
