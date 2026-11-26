@@ -183,6 +183,25 @@
 
         return next < low || (n > 1 && next === low) ? n : next;
     }
+
+    // A rating as a number for text, 3, 3.25, 3.5 or 3.75
+    function ratingNumber(r) {
+        return String(r);
+    }
+
+    // The rating in words, for captions and the info panel
+    function ratingText(r) {
+
+        if (r === null || r === undefined) {
+            return "Not rated";
+        }
+
+        if (r === 0) {
+            return "Rated, no stars";
+        }
+
+        return ratingNumber(r) + (r === 1 ? " star" : " stars");
+    }
     // END SHARED stars
 
     // Guard against the bookmarklet being tapped twice
@@ -221,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.331";
+    const VERSION = "2.0.1.332";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -6346,11 +6365,6 @@
         return Math.max(0, Math.min(5, Math.round(Number(v) * 4) / 4));
     }
 
-    // A rating as a number for text, 3, 3.25, 3.5 or 3.75
-    function ratingNumber(r) {
-        return String(r);
-    }
-
     function loadRatings() {
 
         try {
@@ -6424,20 +6438,6 @@
         afterRatingChange(song);
     }
 
-    // The rating in words, for captions and the info panel
-    function ratingText(r) {
-
-        if (r === null) {
-            return "Not rated";
-        }
-
-        if (r === 0) {
-            return "Rated, no stars";
-        }
-
-        return ratingNumber(r) + (r === 1 ? " star" : " stars");
-    }
-
     // Everything that shows a rating is brought up to date. The queue is left
     // alone on purpose, rating the playing song must not reshuffle what is
     // coming up, the filter applies again the next time the queue is built
@@ -6487,9 +6487,18 @@
         const stars = [];
 
         let caption = null;
-        let captionText = null;
-        let clearBtn = null;
 
+        // Back to not rated, from the caption
+        const clear = function () {
+
+            const song = getSong();
+
+            if (song) {
+
+                setRating(song, null);
+                paint();
+            }
+        };
         const paint = function () {
 
             const song = getSong();
@@ -6500,9 +6509,7 @@
             }
 
             if (caption) {
-
-                captionText.textContent = song ? ratingText(r) : "";
-                clearBtn.style.display = r === null ? "none" : "inline";
+                mnCaption(caption, song ? ratingText(r) : "", song && r !== null ? clear : null);
             }
         };
 
@@ -6554,30 +6561,7 @@
         if (opts.caption) {
 
             caption = document.createElement("div");
-            caption.style.cssText = "display:flex;align-items:center;gap:10px;font-size:12px;color:#aaa";
-
-            captionText = document.createElement("span");
-
-            clearBtn = document.createElement("span");
-            clearBtn.textContent = "Remove rating";
-            clearBtn.style.cssText = "color:" + ACCENT + ";cursor:pointer;text-decoration:underline";
-
-            clearBtn.addEventListener("click", function (ev) {
-
-                ev.preventDefault();
-                ev.stopPropagation();
-
-                const song = getSong();
-
-                if (song) {
-
-                    setRating(song, null);
-                    paint();
-                }
-            });
-
-            caption.appendChild(captionText);
-            caption.appendChild(clearBtn);
+            caption.style.cssText = "font-size:12px;color:#aaa";
             wrap.appendChild(caption);
         }
 
@@ -17312,6 +17296,134 @@
     }
     // END SHARED stats
 
+    // BEGIN SHARED menu
+    // Written by embed-webview.sh from src/shared/menu.js. Change that
+    // file and run make embed, never the lines up to END SHARED menu
+    // The song menu as the player shows it, and the web view on a phone: a
+    // small card at the press, the song's number and title over it, rows
+    // of an icon and a name in groups with a thin line between, and the
+    // stars at the foot. Each side fills it with its own rows, the look is
+    // here, every rule under .mp-mn so nothing else is touched. Shared by
+    // the player and the web view's page, src/shared/menu.js, inlined into
+    // both by embed-webview.sh
+    const MN_CSS = ""
+        + ".mp-mn{background:#26262c;color:#fff;font:13px/1.4 sans-serif;border:1px solid #3a3a42;border-radius:8px;"
+        + "box-shadow:0 6px 20px rgba(0,0,0,0.5);padding:4px;min-width:150px;box-sizing:border-box}"
+        + ".mp-mn .mp-mn-head{display:flex;align-items:baseline;gap:8px;max-width:260px;padding:6px 10px 8px;margin:0 0 4px;"
+        + "border-bottom:1px solid #3a3a42;cursor:default}"
+        + ".mp-mn .mp-mn-num{flex:0 0 auto;color:#888;font-weight:400;font-variant-numeric:tabular-nums}"
+        + ".mp-mn .mp-mn-title{flex:1 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;"
+        + "font-weight:600;color:" + ACCENT + "}"
+        + ".mp-mn .mp-mn-body{overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}"
+        + ".mp-mn .mp-mn-row{display:flex;align-items:center;gap:10px;width:100%;min-height:0;box-sizing:border-box;"
+        + "padding:7px 10px;margin:0;border:none;border-radius:6px;background:transparent;box-shadow:none;"
+        + "font:inherit;text-align:left;cursor:pointer}"
+        + ".mp-mn .mp-mn-row svg{flex:0 0 auto;width:16px;height:16px;opacity:0.85}"
+        + ".mp-mn .mp-mn-row:not(.mp-mn-off):not(:disabled):hover{background:#36363e}"
+        + ".mp-mn .mp-mn-row:not(.mp-mn-off):not(:disabled):active{background:#4a4a54}"
+        + ".mp-mn .mp-mn-off,.mp-mn .mp-mn-row:disabled{color:#777;opacity:1;cursor:default}"
+        + ".mp-mn .mp-mn-line{height:1px;margin:4px 8px;background:#3a3a42}"
+        + ".mp-mn .mp-mn-stars{border-top:1px solid #3a3a42;margin-top:4px;padding:8px 4px 6px}"
+        + ".mp-mn .mp-mn-stars button{padding:6px}"
+        + ".mp-mn .mp-mn-stars svg{width:30px;height:30px}"
+        + ".mp-mn-caption{display:flex;align-items:center;justify-content:center;gap:10px}"
+        + ".mp-mn .mp-mn-caption{font-size:12px;color:#aaa}"
+        + ".mp-mn-clear{color:" + ACCENT + ";cursor:pointer;text-decoration:underline}";
+
+    // The style sheet, once in a page
+    function mnStyle() {
+
+        if (document.getElementById("mp-mn-style")) {
+            return;
+        }
+
+        const style = document.createElement("style");
+
+        style.id = "mp-mn-style";
+        style.textContent = MN_CSS;
+        (document.head || document.documentElement).appendChild(style);
+    }
+
+    // The menu's head: the song's number in the list, when it has one, and
+    // its title. A tap on it does nothing and leaves the menu open
+    function mnHead(head, number, title) {
+
+        const num = document.createElement("span");
+        const name = document.createElement("span");
+
+        head.textContent = "";
+        head.classList.add("mp-mn-head");
+        num.className = "mp-mn-num";
+        num.textContent = number ? String(number) : "";
+        name.className = "mp-mn-title";
+        name.textContent = (title || "").trim() || "Untitled";
+
+        if (number) {
+            head.appendChild(num);
+        }
+
+        head.appendChild(name);
+    }
+
+    // The rating under the stars, in words, with Remove rating once there
+    // is one. Used under any row of stars with a caption, in a menu or not
+    function mnCaption(box, text, clear) {
+
+        const line = document.createElement("div");
+        const words = document.createElement("span");
+
+        mnStyle();
+        box.textContent = "";
+        line.className = "mp-mn-caption";
+        words.textContent = text;
+        line.appendChild(words);
+        box.appendChild(line);
+
+        if (clear) {
+
+            const link = document.createElement("span");
+
+            link.className = "mp-mn-clear";
+            link.textContent = "Remove rating";
+            link.addEventListener("click", function (ev) {
+
+                ev.preventDefault();
+                ev.stopPropagation();
+                clear();
+            });
+            line.appendChild(link);
+        }
+    }
+
+    // The card shown at x, y, moved in to fit what is seen of the page,
+    // a phone's bars left out. Taller than that, body scrolls and the head
+    // and the stars stay. The card is shown before, so it can be measured
+    function mnPlace(card, body, x, y) {
+
+        const vv = window.visualViewport;
+        const viewH = vv ? vv.height : window.innerHeight;
+        const viewW = vv ? vv.width : window.innerWidth;
+        const viewTop = vv ? vv.offsetTop : 0;
+        const viewLeft = vv ? vv.offsetLeft : 0;
+        const room = Math.max(160, viewH - 16);
+
+        card.style.position = "fixed";
+        body.style.maxHeight = "";
+
+        if (card.offsetHeight > room) {
+            body.style.maxHeight = Math.max(80, body.offsetHeight - (card.offsetHeight - room)) + "px";
+        }
+
+        const w = card.offsetWidth;
+        const h = card.offsetHeight;
+        const left = Math.min(x, viewLeft + viewW - w - 8);
+        const top = Math.min(y, viewTop + viewH - h - 8);
+
+        card.style.left = Math.max(viewLeft + 8, left) + "px";
+        card.style.top = Math.max(viewTop + 8, top) + "px";
+    }
+    // END SHARED menu
+
     // BEGIN SHARED marquee
     // Written by embed-webview.sh from src/shared/marquee.js. Change that
     // file and run make embed, never the lines up to END SHARED marquee
@@ -17916,6 +18028,118 @@
         back.appendChild(card);
         host.appendChild(back);
         field.focus();
+    }
+
+    // A picture taken for a new cover: one too large told, else its square
+    // picked in the cover editor. title, host and big as openCoverEditor;
+    // done(file, crop) with the square picked; say(text) a failure told
+    function coverFromFile(file, title, host, big, done, say) {
+
+        if (!file) {
+            return;
+        }
+
+        if (file.size > COVER_FILE_MAX) {
+
+            say("The picture is too large, at most " + Math.round(COVER_FILE_MAX / 1048576) + " MB");
+            return;
+        }
+
+        openCoverEditor(file, title, host, big, function (crop, why) {
+
+            if (crop) {
+                done(file, crop);
+            } else if (why) {
+                say("Could not use the picture, " + why);
+            }
+        });
+    }
+
+    // The browser's file picker for one picture, given to use(file)
+    function choosePicture(use) {
+
+        const input = document.createElement("input");
+
+        input.type = "file";
+        input.accept = "image/*";
+        input.style.display = "none";
+        document.body.appendChild(input);
+
+        input.addEventListener("change", function () {
+
+            const file = input.files && input.files[0];
+
+            input.remove();
+            use(file);
+        });
+
+        input.click();
+    }
+
+    // Choose a picture or paste one, the two answers of a choice each side
+    // shows its own way. A paste is taken while the choice is open, Ctrl+V
+    // with a keyboard. where: where a paste box opens, null for the page;
+    // use(file) the picture; say(text) a failure told; closed() puts the
+    // choice away after a paste. Answers { touch, caption, choose(),
+    // paste(), stop() }, stop when the choice is put away without an answer
+    function coverChoice(where, use, say, closed) {
+
+        const touch = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+        const canRead = !!(navigator.clipboard && typeof navigator.clipboard.read === "function");
+        const onPaste = function (ev) {
+
+            const file = pastedPicture(ev);
+
+            if (!file) {
+                return;
+            }
+
+            ev.preventDefault();
+            stop();
+            closed();
+            use(file);
+        };
+        const stop = function () {
+            document.removeEventListener("paste", onPaste, true);
+        };
+
+        document.addEventListener("paste", onPaste, true);
+
+        return {
+            touch: touch,
+            caption: "Choose a picture, or paste one" + (touch ? "" : ", Ctrl+V pastes too") + ".",
+            stop: stop,
+            choose: function () {
+
+                stop();
+                choosePicture(use);
+            },
+
+            // The clipboard read straight away where the browser lets it,
+            // not over a plain address as the Android device's own, else,
+            // or when that fails, a place to paste into
+            paste: function () {
+
+                stop();
+
+                if (!canRead) {
+
+                    pasteBox(where, touch, use, say);
+                    return;
+                }
+
+                clipboardPicture().then(function (file) {
+
+                    if (file) {
+                        use(file);
+                    } else {
+                        pasteBox(where, touch, use, say);
+                    }
+                }).catch(function () {
+                    pasteBox(where, touch, use, say);
+                });
+            }
+        };
     }
     // END SHARED cover
 
@@ -42562,6 +42786,7 @@
         return {
             id: wanted,
             title: (song.title || "").trim() || "Untitled",
+            number: hostNumbers().get(song.song_id) || 0,
             rating: getRating(song),
             cached: cachedIds.has(song.song_id),
             serverInstrumental: song.generation_method === 7,
@@ -48576,6 +48801,10 @@
 
             // Asked in the web view before it was sent
             deleteSongOnMureka(song);
+        } else if (act === "rate" && a.value === 0) {
+
+            // Remove rating, back to not rated
+            setRating(song, null);
         } else if (act === "rate") {
 
             const n = Math.max(1, Math.min(5, Math.round(Number(a.value) || 0)));
@@ -48706,8 +48935,11 @@
             seekByKey(Number(arg) || 0);
         } else if (cmd === "rate") {
 
-            // A tap on star n, the same cycle as the stars in the player
-            if (currentSong) {
+            // A tap on star n, the same cycle as the stars in the player,
+            // 0 for Remove rating
+            if (currentSong && arg === 0) {
+                setRating(currentSong, null);
+            } else if (currentSong) {
 
                 const n = Math.max(1, Math.min(5, Math.round(Number(arg) || 0)));
 
@@ -51486,7 +51718,6 @@
             + "#mureka-player-panel button:not(:disabled):active,[data-mureka-press] button:not(:disabled):active"
             + "{filter:brightness(1.45);transform:scale(0.96)}"
             + "#mureka-player-panel button.mureka-pressed{filter:brightness(1.45);transform:scale(0.96)}"
-            + ".mureka-menu-row:active{background:#4a4a54 !important}"
             + ".mureka-press-icon{transition:filter 0.08s ease,transform 0.08s ease}"
             + ".mureka-press-icon:active{filter:brightness(1.6);transform:scale(0.88)}"
             // On a phone, fill the screen, shrink the art a touch and let the
@@ -70246,119 +70477,44 @@
         return key;
     }
 
-    // Choose or paste a picture, choose the square in the editor, and on
-    // Set cover make it the song's cover. A picture pasted while asked,
-    // Ctrl+V or the browser's Paste, is taken as well
-    // What the paste box says, as a toast
+    // What the paste box and the cover editor say, as a toast
     function coverSay(text) {
         showToast(text, false);
     }
 
+    // Choose or paste a picture, choose the square in the editor, and on
+    // Set cover make it the song's cover. A picture pasted while asked,
+    // Ctrl+V or the browser's Paste, is taken as well
     function pickCover(song) {
 
         const use = function (file) {
 
-            if (!file) {
-                return;
-            }
-
-            if (file.size > COVER_FILE_MAX) {
-
-                showToast("The picture is too large, at most 20 MB", false);
-                return;
-            }
-
-            openCoverEditor(file, song.title, panelEl || document.body, false, function (crop, why) {
-
-                if (crop) {
-                    changeCover(song, file, crop);
-                } else if (why) {
-                    showToast("Could not use the picture, " + why, false);
-                }
-            });
-        };
-        const choose = function () {
-
-            const input = document.createElement("input");
-
-            input.type = "file";
-            input.accept = "image/*";
-            input.style.display = "none";
-            document.body.appendChild(input);
-
-            input.addEventListener("change", function () {
-
-                const file = input.files && input.files[0];
-
-                input.remove();
-                use(file);
-            });
-
-            input.click();
+            coverFromFile(file, song.title, panelEl || document.body, false, function (f, crop) {
+                changeCover(song, f, crop);
+            }, coverSay);
         };
 
         // Without the clipboard to read, the file picker straight away as
         // before, a paste still taken while it is open is not possible
         if (!panelEl) {
 
-            choose();
+            choosePicture(use);
             return;
         }
 
         let back = null;
-        const onPaste = function (ev) {
-
-            const file = pastedPicture(ev);
-
-            if (!file) {
-                return;
-            }
-
-            ev.preventDefault();
-            stop();
+        const pick = coverChoice(panelEl, use, coverSay, function () {
 
             if (back && back.__cancel) {
                 back.remove();
             }
+        });
+        const options = [
+            { label: "Choose a picture", fn: pick.choose },
+            { label: "Paste a picture", ring: true, fn: pick.paste }
+        ];
 
-            use(file);
-        };
-        const stop = function () {
-            document.removeEventListener("paste", onPaste, true);
-        };
-        const canRead = !!(navigator.clipboard && typeof navigator.clipboard.read === "function");
-        const touch = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
-        const options = [{ label: "Choose a picture", fn: function () {
-
-            stop();
-            choose();
-        } }, { label: "Paste a picture", ring: true, fn: function () {
-
-            stop();
-
-            // The clipboard read straight away where the browser lets it,
-            // else, or when that fails, a place to paste into
-            if (!canRead) {
-
-                pasteBox(panelEl, touch, use, coverSay);
-                return;
-            }
-
-            clipboardPicture().then(function (file) {
-
-                if (file) {
-                    use(file);
-                } else {
-                    pasteBox(panelEl, touch, use, coverSay);
-                }
-            }).catch(function () {
-                pasteBox(panelEl, touch, use, coverSay);
-            });
-        } }];
-
-        document.addEventListener("paste", onPaste, true);
-        back = askChoices("New cover\nFor \"" + ((song.title || "").trim() || "Untitled") + "\". Choose a picture, or paste one"
-            + (touch ? "" : ", Ctrl+V pastes too") + ".", options, stop);
+        back = askChoices("New cover\nFor \"" + ((song.title || "").trim() || "Untitled") + "\". " + pick.caption, options, pick.stop);
     }
 
     // Cut the chosen square out of the picture, upload it and give it to the
@@ -78746,39 +78902,9 @@
     // uploaded and made the playlist's cover
     function pickPlaylistCover(pl) {
 
-        const input = document.createElement("input");
+        choosePicture(function (file) {
 
-        input.type = "file";
-        input.accept = "image/*";
-        input.style.display = "none";
-        document.body.appendChild(input);
-
-        input.addEventListener("change", function () {
-
-            const file = input.files && input.files[0];
-
-            input.remove();
-
-            if (!file) {
-                return;
-            }
-
-            if (file.size > COVER_FILE_MAX) {
-
-                showToast("The picture is too large, at most 20 MB", false);
-                return;
-            }
-
-            openCoverEditor(file, pl.name, panelEl || document.body, false, async function (crop, why) {
-
-                if (!crop) {
-
-                    if (why) {
-                        showToast("Could not use the picture, " + why, false);
-                    }
-
-                    return;
-                }
+            coverFromFile(file, pl.name, panelEl || document.body, false, async function (f, crop) {
 
                 userTry("a playlist cover");
                 showToast("Uploading the cover", "wait");
@@ -78786,16 +78912,14 @@
                 try {
 
                     const bar = toastBarFn();
-                    const key = await uploadCover(await coverSquare(file, crop), bar);
+                    const key = await uploadCover(await coverSquare(f, crop), bar);
 
                     await changePlaylist(pl, { cover: key }, "The cover of " + pl.name + " changed");
                 } catch (e) {
                     showToast("Could not upload the cover, " + errText(e), false);
                 }
-            });
+            }, coverSay);
         });
-
-        input.click();
     }
 
     // Open a playlist: the list shows its songs in its order and a queue
@@ -81077,20 +81201,10 @@
     // Build the reusable right-click options popup once
     function buildContextMenu() {
 
+        mnStyle();
         contextMenuEl = document.createElement("div");
-        contextMenuEl.style.cssText = [
-            "position:fixed",
-            "z-index:1000000",
-            "background:#26262c",
-            "color:#fff",
-            "font:13px/1.4 sans-serif",
-            "border:1px solid #3a3a42",
-            "border-radius:8px",
-            "box-shadow:0 6px 20px rgba(0,0,0,0.5)",
-            "padding:4px",
-            "min-width:150px",
-            "display:none"
-        ].join(";");
+        contextMenuEl.className = "mp-mn";
+        contextMenuEl.style.cssText = "position:fixed;z-index:1000000;display:none";
 
         contextMenuEl.dataset.murekaPress = "1";
         document.body.appendChild(contextMenuEl);
@@ -81175,11 +81289,11 @@
 
         const box = menuTarget || contextMenuEl;
 
-        if (menuLineDue && box.querySelector(".mureka-menu-row, .mureka-menu-off")) {
+        if (menuLineDue && box.querySelector(".mp-mn-row")) {
 
             const line = document.createElement("div");
 
-            line.style.cssText = "height:1px;margin:4px 8px;background:#3a3a42";
+            line.className = "mp-mn-line";
             box.appendChild(line);
         }
 
@@ -81227,9 +81341,6 @@
     // list does not light every row it starts on
     const PRESS_LIGHT_MS = 90;
 
-    // Add one clickable row to the options popup
-    // A row that states something rather than offering an action. Greyed and
-    // inert, so it reads as information and cannot be tapped by mistake
     // The icons before the rows of the song menu, the same as the web
     // view's song menu shows, so a row is found by its look and not only by
     // reading. Each is a list of shapes for makeSvgIcon
@@ -81374,16 +81485,9 @@
         const shapes = MENU_ICONS[iconName];
 
         row.textContent = "";
-        row.style.display = "flex";
-        row.style.alignItems = "center";
-        row.style.gap = "10px";
 
         if (shapes) {
-
-            const ic = makeSvgIcon(shapes, 16);
-
-            ic.style.cssText = "flex:0 0 auto;opacity:0.85";
-            row.appendChild(ic);
+            row.appendChild(makeSvgIcon(shapes, 16));
         }
 
         const text = document.createElement("span");
@@ -81392,12 +81496,13 @@
         row.appendChild(text);
     }
 
+    // A row that states something rather than offering an action. Greyed and
+    // inert, so it reads as information and cannot be tapped by mistake
     function addDisabledMenuRow(label, iconName) {
 
         const row = document.createElement("div");
 
-        row.className = "mureka-menu-off";
-        row.style.cssText = "padding:7px 10px;border-radius:6px;color:#777;cursor:default";
+        row.className = "mp-mn-row mp-mn-off";
         fillMenuRow(row, label, iconName);
 
         row.addEventListener("click", function (ev) {
@@ -81413,47 +81518,22 @@
     function addMenuSongHead(song) {
 
         const head = document.createElement("div");
-        const num = document.createElement("span");
-        const title = document.createElement("span");
-        const number = hostNumbers().get(song.song_id);
 
-        head.style.cssText = "display:flex;align-items:baseline;gap:8px;max-width:260px;"
-            + "padding:6px 10px 8px;margin-bottom:4px;border-bottom:1px solid #3a3a42;cursor:default";
-
-        num.textContent = number ? String(number) : "";
-        num.style.cssText = "flex:0 0 auto;color:#888;font-variant-numeric:tabular-nums";
-
-        title.textContent = (song.title || "").trim() || "Untitled";
-        title.style.cssText = "flex:1 1 auto;min-width:0;overflow:hidden;white-space:nowrap;"
-            + "text-overflow:ellipsis;font-weight:600;color:" + ACCENT;
-
+        mnHead(head, hostNumbers().get(song.song_id), song.title);
         head.addEventListener("click", function (ev) {
             ev.stopPropagation();
         });
-
-        if (number) {
-            head.appendChild(num);
-        }
-
-        head.appendChild(title);
         contextMenuEl.appendChild(head);
     }
 
+    // One row to tap, in its color
     function addMenuRow(label, color, handler, iconName) {
 
         const row = document.createElement("div");
 
-        row.className = "mureka-menu-row";
-        row.style.cssText = "padding:7px 10px;border-radius:6px;cursor:pointer;color:" + color;
+        row.className = "mp-mn-row";
+        row.style.color = color;
         fillMenuRow(row, label, iconName);
-
-        row.addEventListener("mouseenter", function () {
-            row.style.background = "#36363e";
-        });
-
-        row.addEventListener("mouseleave", function () {
-            row.style.background = "transparent";
-        });
 
         row.addEventListener("click", function (ev) {
             ev.stopPropagation();
@@ -81489,7 +81569,7 @@
         // screen, the song's name above and the stars below stay in view
         const body = document.createElement("div");
 
-        body.style.cssText = "overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch";
+        body.className = "mp-mn-body";
         contextMenuEl.appendChild(body);
         menuTarget = body;
         menuLineDue = false;
@@ -81795,9 +81875,7 @@
             return song;
         }, { size: 30, pad: 6, caption: true });
 
-        rateBar.el.style.borderTop = "1px solid #3a3a42";
-        rateBar.el.style.marginTop = "4px";
-        rateBar.el.style.padding = "8px 4px 6px";
+        rateBar.el.classList.add("mp-mn-stars");
         rateBar.el.style.minWidth = Math.min(260, window.innerWidth - 24) + "px";
 
         contextMenuEl.appendChild(rateBar.el);
@@ -81806,27 +81884,7 @@
         // it is seen, Safari's bars left out. Taller than that, the rows
         // scroll and the rest stays where it is
         contextMenuEl.style.display = "block";
-
-        const vv = window.visualViewport;
-        const viewH = vv ? vv.height : window.innerHeight;
-        const viewW = vv ? vv.width : window.innerWidth;
-        const viewTop = vv ? vv.offsetTop : 0;
-        const viewLeft = vv ? vv.offsetLeft : 0;
-        const room = Math.max(160, viewH - 16);
-
-        body.style.maxHeight = "";
-
-        if (contextMenuEl.offsetHeight > room) {
-            body.style.maxHeight = Math.max(80, body.offsetHeight - (contextMenuEl.offsetHeight - room)) + "px";
-        }
-
-        const w = contextMenuEl.offsetWidth;
-        const h = contextMenuEl.offsetHeight;
-        const left = Math.min(x, viewLeft + viewW - w - 8);
-        const top = Math.min(y, viewTop + viewH - h - 8);
-
-        contextMenuEl.style.left = Math.max(viewLeft + 8, left) + "px";
-        contextMenuEl.style.top = Math.max(viewTop + 8, top) + "px";
+        mnPlace(contextMenuEl, body, x, y);
     }
 
     // Expose a toggle so a second bookmarklet tap minimizes or restores the
@@ -85582,7 +85640,7 @@
         z-index: 46;
     }
 
-    #menuBox,
+    #menuBox:not(.mp-mn),
     #actionsBox,
     #ssBox,
     #statsBox,
@@ -85703,13 +85761,13 @@
         box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
     }
 
-    #menuBox {
+    #menuBox:not(.mp-mn) {
         width: min(900px, 94vw);
     }
 
     /* Two columns of choices where there is room, so the whole menu and its
        stars fit on a wide screen without scrolling */
-    #menuItems,
+    #menuBox:not(.mp-mn) #menuItems,
     #actionItems {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -85733,7 +85791,7 @@
 
     @media (max-width: 700px) {
 
-        #menuItems {
+        #menuBox:not(.mp-mn) #menuItems {
             grid-template-columns: minmax(0, 1fr);
         }
 
@@ -85771,7 +85829,7 @@
     /* The song's title over its choices, a heading with a thin line under
        it as in the settings. In the actions menu the playing song's title
        comes after the general choices, so it has room above it */
-    #menuTitle,
+    #menuBox:not(.mp-mn) #menuTitle,
     .actionsSong {
         grid-column: 1 / -1;
         margin: 0 0 6px;
@@ -85911,6 +85969,10 @@
 
     .menuItem.accent {
         color: var(--accent);
+    }
+
+    .menuItem.amber {
+        color: #ffb454;
     }
 
     .menuItem.green {
@@ -86195,7 +86257,7 @@
         height: 1.3em;
     }
 
-    #menuStars {
+    #menuBox:not(.mp-mn) #menuStars {
         display: flex;
         justify-content: center;
         border-top: 1px solid var(--line);
@@ -86203,7 +86265,51 @@
         padding-top: 10px;
     }
 
-    #menuStars .star svg {
+    /* The song's number in the list before its title */
+    #menuTitle .mp-mn-num {
+        margin-right: 0.5em;
+        color: var(--muted);
+        font-weight: 400;
+    }
+
+    /* The song menu on a phone is the mobile player's small card, its look
+       from the shared src/shared/menu.js, put where the press that opened
+       it was. Here only what the page's own parts of it need: the choices
+       scroll between the title and the stars, the stars and their caption
+       are one part, and while a field is typed in it goes to the top */
+    #menuBox.mp-mn {
+        display: flex;
+        flex-direction: column;
+        max-width: calc(100vw - 16px);
+        max-height: calc(100% - 16px);
+        overflow: hidden;
+    }
+
+    #menuBox.mp-mn #menuItems {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+
+    #menuBox.mp-mn .popX {
+        display: none;
+    }
+
+    #menuBox.mp-mn #menuStars {
+        display: flex;
+        justify-content: center;
+        min-width: min(260px, 100vw - 24px);
+        padding-bottom: 0;
+    }
+
+    #menuBox.mp-mn #menuCaption {
+        padding: 2px 0 6px;
+    }
+
+    html.typing #menuBox.mp-mn {
+        position: static !important;
+    }
+
+    #menuBox:not(.mp-mn) #menuStars .star svg {
         width: clamp(48px, 6vw, 80px);
         height: clamp(48px, 6vw, 80px);
     }
@@ -88427,12 +88533,12 @@
         font-size: 0.6em;
     }
 
-    html.phone .star,
+    html.phone #stars .star,
     html.phone #like {
         padding: 5px;
     }
 
-    html.phone .star svg,
+    html.phone #stars .star svg,
     html.phone #like .ico {
         width: 20px;
         height: 20px;
@@ -89294,7 +89400,7 @@
 <div id="songMenu">
     <div id="menuBox">
         <div id="menuTitle"></div>
-        <div id="menuItems"></div>
+        <div id="menuItems" class="mp-mn-body"></div>
         <div id="bpmRow">
             <span>BPM</span>
             <input id="bpmInput" type="number" min="1" max="400" step="1" inputmode="numeric">
@@ -89310,7 +89416,7 @@
             <input id="titleInput" type="text" autocomplete="off">
             <button class="chip" id="titleSave" type="button">Save</button>
         </div>
-        <div id="menuStars"></div>
+        <div id="menuStars" class="mp-mn-stars"></div>
         <div id="menuCaption" class="ceLabel" style="text-align:center"></div>
     </div>
 </div>
@@ -89543,6 +89649,25 @@
         const next = current - 0.25;
 
         return next < low || (n > 1 && next === low) ? n : next;
+    }
+
+    // A rating as a number for text, 3, 3.25, 3.5 or 3.75
+    function ratingNumber(r) {
+        return String(r);
+    }
+
+    // The rating in words, for captions and the info panel
+    function ratingText(r) {
+
+        if (r === null || r === undefined) {
+            return "Not rated";
+        }
+
+        if (r === 0) {
+            return "Rated, no stars";
+        }
+
+        return ratingNumber(r) + (r === 1 ? " star" : " stars");
     }
     // END SHARED stars
 
@@ -94882,6 +95007,134 @@
     }
     // END SHARED stats
 
+    // BEGIN SHARED menu
+    // Written by embed-webview.sh from src/shared/menu.js. Change that
+    // file and run make embed, never the lines up to END SHARED menu
+    // The song menu as the player shows it, and the web view on a phone: a
+    // small card at the press, the song's number and title over it, rows
+    // of an icon and a name in groups with a thin line between, and the
+    // stars at the foot. Each side fills it with its own rows, the look is
+    // here, every rule under .mp-mn so nothing else is touched. Shared by
+    // the player and the web view's page, src/shared/menu.js, inlined into
+    // both by embed-webview.sh
+    const MN_CSS = ""
+        + ".mp-mn{background:#26262c;color:#fff;font:13px/1.4 sans-serif;border:1px solid #3a3a42;border-radius:8px;"
+        + "box-shadow:0 6px 20px rgba(0,0,0,0.5);padding:4px;min-width:150px;box-sizing:border-box}"
+        + ".mp-mn .mp-mn-head{display:flex;align-items:baseline;gap:8px;max-width:260px;padding:6px 10px 8px;margin:0 0 4px;"
+        + "border-bottom:1px solid #3a3a42;cursor:default}"
+        + ".mp-mn .mp-mn-num{flex:0 0 auto;color:#888;font-weight:400;font-variant-numeric:tabular-nums}"
+        + ".mp-mn .mp-mn-title{flex:1 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;"
+        + "font-weight:600;color:" + ACCENT + "}"
+        + ".mp-mn .mp-mn-body{overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}"
+        + ".mp-mn .mp-mn-row{display:flex;align-items:center;gap:10px;width:100%;min-height:0;box-sizing:border-box;"
+        + "padding:7px 10px;margin:0;border:none;border-radius:6px;background:transparent;box-shadow:none;"
+        + "font:inherit;text-align:left;cursor:pointer}"
+        + ".mp-mn .mp-mn-row svg{flex:0 0 auto;width:16px;height:16px;opacity:0.85}"
+        + ".mp-mn .mp-mn-row:not(.mp-mn-off):not(:disabled):hover{background:#36363e}"
+        + ".mp-mn .mp-mn-row:not(.mp-mn-off):not(:disabled):active{background:#4a4a54}"
+        + ".mp-mn .mp-mn-off,.mp-mn .mp-mn-row:disabled{color:#777;opacity:1;cursor:default}"
+        + ".mp-mn .mp-mn-line{height:1px;margin:4px 8px;background:#3a3a42}"
+        + ".mp-mn .mp-mn-stars{border-top:1px solid #3a3a42;margin-top:4px;padding:8px 4px 6px}"
+        + ".mp-mn .mp-mn-stars button{padding:6px}"
+        + ".mp-mn .mp-mn-stars svg{width:30px;height:30px}"
+        + ".mp-mn-caption{display:flex;align-items:center;justify-content:center;gap:10px}"
+        + ".mp-mn .mp-mn-caption{font-size:12px;color:#aaa}"
+        + ".mp-mn-clear{color:" + ACCENT + ";cursor:pointer;text-decoration:underline}";
+
+    // The style sheet, once in a page
+    function mnStyle() {
+
+        if (document.getElementById("mp-mn-style")) {
+            return;
+        }
+
+        const style = document.createElement("style");
+
+        style.id = "mp-mn-style";
+        style.textContent = MN_CSS;
+        (document.head || document.documentElement).appendChild(style);
+    }
+
+    // The menu's head: the song's number in the list, when it has one, and
+    // its title. A tap on it does nothing and leaves the menu open
+    function mnHead(head, number, title) {
+
+        const num = document.createElement("span");
+        const name = document.createElement("span");
+
+        head.textContent = "";
+        head.classList.add("mp-mn-head");
+        num.className = "mp-mn-num";
+        num.textContent = number ? String(number) : "";
+        name.className = "mp-mn-title";
+        name.textContent = (title || "").trim() || "Untitled";
+
+        if (number) {
+            head.appendChild(num);
+        }
+
+        head.appendChild(name);
+    }
+
+    // The rating under the stars, in words, with Remove rating once there
+    // is one. Used under any row of stars with a caption, in a menu or not
+    function mnCaption(box, text, clear) {
+
+        const line = document.createElement("div");
+        const words = document.createElement("span");
+
+        mnStyle();
+        box.textContent = "";
+        line.className = "mp-mn-caption";
+        words.textContent = text;
+        line.appendChild(words);
+        box.appendChild(line);
+
+        if (clear) {
+
+            const link = document.createElement("span");
+
+            link.className = "mp-mn-clear";
+            link.textContent = "Remove rating";
+            link.addEventListener("click", function (ev) {
+
+                ev.preventDefault();
+                ev.stopPropagation();
+                clear();
+            });
+            line.appendChild(link);
+        }
+    }
+
+    // The card shown at x, y, moved in to fit what is seen of the page,
+    // a phone's bars left out. Taller than that, body scrolls and the head
+    // and the stars stay. The card is shown before, so it can be measured
+    function mnPlace(card, body, x, y) {
+
+        const vv = window.visualViewport;
+        const viewH = vv ? vv.height : window.innerHeight;
+        const viewW = vv ? vv.width : window.innerWidth;
+        const viewTop = vv ? vv.offsetTop : 0;
+        const viewLeft = vv ? vv.offsetLeft : 0;
+        const room = Math.max(160, viewH - 16);
+
+        card.style.position = "fixed";
+        body.style.maxHeight = "";
+
+        if (card.offsetHeight > room) {
+            body.style.maxHeight = Math.max(80, body.offsetHeight - (card.offsetHeight - room)) + "px";
+        }
+
+        const w = card.offsetWidth;
+        const h = card.offsetHeight;
+        const left = Math.min(x, viewLeft + viewW - w - 8);
+        const top = Math.min(y, viewTop + viewH - h - 8);
+
+        card.style.left = Math.max(viewLeft + 8, left) + "px";
+        card.style.top = Math.max(viewTop + 8, top) + "px";
+    }
+    // END SHARED menu
+
     // BEGIN SHARED marquee
     // Written by embed-webview.sh from src/shared/marquee.js. Change that
     // file and run make embed, never the lines up to END SHARED marquee
@@ -95486,6 +95739,118 @@
         back.appendChild(card);
         host.appendChild(back);
         field.focus();
+    }
+
+    // A picture taken for a new cover: one too large told, else its square
+    // picked in the cover editor. title, host and big as openCoverEditor;
+    // done(file, crop) with the square picked; say(text) a failure told
+    function coverFromFile(file, title, host, big, done, say) {
+
+        if (!file) {
+            return;
+        }
+
+        if (file.size > COVER_FILE_MAX) {
+
+            say("The picture is too large, at most " + Math.round(COVER_FILE_MAX / 1048576) + " MB");
+            return;
+        }
+
+        openCoverEditor(file, title, host, big, function (crop, why) {
+
+            if (crop) {
+                done(file, crop);
+            } else if (why) {
+                say("Could not use the picture, " + why);
+            }
+        });
+    }
+
+    // The browser's file picker for one picture, given to use(file)
+    function choosePicture(use) {
+
+        const input = document.createElement("input");
+
+        input.type = "file";
+        input.accept = "image/*";
+        input.style.display = "none";
+        document.body.appendChild(input);
+
+        input.addEventListener("change", function () {
+
+            const file = input.files && input.files[0];
+
+            input.remove();
+            use(file);
+        });
+
+        input.click();
+    }
+
+    // Choose a picture or paste one, the two answers of a choice each side
+    // shows its own way. A paste is taken while the choice is open, Ctrl+V
+    // with a keyboard. where: where a paste box opens, null for the page;
+    // use(file) the picture; say(text) a failure told; closed() puts the
+    // choice away after a paste. Answers { touch, caption, choose(),
+    // paste(), stop() }, stop when the choice is put away without an answer
+    function coverChoice(where, use, say, closed) {
+
+        const touch = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+        const canRead = !!(navigator.clipboard && typeof navigator.clipboard.read === "function");
+        const onPaste = function (ev) {
+
+            const file = pastedPicture(ev);
+
+            if (!file) {
+                return;
+            }
+
+            ev.preventDefault();
+            stop();
+            closed();
+            use(file);
+        };
+        const stop = function () {
+            document.removeEventListener("paste", onPaste, true);
+        };
+
+        document.addEventListener("paste", onPaste, true);
+
+        return {
+            touch: touch,
+            caption: "Choose a picture, or paste one" + (touch ? "" : ", Ctrl+V pastes too") + ".",
+            stop: stop,
+            choose: function () {
+
+                stop();
+                choosePicture(use);
+            },
+
+            // The clipboard read straight away where the browser lets it,
+            // not over a plain address as the Android device's own, else,
+            // or when that fails, a place to paste into
+            paste: function () {
+
+                stop();
+
+                if (!canRead) {
+
+                    pasteBox(where, touch, use, say);
+                    return;
+                }
+
+                clipboardPicture().then(function (file) {
+
+                    if (file) {
+                        use(file);
+                    } else {
+                        pasteBox(where, touch, use, say);
+                    }
+                }).catch(function () {
+                    pasteBox(where, touch, use, say);
+                });
+            }
+        };
     }
     // END SHARED cover
 
@@ -97129,7 +97494,13 @@
 
         paintMainStars(r);
         paintPopupStars(r);
-        $("rateCaption").textContent = r === null || r === undefined ? "Not rated" : r + " of 5";
+        mnCaption($("rateCaption"), ratingText(r), r === null || r === undefined || !state || !state.id ? null : function () {
+
+            holdRating(state.id, null);
+            paintStars(null);
+            paintRowRating(String(state.id), null);
+            send("rate", 0);
+        });
     }
 
     // Everything that follows the state, drawn when a new one arrives
@@ -112369,8 +112740,7 @@
             // Shown at once, here, on its rows and over the cover when it is
             // the playing song, the phone confirms a moment later
             holdRating(id, next);
-            paintMenuStars(next);
-            $("menuCaption").textContent = next + " of 5";
+            paintMenuRating(next);
             paintRowRating(id, next);
 
             if (state && String(state.id) === id) {
@@ -112380,6 +112750,31 @@
             songAction("rate", n);
         }
     });
+
+    // The menu's stars and the rating in words under them, with Remove
+    // rating, which sends 0 for not rated
+    function paintMenuRating(r) {
+
+        paintMenuStars(r);
+        mnCaption($("menuCaption"), ratingText(r), r === null || r === undefined ? null : function () {
+
+            if (!menuSong) {
+                return;
+            }
+
+            const id = String(menuSong.id);
+
+            holdRating(id, null);
+            paintMenuRating(null);
+            paintRowRating(id, null);
+
+            if (state && String(state.id) === id) {
+                paintStars(null);
+            }
+
+            songAction("rate", 0);
+        });
+    }
 
     // The playing song's rating on its rows in the lists as soon as it
     // changes, rated with the stars over the cover or anywhere else
@@ -112508,6 +112903,7 @@
 
         markMenuRow(null);
         $("menuBox").classList.remove("switchBox");
+        placeSongMenu(false);
         $("songMenu").style.display = "none";
         $("bpmRow").style.display = "none";
         $("titleRow").style.display = "none";
@@ -112835,6 +113231,7 @@
         menuSong = null;
         box.textContent = "";
         $("menuBox").classList.remove("switchBox");
+        placeSongMenu(false);
         $("menuTitle").textContent = title;
         $("bpmRow").style.display = "none";
         $("titleRow").style.display = "none";
@@ -113507,7 +113904,7 @@
         const text = document.createElement("span");
 
         btn.type = "button";
-        btn.className = "menuItem" + (cls ? " " + cls : "");
+        btn.className = "menuItem mp-mn-row" + (cls ? " " + cls : "");
         btn.disabled = disabled === true;
         btn.appendChild(icon(iconName));
         text.textContent = label;
@@ -113572,12 +113969,8 @@
 
         menuSong = m;
         box.textContent = "";
-        $("menuTitle").textContent = m.title;
-
-        const shownRating = heldRating(m.id, m.rating);
-
-        paintMenuStars(shownRating);
-        $("menuCaption").textContent = shownRating === null || shownRating === undefined ? "Not rated" : shownRating + " of 5";
+        mnHead($("menuTitle"), m.number, m.title);
+        paintMenuRating(heldRating(m.id, m.rating));
 
         box.appendChild(menuItem("play", "Play", function () {
 
@@ -113591,6 +113984,29 @@
             songAction("playOnly");
             closeSongMenu();
         }));
+
+        // Pick songs to share with another player
+        if (picking) {
+
+            box.appendChild(menuItem("check", picked.has(String(m.id)) ? "Let go of this" : "Pick this", function () {
+
+                togglePicked(m.id);
+                closeSongMenu();
+            }));
+
+            box.appendChild(menuItem("close", "Done picking", function () {
+
+                stopPicking();
+                closeSongMenu();
+            }));
+        } else {
+
+            box.appendChild(menuItem("check", "Select to share", function () {
+
+                startPicking(m.id);
+                closeSongMenu();
+            }));
+        }
 
         // The queue
         menuLine(box);
@@ -113717,7 +114133,7 @@
 
         const line = document.createElement("div");
 
-        line.className = "menuLine";
+        line.className = "menuLine mp-mn-line";
         line.setAttribute("aria-hidden", "true");
         box.appendChild(line);
     }
@@ -114585,40 +115001,13 @@
     function pickPlaylistCover(id) {
 
         const p = playlistFor(id);
-        const input = document.createElement("input");
 
-        input.type = "file";
-        input.accept = "image/*";
-        input.style.display = "none";
-        document.body.appendChild(input);
+        choosePicture(function (file) {
 
-        input.addEventListener("change", function () {
-
-            const file = input.files && input.files[0];
-
-            input.remove();
-
-            if (!file) {
-                return;
-            }
-
-            if (file.size > COVER_FILE_MAX) {
-
-                toast("The picture is too large, at most 20 MB", "bad");
-                return;
-            }
-
-            openCoverEditor(file, p ? p.name : "Playlist", document.body, true, function (crop, why) {
-
-                if (crop) {
-                    sendPlaylistCover(id, file, crop);
-                } else if (why) {
-                    toast("Could not use the picture, " + why, "bad");
-                }
-            });
+            coverFromFile(file, p ? p.name : "Playlist", document.body, true, function (f, crop) {
+                sendPlaylistCover(id, f, crop);
+            }, coverSay);
         });
-
-        input.click();
     }
 
     function sendPlaylistCover(id, file, crop) {
@@ -116987,34 +117376,6 @@
 
         playlistMenuItems(m, box, close);
 
-        // Pick songs to share with another player
-        if (!fromActions) {
-
-            menuLine(box);
-
-            if (picking) {
-
-                box.appendChild(menuItem("check", picked.has(String(m.id)) ? "Let go of this" : "Pick this", function () {
-
-                    togglePicked(m.id);
-                    close();
-                }));
-
-                box.appendChild(menuItem("close", "Done picking", function () {
-
-                    stopPicking();
-                    close();
-                }));
-            } else {
-
-                box.appendChild(menuItem("check", "Select to share", function () {
-
-                    startPicking(m.id);
-                    close();
-                }));
-            }
-        }
-
         // The song on Mureka, only the account's own songs
         menuLine(box);
 
@@ -117037,6 +117398,13 @@
                 showTitleField(m);
             }, "accent"));
 
+            // A new take on it: its lyrics, style and the rest in Create
+            box.appendChild(menuItem("create", "Use in Create", function () {
+
+                close();
+                act("createFrom").then(openCreatePop);
+            }, "accent"));
+
             // Cut the start or the end off, Mureka makes a new song of it
             if (m.canTrim) {
 
@@ -117044,16 +117412,6 @@
 
                     close();
                     openTrimmer(m);
-                }, "accent"));
-            }
-
-            // A new take on it: its lyrics, style and the rest in Create
-            if (m.mine) {
-
-                box.appendChild(menuItem("create", "Use in Create", function () {
-
-                    close();
-                    act("createFrom").then(openCreatePop);
                 }, "accent"));
             }
 
@@ -117201,7 +117559,7 @@
 
             close();
             openComments(m);
-        }));
+        }, "amber"));
 
         box.appendChild(menuItem("refresh", "Refresh", function () {
 
@@ -117287,111 +117645,36 @@
         }
     }
 
-    // A new cover: a picture from this browser, the square chosen in the
-    // editor here, and on Set cover the picture as it is and the square
-    // sent to the phone, which uploads it to Mureka
-    // A picture chosen or pasted: Choose a picture, Paste a picture where
-    // the browser lets the page read the clipboard, and a paste while
-    // asked, Ctrl+V or the browser's Paste, taken as well
-    // What the paste box says, as a toast
+    // What the paste box and the cover editor say, as a toast
     function coverSay(text) {
         toast(text, "bad");
     }
 
+    // A picture chosen or pasted: Choose a picture, Paste a picture where
+    // the browser lets the page read the clipboard, and a paste while
+    // asked, Ctrl+V or the browser's Paste, taken as well. Its square
+    // chosen in the editor, sent to the phone, which uploads it to Mureka
     function pickCover(m) {
 
         const use = function (file) {
 
-            if (!file) {
-                return;
-            }
-
-            if (file.size > COVER_FILE_MAX) {
-
-                toast("The picture is too large, at most 20 MB", "bad");
-                return;
-            }
-
-            openCoverEditor(file, m.title, document.body, true, function (crop, why) {
-
-                if (crop) {
-                    sendCover(m, file, crop);
-                } else if (why) {
-                    toast("Could not use the picture, " + why, "bad");
-                }
-            });
+            coverFromFile(file, m.title, document.body, true, function (f, crop) {
+                sendCover(m, f, crop);
+            }, coverSay);
         };
-        const choose = function () {
-
-            const input = document.createElement("input");
-
-            input.type = "file";
-            input.accept = "image/*";
-            input.style.display = "none";
-            document.body.appendChild(input);
-
-            input.addEventListener("change", function () {
-
-                const file = input.files && input.files[0];
-
-                input.remove();
-                use(file);
-            });
-
-            input.click();
-        };
-        const canRead = !!(navigator.clipboard && typeof navigator.clipboard.read === "function");
-        const touch = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
-        const onPaste = function (ev) {
-
-            const file = pastedPicture(ev);
-
-            if (!file) {
-                return;
-            }
-
-            ev.preventDefault();
-            stop();
-            closeSongMenu();
-            use(file);
-        };
-        const stop = function () {
-            document.removeEventListener("paste", onPaste, true);
-        };
+        const pick = coverChoice(null, use, coverSay, closeSongMenu);
         const items = [{ icon: "image", label: "Choose a picture", fn: function () {
 
-            stop();
             closeSongMenu();
-            choose();
+            pick.choose();
         } }, { icon: "download", label: "Paste a picture", cls: "inset", fn: function () {
 
-            stop();
             closeSongMenu();
-
-            // The clipboard read straight away where the browser lets it,
-            // over the Android device's own address it does not, else, or
-            // when that fails, a place to paste into
-            if (!canRead) {
-
-                pasteBox(null, touch, use, coverSay);
-                return;
-            }
-
-            clipboardPicture().then(function (file) {
-
-                if (file) {
-                    use(file);
-                } else {
-                    pasteBox(null, touch, use, coverSay);
-                }
-            }).catch(function () {
-                pasteBox(null, touch, use, coverSay);
-            });
+            pick.paste();
         } }];
 
-        document.addEventListener("paste", onPaste, true);
         openChoice("New cover for \"" + (m.title || "Untitled") + "\"", items);
-        $("menuCaption").textContent = "Choose a picture, or paste one" + (touch ? "" : ", Ctrl+V pastes too") + ".";
+        $("menuCaption").textContent = pick.caption;
         $("menuCaption").style.display = "";
 
         // Put away without a choice, nothing pasted is taken any more
@@ -117400,7 +117683,7 @@
             if (!isShown("songMenu")) {
 
                 clearInterval(watch);
-                stop();
+                pick.stop();
             }
         }, 500);
     }
@@ -117910,12 +118193,39 @@
 
                 const r = heldRating(m.id, m.rating);
 
-                paintMenuStars(r);
-                $("menuCaption").textContent = r === null || r === undefined ? "Not rated" : r + " of 5";
+                paintMenuRating(r);
                 paintRowRating(m.id, r);
             }
         }).catch(function () {
         });
+    }
+
+    // Where the last press on the page was, so a song's menu on a phone
+    // opens there, as in the mobile player
+    let lastPress = null;
+
+    document.addEventListener("pointerdown", function (ev) {
+        lastPress = { x: ev.clientX, y: ev.clientY, at: Date.now() };
+    }, true);
+
+    // A song's menu on a phone as the mobile player's small card, at the
+    // press that opened it a moment ago or else in the middle. Anything
+    // else in the menu's place, a question or a panel, keeps its own look
+    function placeSongMenu(song) {
+
+        const box = $("menuBox");
+        const card = song === true && isPhone();
+
+        mnStyle();
+        box.classList.toggle("mp-mn", card);
+        box.style.position = "";
+        box.style.left = "";
+        box.style.top = "";
+        $("menuItems").style.maxHeight = "";
+
+        if (card && lastPress && Date.now() - lastPress.at < 3000) {
+            mnPlace(box, $("menuItems"), lastPress.x, lastPress.y);
+        }
     }
 
     function openSongMenu(id, bpm, title, queueIndex) {
@@ -117932,6 +118242,7 @@
             drawMenu(m, typeof queueIndex === "number" ? queueIndex : -1);
             $("bpmRow").style.display = "none";
             $("songMenu").style.display = "flex";
+            placeSongMenu(true);
 
             // Opened for one of its fields, from the actions menu
             if (bpm && m.canSetBpm) {

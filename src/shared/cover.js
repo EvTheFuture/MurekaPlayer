@@ -403,3 +403,115 @@
         host.appendChild(back);
         field.focus();
     }
+
+    // A picture taken for a new cover: one too large told, else its square
+    // picked in the cover editor. title, host and big as openCoverEditor;
+    // done(file, crop) with the square picked; say(text) a failure told
+    function coverFromFile(file, title, host, big, done, say) {
+
+        if (!file) {
+            return;
+        }
+
+        if (file.size > COVER_FILE_MAX) {
+
+            say("The picture is too large, at most " + Math.round(COVER_FILE_MAX / 1048576) + " MB");
+            return;
+        }
+
+        openCoverEditor(file, title, host, big, function (crop, why) {
+
+            if (crop) {
+                done(file, crop);
+            } else if (why) {
+                say("Could not use the picture, " + why);
+            }
+        });
+    }
+
+    // The browser's file picker for one picture, given to use(file)
+    function choosePicture(use) {
+
+        const input = document.createElement("input");
+
+        input.type = "file";
+        input.accept = "image/*";
+        input.style.display = "none";
+        document.body.appendChild(input);
+
+        input.addEventListener("change", function () {
+
+            const file = input.files && input.files[0];
+
+            input.remove();
+            use(file);
+        });
+
+        input.click();
+    }
+
+    // Choose a picture or paste one, the two answers of a choice each side
+    // shows its own way. A paste is taken while the choice is open, Ctrl+V
+    // with a keyboard. where: where a paste box opens, null for the page;
+    // use(file) the picture; say(text) a failure told; closed() puts the
+    // choice away after a paste. Answers { touch, caption, choose(),
+    // paste(), stop() }, stop when the choice is put away without an answer
+    function coverChoice(where, use, say, closed) {
+
+        const touch = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+        const canRead = !!(navigator.clipboard && typeof navigator.clipboard.read === "function");
+        const onPaste = function (ev) {
+
+            const file = pastedPicture(ev);
+
+            if (!file) {
+                return;
+            }
+
+            ev.preventDefault();
+            stop();
+            closed();
+            use(file);
+        };
+        const stop = function () {
+            document.removeEventListener("paste", onPaste, true);
+        };
+
+        document.addEventListener("paste", onPaste, true);
+
+        return {
+            touch: touch,
+            caption: "Choose a picture, or paste one" + (touch ? "" : ", Ctrl+V pastes too") + ".",
+            stop: stop,
+            choose: function () {
+
+                stop();
+                choosePicture(use);
+            },
+
+            // The clipboard read straight away where the browser lets it,
+            // not over a plain address as the Android device's own, else,
+            // or when that fails, a place to paste into
+            paste: function () {
+
+                stop();
+
+                if (!canRead) {
+
+                    pasteBox(where, touch, use, say);
+                    return;
+                }
+
+                clipboardPicture().then(function (file) {
+
+                    if (file) {
+                        use(file);
+                    } else {
+                        pasteBox(where, touch, use, say);
+                    }
+                }).catch(function () {
+                    pasteBox(where, touch, use, say);
+                });
+            }
+        };
+    }

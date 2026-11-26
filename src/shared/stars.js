@@ -142,3 +142,22 @@
 
         return next < low || (n > 1 && next === low) ? n : next;
     }
+
+    // A rating as a number for text, 3, 3.25, 3.5 or 3.75
+    function ratingNumber(r) {
+        return String(r);
+    }
+
+    // The rating in words, for captions and the info panel
+    function ratingText(r) {
+
+        if (r === null || r === undefined) {
+            return "Not rated";
+        }
+
+        if (r === 0) {
+            return "Rated, no stars";
+        }
+
+        return ratingNumber(r) + (r === 1 ? " star" : " stars");
+    }
