@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.354";
+    const VERSION = "2.0.1.355";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -4700,7 +4700,6 @@
             trimZoom: 3,
             pauseOnDisconnect: false,
             noLoudWarning: false,
-            volPressDb: 1,
             playOnConnect: "never",
             coverResend: "title",
             controlOrder: "repeat,shuffle,stop,play",
@@ -4973,7 +4972,6 @@
                     trimZoom: numberIn(parsed.trimZoom, 0, 10, 3),
                     pauseOnDisconnect: parsed.pauseOnDisconnect === true,
                     noLoudWarning: parsed.noLoudWarning === true,
-                    volPressDb: pressDbSetting(parsed.volPressDb),
                     coverResend: ["art", "id", "title"].indexOf(parsed.coverResend) >= 0
                         ? parsed.coverResend
                         : "title",
@@ -19890,15 +19888,6 @@
         return isFinite(n) && n > 0 ? Math.max(5, Math.min(100, n)) : 0;
     }
 
-    // How much louder a press of more volume steps makes it, in dB, a half
-    // to 3 in halves, 1 unless set
-    function pressDbSetting(v) {
-
-        const n = Math.round(Number(v) * 2) / 2;
-
-        return isFinite(n) && n >= 0.5 ? Math.min(3, n) : 1;
-    }
-
     // The step sizes set by hand, to the app, which evens out the volume
     // between the phone's steps by the one of the speaker in use. A
     // speaker without its own takes this device's
@@ -19958,7 +19947,7 @@
                 fallbackLow: s.fallback.lowDb || 0,
                 lowSteps: lowSteps,
                 fallbackLowSteps: s.fallback.lowSteps > 0 ? s.fallback.lowSteps - 1 : 0,
-                pressDb: pressDbSetting(settings.volPressDb)
+                byGap: true
             }));
         } catch (e) {
             dbgLog("Sound", "volume step sizes not taken: " + errText(e));
@@ -62742,13 +62731,6 @@
                     fineAsk("on", v);
                     window.MurekaHost.fineVolume(v ? "1" : "0");
                 }));
-                soundBox.appendChild(makeStepperRow("Each step, dB", function () {
-                    return pressDbSetting(settings.volPressDb);
-                }, function (v) {
-
-                    settings.volPressDb = pressDbSetting(v);
-                    pushStepSizes();
-                }, 0.5, 3, 0.5));
                 soundBox.appendChild(makeBoolRow("Volume buttons move them a step at a time", function () {
                     return fineAsked("buttons");
                 }, function (v) {
@@ -62756,7 +62738,7 @@
                     fineAsk("buttons", v);
                     window.MurekaHost.volumeButtons(v ? "1" : "0");
                 }));
-                soundBox.appendChild(makeHint("More volume steps puts more steps between Android's few media volume steps, the player's own sound evening out between them. Each step makes it the same dB louder, so there are as many between two of Android's steps as the gap between them holds: twice as many for a 6 dB gap as for a 3 dB one, by the gaps trained for the speaker in use, or its step size set by hand. Under Android's first step, the steps set for the speaker. With the volume buttons on as well, they move it a step at a time, with the app on screen and, while its music plays, outside it too, where Android shows its own slider."));
+                soundBox.appendChild(makeHint("More volume steps puts about 100 steps in place of Android's few media volume steps, the player's own sound evening out between them. For a speaker with its volume steps set, trained or by hand, they follow its steps: a gap between two of Android's steps as wide as usual has as many as before, a wider one more and a narrower one fewer, a 6 dB gap twice as many as a 3 dB one, so each step is about as much louder. Under Android's first step, the steps set for the speaker. With the volume buttons on as well, they move it a step at a time, with the app on screen and, while its music plays, outside it too, where Android shows its own slider."));
 
                 // Android's warning before loud music, confirmed for it
                 // through the hotspot helper, so the car can turn it up
