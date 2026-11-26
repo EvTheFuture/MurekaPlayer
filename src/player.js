@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.337";
+    const VERSION = "2.0.1.338";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -84709,6 +84709,117 @@
         flex: 0 0 auto;
     }
 
+    /* The playlists on a phone as the mobile player's page: its title with
+       Done, New playlist and All songs side by side, and a row for each
+       playlist, its cover, its name and count as a button, Play and Edit */
+    html.phone #plPop {
+        align-items: stretch;
+        justify-content: stretch;
+        background: var(--bg);
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+
+    html.phone #plBox {
+        width: 100%;
+        max-height: none;
+        padding: max(12px, env(safe-area-inset-top)) 12px 12px;
+        border: none;
+        border-radius: 0;
+        background: var(--bg);
+        font-size: 12px;
+        gap: 10px;
+        justify-content: flex-start;
+    }
+
+    html.phone #plTop {
+        gap: 8px;
+    }
+
+    html.phone #plTitle {
+        flex: 1 1 60%;
+        font-size: 12px;
+        font-weight: 600;
+        color: #fff;
+    }
+
+    html.phone #plPop .chip {
+        height: 30px;
+        padding: 6px 12px;
+        border: none;
+        border-radius: 6px;
+        background: #333;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 600;
+    }
+
+    html.phone #plPop .chip .ico {
+        display: none;
+    }
+
+    html.phone #plPop #plClose {
+        order: 1;
+        background: var(--accent);
+        color: #000;
+    }
+
+    html.phone #plClose::after {
+        content: "Done";
+    }
+
+    html.phone #plNew,
+    html.phone #plAll {
+        order: 2;
+        flex: 1 1 40%;
+        justify-content: center;
+    }
+
+    html.phone #plPop #plNew {
+        background: var(--accent);
+        color: #000;
+    }
+
+    html.phone #plRows .plRow {
+        gap: 6px;
+        padding: 0;
+        border-radius: 0;
+        background: none;
+    }
+
+    html.phone #plRows .plRow.on {
+        box-shadow: none;
+    }
+
+    html.phone #plRows .plRow .thumb {
+        width: 34px;
+        height: 34px;
+        border-radius: 5px;
+    }
+
+    html.phone #plRows .plRowText {
+        display: flex;
+        align-items: center;
+        min-height: 30px;
+        padding: 0 4px;
+        box-sizing: border-box;
+        border-radius: 6px;
+        background: #333;
+    }
+
+    html.phone #plRows .plRow.on .plRowText {
+        background: var(--accent);
+        color: #000;
+    }
+
+    html.phone #plRows .plRowName {
+        font-size: 13px;
+    }
+
+    html.phone #plRows .plRowCount {
+        display: none;
+    }
+
     /* Stop beside the line of what the phone works on, ringed in red */
     .workStop {
         margin-left: auto;
@@ -105889,8 +106000,10 @@
                 continue;
             }
 
+            // More steps have levels between whole percents under the
+            // phone's first step, which a slider of whole steps rounded away
             slider.max = String(top);
-            slider.step = t.kind === "phone" ? "1" : "5";
+            slider.step = t.kind === "phone" ? (volFineOn() ? "any" : "1") : "5";
 
             const fineBox = bar.querySelector(".volFine input");
 
@@ -106112,7 +106225,7 @@
         }
 
         if (t.kind === "phone" && volFineOn()) {
-            return pctText(level / top * 100) + "%";
+            return pctText(fineShown(level / top * 100)) + "%";
         }
 
         if (t.kind !== "phone" || !state || state.volUnit !== "steps") {
@@ -106124,6 +106237,15 @@
 
     function volText(level) {
         return volTextOf(volTarget(), level);
+    }
+
+    // A level of more steps as the phone keeps it: from the phone's first
+    // step up a whole percent, under it the finer levels as they are
+    function fineShown(p) {
+
+        const high = state && state.volMax > 0 ? Math.round(100 / state.volMax) : 0;
+
+        return p >= high ? Math.round(p) : p;
     }
 
     // The level in a word, for when the slider is not open
@@ -115070,6 +115192,12 @@
         count.className = "plRowCount";
         name.textContent = p.name;
         count.textContent = p.count + (p.count === 1 ? " song" : " songs") + (p.open ? " \u00B7 open" : "");
+
+        // On a phone the name and the count on one line, as the mobile
+        // player's button
+        if (isPhone()) {
+            name.textContent = p.name + "  (" + p.count + ")";
+        }
         text.appendChild(name);
         text.appendChild(count);
         row.appendChild(text);
@@ -115163,11 +115291,11 @@
                 send("playlistOpenId", { id: p.id, play: false });
             });
             const play = document.createElement("button");
+            let edit = null;
 
             if (p.editable) {
 
-                const edit = document.createElement("button");
-
+                edit = document.createElement("button");
                 edit.type = "button";
                 edit.className = "chip iconOnly plRowEdit";
                 edit.title = "Edit " + p.name;
@@ -115191,6 +115319,15 @@
                 send("playlistOpenId", { id: p.id, play: true });
             });
             row.appendChild(play);
+
+            // On a phone Play and then Edit in words, as the mobile player
+            if (edit && isPhone()) {
+
+                edit.className = "chip plRowEdit";
+                edit.textContent = "Edit";
+                row.appendChild(edit);
+            }
+
             box.appendChild(row);
             loadThumbsNow(row);
         }

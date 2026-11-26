@@ -651,8 +651,15 @@ public class PlayerService extends Service implements Hub.Listener {
                 }
             }
 
+            // Android's slider has whole percents only: the level it shows,
+            // handed back, leaves a finer level under the first step as it is
             @Override
             public void onSetVolumeTo(int volume) {
+
+                if (volume == Math.round(SysVolume.finePct())) {
+                    return;
+                }
+
                 SysVolume.setFine(true, Math.max(0, Math.min(100, volume)));
             }
         };

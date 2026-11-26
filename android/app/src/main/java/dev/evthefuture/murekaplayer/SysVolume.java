@@ -82,6 +82,15 @@ final class SysVolume {
     private static final long FINE_KEEP_MS = 15000;
     private static long fineKeepUntil;
 
+    // A step taken for the volume buttons, and the level before it. Android
+    // often puts in the step it keeps for a speaker a moment before the
+    // speaker shows as the output: a new output within this long after
+    // such a step puts the level from before it back, as the step was the
+    // speaker's and not a press
+    private static final long FINE_OUTPUT_GRACE_MS = 4000;
+    private static float fineBeforePress = -1;
+    private static long finePressAt;
+
     // The phone's volume buttons moving more steps by 1%, and the level
     // in dB of the step in use, for the stats and the volume popup
     private static boolean buttons;
@@ -299,8 +308,18 @@ final class SysVolume {
             boolean moved = refreshOutput();
 
             // Another output: the level kept goes on there, and a step it
-            // brings with it a moment later is put back too
+            // brings with it a moment later is put back too. A step that
+            // came just before the output showed was the output's as well
             if (moved && fineOn && !training && max > 0) {
+
+                if (fineBeforePress >= 0 && SystemClock.uptimeMillis() - finePressAt < FINE_OUTPUT_GRACE_MS) {
+
+                    Hub.note("Volume", "step " + level + " came with the new output, back to the "
+                        + Math.round(fineBeforePress * 10) / 10f + "% kept");
+                    finePct = fineBeforePress;
+                }
+
+                fineBeforePress = -1;
                 fineKeepUntil = SystemClock.uptimeMillis() + FINE_KEEP_MS;
             }
 
@@ -321,6 +340,8 @@ final class SysVolume {
             // step of its own is still waiting to be put in
             if (fineOn && !training && fineStep >= 0 && level != fineStep && max > 0 && stepWaiting < 0) {
 
+                fineBeforePress = finePct;
+                finePressAt = SystemClock.uptimeMillis();
                 fineStep = level;
                 finePct = stepPct(level, max);
                 fineGain = 1;
