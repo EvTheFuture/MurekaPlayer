@@ -1769,6 +1769,15 @@
         z-index: 2147483500;
     }
 
+    .crFootRoom {
+        flex: 0 0 auto;
+        height: 8px;
+    }
+
+    html.phone .crFootRoom {
+        height: calc(48px + env(safe-area-inset-bottom));
+    }
+
     .chip.crPrimary.crBottom {
         flex: 1 1 auto;
         justify-content: center;
@@ -34872,6 +34881,13 @@
         form.appendChild(crRow([crChip("Create", function () {
             crMake(false);
         }, "crPrimary crBottom")]));
+
+        // Room under it, so a phone browser's bar laid over the page's foot
+        // does not hide the button once scrolled to the end
+        const footRoom = document.createElement("div");
+
+        footRoom.className = "crFootRoom";
+        form.appendChild(footRoom);
         crUi.acts.push($("crMake"));
         crUi.acts.push($("crReset"));
     }

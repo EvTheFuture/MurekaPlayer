@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.343";
+    const VERSION = "2.0.1.344";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -76179,6 +76179,13 @@
         ui.acts.push(ui.makeBottom);
         createEl.appendChild(ui.makeBottom);
 
+        // Room under it, so Safari's bar laid over the page's foot does not
+        // hide the button once scrolled to the end
+        const footRoom = document.createElement("div");
+
+        footRoom.style.cssText = "flex:0 0 auto;height:calc(48px + env(safe-area-inset-bottom))";
+        createEl.appendChild(footRoom);
+
         // While Mureka works the page dims under a large turning ring, as
         // in the trimmer, the text still seen filling in
         ui.wait = document.createElement("div");
@@ -84227,6 +84234,15 @@
         padding: 16px;
         box-sizing: border-box;
         z-index: 2147483500;
+    }
+
+    .crFootRoom {
+        flex: 0 0 auto;
+        height: 8px;
+    }
+
+    html.phone .crFootRoom {
+        height: calc(48px + env(safe-area-inset-bottom));
     }
 
     .chip.crPrimary.crBottom {
@@ -117332,6 +117348,13 @@
         form.appendChild(crRow([crChip("Create", function () {
             crMake(false);
         }, "crPrimary crBottom")]));
+
+        // Room under it, so a phone browser's bar laid over the page's foot
+        // does not hide the button once scrolled to the end
+        const footRoom = document.createElement("div");
+
+        footRoom.className = "crFootRoom";
+        form.appendChild(footRoom);
         crUi.acts.push($("crMake"));
         crUi.acts.push($("crReset"));
     }
