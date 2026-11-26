@@ -148,6 +148,57 @@
         return b;
     }
 
+    // A box to tick and its name, drawn here, as a page's own style can
+    // hide a browser's checkbox. Answers { el, checked } with checked
+    // read and set like a checkbox's; change(on) told after each tap
+    function uiTick(label, change) {
+
+        const el = document.createElement("button");
+        const box = document.createElement("span");
+        const name = document.createElement("span");
+        const tick = { el: el };
+        let on = false;
+
+        const paint = function () {
+
+            el.classList.toggle("on", on);
+            el.setAttribute("aria-checked", on ? "true" : "false");
+            box.textContent = on ? "\u2713" : "";
+        };
+
+        uiStyle();
+        el.type = "button";
+        el.className = "mp-ui-tick";
+        el.setAttribute("role", "checkbox");
+        box.className = "mp-ui-tick-box";
+        name.className = "mp-ui-tick-name";
+        name.textContent = label;
+        el.appendChild(box);
+        el.appendChild(name);
+        el.addEventListener("click", function () {
+
+            on = !on;
+            paint();
+
+            if (typeof change === "function") {
+                change(on);
+            }
+        });
+        Object.defineProperty(tick, "checked", {
+            get: function () {
+                return on;
+            },
+            set: function (v) {
+
+                on = v === true;
+                paint();
+            }
+        });
+        paint();
+
+        return tick;
+    }
+
     // Which kinds to take along or bring in, as the player and the web view
     // both ask: All and None side by side when asked for, a box to tick for
     // each kind with a count at the end when it has one, then Cancel and

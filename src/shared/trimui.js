@@ -59,8 +59,7 @@
         + ".mp-tr-cover .trimRow{display:flex;align-items:center;gap:8px}"
         + ".mp-tr-cover .pBtn{flex:1 1 0;min-height:30px;padding:7px 4px;border:none;border-radius:6px;background:#333;color:#fff;"
         + "font:inherit;font-weight:600;cursor:pointer}"
-        + ".mp-tr-cover .pBtn.on{background:" + ACCENT + ";color:#000}"
-        + ".mp-tr-cover .trimCheck input{width:18px;height:18px;margin:0;accent-color:" + ACCENT + "}";
+        + ".mp-tr-cover .pBtn.on{background:" + ACCENT + ";color:#000}";
 
     // The style sheet, once in a page
     function trimStyle() {
@@ -482,13 +481,10 @@
         askBox.className = "trimAskBox";
         ui.askText = document.createElement("div");
 
-        const deleteLabel = document.createElement("label");
+        // A box drawn here, as mureka.ai's own style hides the browser's
+        ui.askDelete = uiTick("Delete original");
 
-        deleteLabel.className = "trimRow trimCheck";
-        ui.askDelete = document.createElement("input");
-        ui.askDelete.type = "checkbox";
-        deleteLabel.appendChild(ui.askDelete);
-        deleteLabel.appendChild(document.createTextNode("Delete original"));
+        const deleteLabel = ui.askDelete.el;
 
         const askButtons = document.createElement("div");
 

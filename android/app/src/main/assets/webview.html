@@ -7624,19 +7624,6 @@
         line-height: 1.4;
     }
 
-    .trimCheck {
-        cursor: pointer;
-    }
-
-    /* In the accent color when ticked, plain grey is hard to read */
-    .trimCheck input {
-        width: 22px;
-        height: 22px;
-        margin: 0;
-        accent-color: var(--accent);
-        cursor: pointer;
-    }
-
     /* Every button lights up and dips a little while it is pressed, so a
        tap is seen to have landed even when what it does shows elsewhere */
     button {
@@ -12701,6 +12688,57 @@
         b.style.boxShadow = "inset 0 0 0 2px " + DANGER;
 
         return b;
+    }
+
+    // A box to tick and its name, drawn here, as a page's own style can
+    // hide a browser's checkbox. Answers { el, checked } with checked
+    // read and set like a checkbox's; change(on) told after each tap
+    function uiTick(label, change) {
+
+        const el = document.createElement("button");
+        const box = document.createElement("span");
+        const name = document.createElement("span");
+        const tick = { el: el };
+        let on = false;
+
+        const paint = function () {
+
+            el.classList.toggle("on", on);
+            el.setAttribute("aria-checked", on ? "true" : "false");
+            box.textContent = on ? "\u2713" : "";
+        };
+
+        uiStyle();
+        el.type = "button";
+        el.className = "mp-ui-tick";
+        el.setAttribute("role", "checkbox");
+        box.className = "mp-ui-tick-box";
+        name.className = "mp-ui-tick-name";
+        name.textContent = label;
+        el.appendChild(box);
+        el.appendChild(name);
+        el.addEventListener("click", function () {
+
+            on = !on;
+            paint();
+
+            if (typeof change === "function") {
+                change(on);
+            }
+        });
+        Object.defineProperty(tick, "checked", {
+            get: function () {
+                return on;
+            },
+            set: function (v) {
+
+                on = v === true;
+                paint();
+            }
+        });
+        paint();
+
+        return tick;
     }
 
     // Which kinds to take along or bring in, as the player and the web view
@@ -43433,8 +43471,7 @@
         + ".mp-tr-cover .trimRow{display:flex;align-items:center;gap:8px}"
         + ".mp-tr-cover .pBtn{flex:1 1 0;min-height:30px;padding:7px 4px;border:none;border-radius:6px;background:#333;color:#fff;"
         + "font:inherit;font-weight:600;cursor:pointer}"
-        + ".mp-tr-cover .pBtn.on{background:" + ACCENT + ";color:#000}"
-        + ".mp-tr-cover .trimCheck input{width:18px;height:18px;margin:0;accent-color:" + ACCENT + "}";
+        + ".mp-tr-cover .pBtn.on{background:" + ACCENT + ";color:#000}";
 
     // The style sheet, once in a page
     function trimStyle() {
@@ -43856,13 +43893,10 @@
         askBox.className = "trimAskBox";
         ui.askText = document.createElement("div");
 
-        const deleteLabel = document.createElement("label");
+        // A box drawn here, as mureka.ai's own style hides the browser's
+        ui.askDelete = uiTick("Delete original");
 
-        deleteLabel.className = "trimRow trimCheck";
-        ui.askDelete = document.createElement("input");
-        ui.askDelete.type = "checkbox";
-        deleteLabel.appendChild(ui.askDelete);
-        deleteLabel.appendChild(document.createTextNode("Delete original"));
+        const deleteLabel = ui.askDelete.el;
 
         const askButtons = document.createElement("div");
 
