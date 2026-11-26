@@ -251,9 +251,9 @@
             close({ x: x, y: y, s: s, w: W, h: H });
         };
 
-        row.appendChild(button("Cancel", "#444", "#fff", function () {
+        row.appendChild(uiCancelLook(button("Cancel", "#444", "#fff", function () {
             close(null);
-        }));
+        })));
         row.appendChild(button("Set cover", ACCENT, "#000", finish));
 
         // The page's own keys never hear what is pressed here

@@ -216,7 +216,7 @@
             return b;
         };
 
-        buttons.appendChild(button("Cancel", false, false));
+        buttons.appendChild(uiCancelLook(button("Cancel", false, false)));
         buttons.appendChild(button("Done", true, true));
 
         box.appendChild(head);

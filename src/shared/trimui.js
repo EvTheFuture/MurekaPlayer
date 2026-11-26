@@ -87,6 +87,11 @@
         b.textContent = label;
         b.addEventListener("click", fn);
 
+        // Cancel ringed in red, as everywhere
+        if (uiIsCancel(label)) {
+            uiCancelLook(b);
+        }
+
         // Lit while pressed and a moment after, so even a quick tap is
         // seen to land
         b.addEventListener("pointerdown", function () {

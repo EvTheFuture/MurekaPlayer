@@ -34,6 +34,19 @@
         + ".mp-ui-btn.yes{background:" + ACCENT + ";color:#000}"
         + ".mp-ui-btn.yes.danger{background:" + DANGER + ";color:#000}"
         + ".mp-ui-btn.ring{background:transparent;color:var(--ring," + ACCENT + ");box-shadow:inset 0 0 0 2px var(--ring," + ACCENT + ")}"
+        + ".mp-ui-btn.cancel{background:transparent;color:" + DANGER + ";box-shadow:inset 0 0 0 2px " + DANGER + "}"
+        + ".mp-ui-btn.full{background:" + DANGER + ";color:#000;box-shadow:none}"
+        + ".mp-ui-band{display:flex;flex-direction:column;gap:2px;border-top:1px solid #3a3a42;border-bottom:1px solid #3a3a42;padding:6px 0}"
+        + ".mp-ui-tick{display:flex;align-items:center;gap:10px;width:100%;min-height:0;cursor:pointer;background:transparent;border:none;"
+        + "box-shadow:none;color:#fff;font:inherit;font-size:14px;padding:8px 4px;margin:0;text-align:left}"
+        + ".mp-ui-tick-box{flex:0 0 auto;width:20px;height:20px;box-sizing:border-box;border-radius:5px;display:flex;align-items:center;"
+        + "justify-content:center;font-weight:700;font-size:15px;line-height:1;color:#000;border:2px solid #8a8a94}"
+        + ".mp-ui-tick.on .mp-ui-tick-box{background:" + ACCENT + ";border-color:" + ACCENT + "}"
+        + ".mp-ui-tick-name{flex:1 1 auto;min-width:0}"
+        + ".mp-ui-tick-count{flex:0 0 auto;color:#888;font-size:12px}"
+        + "@media (pointer:coarse){.mp-ui-tick{min-height:44px}}"
+        + ".mp-ui-pair{display:flex;gap:8px}"
+        + ".mp-ui-pair .mp-ui-btn{flex:1 1 0;min-width:0}"
         + ".mp-ui-ch{background:#26262c;border:1px solid #3a3a42;border-radius:10px;padding:14px;width:100%;max-width:360px;"
         + "max-height:100%;overflow-y:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:10px;color:#fff;"
         + "font-size:13px;text-align:left}"
@@ -105,18 +118,148 @@
         return ring;
     }
 
-    // A plain button, dim for one that closes
+    // A plain button, dim for one that closes. Cancel is always ringed in
+    // red, everywhere, so the way out looks the same in every dialog
     function uiBtn(label, fn, dim) {
 
         const b = document.createElement("button");
 
         uiStyle();
         b.type = "button";
-        b.className = "mp-ui-btn" + (dim ? " dim" : "");
+        b.className = "mp-ui-btn" + (dim ? " dim" : "") + (uiIsCancel(label) ? " cancel" : "");
         b.textContent = label;
         b.addEventListener("click", fn);
 
         return b;
+    }
+
+    // Whether a button's name is Cancel, which is ringed in red
+    function uiIsCancel(label) {
+        return String(label || "").trim() === "Cancel";
+    }
+
+    // Cancel's red ring on a button styled by hand, see uiBtn
+    function uiCancelLook(b) {
+
+        b.style.background = "transparent";
+        b.style.color = DANGER;
+        b.style.boxShadow = "inset 0 0 0 2px " + DANGER;
+
+        return b;
+    }
+
+    // Which kinds to take along or bring in, as the player and the web view
+    // both ask: All and None side by side when asked for, a box to tick for
+    // each kind with a count at the end when it has one, then Cancel and
+    // the button that goes on. col: where they go. o: kinds as [{ label,
+    // on, count }], on kept up to date; quick, All and None; action, the
+    // name of the button that goes on; need, at least one kind ticked for
+    // it; change(), told after each tap that ticks or unticks; go(),
+    // onCancel()
+    function uiKinds(col, o) {
+
+        uiStyle();
+        col.classList.add("mp-ui-ch-col");
+        col.classList.remove("tall");
+
+        const ticks = [];
+        const band = document.createElement("div");
+        const foot = document.createElement("div");
+        const cancel = uiBtn("Cancel", function () {
+            o.onCancel();
+        });
+        const go = uiBtn(o.action, function () {
+            o.go();
+        });
+
+        const paint = function () {
+
+            for (const t of ticks) {
+
+                t.el.classList.toggle("on", t.kind.on === true);
+                t.el.setAttribute("aria-checked", t.kind.on === true ? "true" : "false");
+                t.box.textContent = t.kind.on === true ? "\u2713" : "";
+            }
+
+            go.disabled = o.need === true && !o.kinds.some(function (k) {
+                return k.on === true;
+            });
+        };
+
+        const changed = function () {
+
+            paint();
+
+            if (typeof o.change === "function") {
+                o.change();
+            }
+        };
+
+        const setAll = function (value) {
+
+            for (const k of o.kinds) {
+                k.on = value;
+            }
+
+            changed();
+        };
+
+        if (o.quick) {
+
+            const quick = document.createElement("div");
+
+            quick.className = "mp-ui-pair";
+            quick.appendChild(uiBtn("All", function () {
+                setAll(true);
+            }));
+            quick.appendChild(uiBtn("None", function () {
+                setAll(false);
+            }));
+            col.appendChild(quick);
+        }
+
+        band.className = "mp-ui-band";
+
+        for (const kind of o.kinds) {
+
+            const el = document.createElement("button");
+            const box = document.createElement("span");
+            const name = document.createElement("span");
+
+            el.type = "button";
+            el.className = "mp-ui-tick";
+            el.setAttribute("role", "checkbox");
+            box.className = "mp-ui-tick-box";
+            name.className = "mp-ui-tick-name";
+            name.textContent = kind.label;
+            el.appendChild(box);
+            el.appendChild(name);
+
+            if (kind.count !== undefined && kind.count !== null && kind.count !== "") {
+
+                const count = document.createElement("span");
+
+                count.className = "mp-ui-tick-count";
+                count.textContent = String(kind.count);
+                el.appendChild(count);
+            }
+
+            el.addEventListener("click", function () {
+
+                kind.on = kind.on !== true;
+                changed();
+            });
+            band.appendChild(el);
+            ticks.push({ el: el, box: box, kind: kind });
+        }
+
+        col.appendChild(band);
+        foot.className = "mp-ui-pair";
+        go.classList.add("yes");
+        foot.appendChild(cancel);
+        foot.appendChild(go);
+        col.appendChild(foot);
+        paint();
     }
 
     // A line saying something is being read, with its ring
@@ -206,7 +349,8 @@
     // and the words about it .mp-ui-ch-text, each side builds those.
     // col: where the answers go. o: options as [{ label, sub, look, color,
     // disabled, fn }], look "" filled, "plain" grey, "ring" ringed in color
-    // or the accent; tall, larger
+    // or the accent, "danger" filled in red for one that takes something
+    // away; tall, larger
     // answers where a wrong tap does something else at once; check as
     // { label, on, change() }, on kept up to date; cancel, Cancel's name
     // or false for none; pick(fn) runs an answer, onCancel runs on Cancel
@@ -223,8 +367,13 @@
             });
             const look = opt.look || "";
 
-            b.classList.toggle("yes", look === "");
-            b.classList.toggle("ring", look === "ring");
+            // An answer named Cancel ringed in red like the Cancel at the foot
+            const out = uiIsCancel(opt.label);
+
+            b.classList.toggle("yes", look === "" && !out);
+            b.classList.toggle("ring", look === "ring" && !out);
+            b.classList.toggle("full", look === "danger" && !out);
+            b.classList.toggle("cancel", out);
             b.disabled = opt.disabled === true;
 
             if (look === "ring" && opt.color) {
@@ -266,13 +415,12 @@
             col.appendChild(row);
         }
 
-        // Cancel ringed in red, apart from the answers
+        // Cancel ringed in red, apart from the answers, whatever its name
         if (o.cancel !== false) {
 
             const cancel = uiBtn(o.cancel || "Cancel", o.onCancel || function () {}, true);
 
-            cancel.classList.add("ring");
-            cancel.style.setProperty("--ring", DANGER);
+            cancel.classList.add("cancel");
             col.appendChild(cancel);
         }
     }
