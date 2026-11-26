@@ -266,7 +266,13 @@
             col.appendChild(row);
         }
 
+        // Cancel ringed in red, apart from the answers
         if (o.cancel !== false) {
-            col.appendChild(uiBtn(o.cancel || "Cancel", o.onCancel || function () {}, true));
+
+            const cancel = uiBtn(o.cancel || "Cancel", o.onCancel || function () {}, true);
+
+            cancel.classList.add("ring");
+            cancel.style.setProperty("--ring", DANGER);
+            col.appendChild(cancel);
         }
     }

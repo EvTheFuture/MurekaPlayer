@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.346";
+    const VERSION = "2.0.1.347";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -16579,8 +16579,14 @@
             col.appendChild(row);
         }
 
+        // Cancel ringed in red, apart from the answers
         if (o.cancel !== false) {
-            col.appendChild(uiBtn(o.cancel || "Cancel", o.onCancel || function () {}, true));
+
+            const cancel = uiBtn(o.cancel || "Cancel", o.onCancel || function () {}, true);
+
+            cancel.classList.add("ring");
+            cancel.style.setProperty("--ring", DANGER);
+            col.appendChild(cancel);
         }
     }
     // END SHARED ui
@@ -95662,8 +95668,14 @@
             col.appendChild(row);
         }
 
+        // Cancel ringed in red, apart from the answers
         if (o.cancel !== false) {
-            col.appendChild(uiBtn(o.cancel || "Cancel", o.onCancel || function () {}, true));
+
+            const cancel = uiBtn(o.cancel || "Cancel", o.onCancel || function () {}, true);
+
+            cancel.classList.add("ring");
+            cancel.style.setProperty("--ring", DANGER);
+            col.appendChild(cancel);
         }
     }
     // END SHARED ui
