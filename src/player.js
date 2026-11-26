@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.360";
+    const VERSION = "2.0.1.361";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -73060,6 +73060,10 @@
         };
     }
 
+    // The ways a song to remix is chosen, by the button that chose it,
+    // shown pressed while it is the one remixed
+    const CREATE_REMIX_VIA = ["resources", "library", "upload", "record"];
+
     function createCleanDraft(d) {
 
         const x = d && typeof d === "object" ? d : {};
@@ -73087,6 +73091,7 @@
             remixName: createText(x.remixName, 120),
             remixStyle: createText(x.remixStyle, CREATE_STYLE_MAX),
             remixSource: createCleanSource(x.remixSource),
+            remixVia: CREATE_REMIX_VIA.indexOf(x.remixVia) >= 0 ? x.remixVia : "",
             lengthMs: lengths.indexOf(Number(x.lengthMs)) >= 0 ? Number(x.lengthMs) : 0,
             wildness: isFinite(wild) ? Math.max(0, Math.min(100, wild)) : 50,
             theme: createText(x.theme, CREATE_THEME_MAX),
@@ -75958,7 +75963,8 @@
             remix: null,
             remixName: "",
             remixStyle: "",
-            remixSource: null
+            remixSource: null,
+            remixVia: ""
         };
 
         if (model) {
@@ -76278,7 +76284,8 @@
                     remix: null,
                     remixName: "",
                     remixStyle: "",
-                    remixSource: null
+                    remixSource: null,
+                    remixVia: ""
                 });
 
                 if (made.voice) {
@@ -76769,9 +76776,6 @@
             changeCreateDraft({ style: createDraft.remixStyle, stylePromptId: "", stylePromptText: "" });
             setCreateNote("The style is the one Mureka heard in the song");
         }), CTRL_ACCENT);
-        ui.remixClearBtn = createRing(act("No remix", function () {
-            changeCreateDraft({ remix: null, remixName: "", remixStyle: "", remixSource: null });
-        }), DANGER);
 
         // The part of the uploaded song, chosen again on its waveform
         ui.remixPartBtn = createRing(act("Choose the part", function () {
@@ -76785,15 +76789,38 @@
                 }), null, true);
             }
         }), CTRL_ACCENT);
+        // The way the song remixed was chosen shown pressed, and a tap on it
+        // again lets it go, a new song made
+        const viaBtn = function (via, label, fn) {
+
+            const b = act(label, function () {
+
+                const d = loadCreateDraft();
+
+                if (d.remix && d.remixVia === via) {
+
+                    changeCreateDraft({ remix: null, remixName: "", remixStyle: "", remixSource: null, remixVia: "" });
+                    return;
+                }
+
+                fn();
+            });
+
+            ui.remixVia[via] = b;
+
+            return b;
+        };
+
+        ui.remixVia = {};
         createEl.appendChild(createButtonRow([
-            act("Choose a song", createRemixFromPage),
-            act("Library song", createRemixLibraryFromPage)
+            viaBtn("resources", "Choose a song", createRemixFromPage),
+            viaBtn("library", "Library song", createRemixLibraryFromPage)
         ]));
         createEl.appendChild(createButtonRow([
-            act("Upload a song", createUploadFromPage),
-            act("Record a song", createRecordFromPage)
+            viaBtn("upload", "Upload a song", createUploadFromPage),
+            viaBtn("record", "Record a song", createRecordFromPage)
         ]));
-        createEl.appendChild(createButtonRow([ui.remixPartBtn, ui.remixStyleBtn, ui.remixClearBtn]));
+        createEl.appendChild(createButtonRow([ui.remixPartBtn, ui.remixStyleBtn]));
 
         ui.easyTo = createEl.children.length;
 
@@ -77119,6 +77146,16 @@
                     + trimTimeText((d.remix.trim_end_ms - (d.remix.trim_start_ms || 0)) / 1000) : "")
             : "None, a new song";
         ui.remixName.style.color = d.remix ? "#fff" : "#888";
+
+        for (const via of CREATE_REMIX_VIA) {
+
+            const on = !!d.remix && d.remixVia === via;
+
+            ui.remixVia[via].style.background = on ? ACCENT : "#333";
+            ui.remixVia[via].style.color = on ? "#000" : "#fff";
+            ui.remixVia[via].setAttribute("aria-pressed", on ? "true" : "false");
+        }
+
         ui.remixStyleBtn.parentElement.style.display = d.remix ? "flex" : "none";
         ui.remixStyleBtn.style.display = d.remix && d.remixStyle && d.remixStyle.trim() !== d.style.trim() ? "" : "none";
         ui.remixPartBtn.style.display = d.remix && d.remixSource ? "" : "none";
@@ -77939,7 +77976,8 @@
             remix: used.remix,
             remixName: used.name,
             remixStyle: used.style,
-            remixSource: res.url ? createCleanSource({ id: res.id, title: res.title, ms: res.ms, url: res.url, kind: res.kind }) : null
+            remixSource: res.url ? createCleanSource({ id: res.id, title: res.title, ms: res.ms, url: res.url, kind: res.kind }) : null,
+            remixVia: CREATE_REMIX_VIA.indexOf(res.via) >= 0 ? res.via : (res.kind === "song" ? "library" : "resources")
         };
 
         if (!d.style.trim() && used.style) {
@@ -78150,6 +78188,10 @@
         });
 
         if (res) {
+
+            // A recording, named so by the recorder, or a file
+            res.via = /^Recording \d/.test(file.name || "") ? "record" : "upload";
+
             return createUseResource(res, null, pickHere === true);
         }
 
@@ -85020,11 +85062,11 @@
     /* A row of buttons all as wide, as many across as fit */
     .plEdActs.crEven {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
     }
 
     html.phone .plEdActs.crEven {
-        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     }
 
     .plEdActs.crEven > .chip {
@@ -85195,15 +85237,15 @@
         display: flex;
     }
 
-    /* Its choices all as wide as the widest */
-    .crSeg.crEvenSeg {
-        display: inline-grid;
-        grid-auto-flow: column;
-        grid-auto-columns: 1fr;
+    /* A choice under its name, across the whole width */
+    .crLine.crStack {
+        flex-direction: column;
+        align-items: stretch;
     }
 
-    html.phone .crSeg.crEvenSeg button {
-        padding: 0 12px;
+    .crLine.crStack > .crSeg {
+        width: 100%;
+        box-sizing: border-box;
     }
 
     .crSeg.crWide button {
@@ -85292,6 +85334,13 @@
         border-color: #3a3a44;
         color: var(--text);
         font-weight: 600;
+    }
+
+    /* Pressed: the way the song remixed was chosen */
+    .chip.crFill.crOn {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #000;
     }
 
     /* The length's step buttons, round */
@@ -118300,7 +118349,8 @@
 
     // An even row's buttons never narrower than its longest name needs,
     // at the size the screen gives the words: measured again whenever the
-    // row changes width, fewer across when the names need it
+    // row changes width, fewer across when the names need it, and fewer
+    // buttons than fit stretched to fill the row
     const crEvenSeen = typeof ResizeObserver === "function" ? new ResizeObserver(function (list) {
 
         for (const e of list) {
@@ -118340,7 +118390,7 @@
         }
 
         if (widest > 0) {
-            row.style.gridTemplateColumns = "repeat(auto-fill, minmax(" + Math.min(room, widest) + "px, 1fr))";
+            row.style.gridTemplateColumns = "repeat(auto-fit, minmax(" + Math.min(room, widest) + "px, 1fr))";
         }
     }
 
@@ -118437,12 +118487,13 @@
     }
 
     // A line with its name on the left and what is chosen on the right
-    function crLine(name, right) {
+    // stack: the choice under the name, across the whole width
+    function crLine(name, right, stack) {
 
         const row = document.createElement("div");
         const label = document.createElement("span");
 
-        row.className = "crLine";
+        row.className = "crLine" + (stack ? " crStack" : "");
         label.className = "crLineName";
         label.textContent = name;
         row.appendChild(label);
@@ -118668,8 +118719,8 @@
             { label: "Female", value: "female" },
             { label: "Character", value: "character" }
         ], "voice");
-        ui.voice.classList.add("crEvenSeg");
-        ui.voiceBox.appendChild(crLine("Voice", [ui.voice]));
+        ui.voice.classList.add("crWide");
+        ui.voiceBox.appendChild(crLine("Voice", [ui.voice], true));
         ui.characterName = document.createElement("span");
         ui.characterName.className = "crName";
         ui.characterRow = crRow([ui.characterName, crChip("Choose", function () {
@@ -118699,22 +118750,39 @@
                     ? { start: crDraft.remix.trim_start_ms || 0, end: crDraft.remix.trim_end_ms || 0 } : null);
             }
         });
-        ui.remixClear = crChip("No remix", function () {
-            crSet({ remix: null, remixName: "", remixStyle: "", remixSource: null });
-        }, "fail");
+        // The way the song remixed was chosen shown pressed, and a tap on it
+        // again lets it go, a new song made
+        const viaChip = function (via, label, fn) {
+
+            const b = crChip(label, function () {
+
+                if (crDraft && crDraft.remix && crDraft.remixVia === via) {
+
+                    crSet({ remix: null, remixName: "", remixStyle: "", remixSource: null, remixVia: "" });
+                    return;
+                }
+
+                fn();
+            }, "crFill");
+
+            ui.remixVia[via] = b;
+
+            return b;
+        };
+
+        ui.remixVia = {};
         remix.appendChild(crRow([
-            crChip("Choose a song", function () {
+            viaChip("resources", "Choose a song", function () {
                 openCrPick("resources");
-            }, "crFill"),
-            crChip("Library song", function () {
+            }),
+            viaChip("library", "Library song", function () {
                 openCrPick("library");
-            }, "crFill"),
-            crChip("Upload a song", crUpload, "crFill"),
-            crChip("Record a song", crRecord, "crFill"),
-            ui.remixPart,
-            ui.remixStyle,
-            ui.remixClear
+            }),
+            viaChip("upload", "Upload a song", crUpload),
+            viaChip("record", "Record a song", crRecord)
         ], true));
+        ui.remixMore = crRow([ui.remixPart, ui.remixStyle], true);
+        remix.appendChild(ui.remixMore);
 
         // The length on a slider, all the way left automatic, with a step
         // of ten seconds either way on the buttons, and the wildness
@@ -118773,7 +118841,8 @@
             { label: "Play when ready", value: "now" },
             { label: "Play next", value: "after" }
         ], "playMode");
-        ready.appendChild(crLine("Play", [ui.playMode]));
+        ui.playMode.classList.add("crWide");
+        ready.appendChild(crLine("Play", [ui.playMode], true));
         ui.setOn = document.createElement("button");
         ui.setOn.type = "button";
         ui.setOn.className = "crSwitch";
@@ -119000,7 +119069,16 @@
             ui.remixPart.style.display = fresh.remix && fresh.remixSource ? "" : "none";
             ui.remixName.classList.toggle("crNone", !fresh.remix);
             ui.remixStyle.style.display = fresh.remix && fresh.remixStyle && fresh.remixStyle.trim() !== String(fresh.style || "").trim() ? "" : "none";
-            ui.remixClear.style.display = fresh.remix ? "" : "none";
+            ui.remixMore.style.display = fresh.remix ? "" : "none";
+
+            for (const via in ui.remixVia) {
+
+                const on = !!fresh.remix && fresh.remixVia === via;
+
+                ui.remixVia[via].classList.toggle("crOn", on);
+                ui.remixVia[via].setAttribute("aria-pressed", on ? "true" : "false");
+            }
+
             if (Array.isArray(c.models) && !ui.model) {
 
                 ui.model = crSegments(c.models, "model");

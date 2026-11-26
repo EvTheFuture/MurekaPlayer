@@ -1793,11 +1793,11 @@
     /* A row of buttons all as wide, as many across as fit */
     .plEdActs.crEven {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
     }
 
     html.phone .plEdActs.crEven {
-        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     }
 
     .plEdActs.crEven > .chip {
@@ -1968,15 +1968,15 @@
         display: flex;
     }
 
-    /* Its choices all as wide as the widest */
-    .crSeg.crEvenSeg {
-        display: inline-grid;
-        grid-auto-flow: column;
-        grid-auto-columns: 1fr;
+    /* A choice under its name, across the whole width */
+    .crLine.crStack {
+        flex-direction: column;
+        align-items: stretch;
     }
 
-    html.phone .crSeg.crEvenSeg button {
-        padding: 0 12px;
+    .crLine.crStack > .crSeg {
+        width: 100%;
+        box-sizing: border-box;
     }
 
     .crSeg.crWide button {
@@ -2065,6 +2065,13 @@
         border-color: #3a3a44;
         color: var(--text);
         font-weight: 600;
+    }
+
+    /* Pressed: the way the song remixed was chosen */
+    .chip.crFill.crOn {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #000;
     }
 
     /* The length's step buttons, round */
@@ -35073,7 +35080,8 @@
 
     // An even row's buttons never narrower than its longest name needs,
     // at the size the screen gives the words: measured again whenever the
-    // row changes width, fewer across when the names need it
+    // row changes width, fewer across when the names need it, and fewer
+    // buttons than fit stretched to fill the row
     const crEvenSeen = typeof ResizeObserver === "function" ? new ResizeObserver(function (list) {
 
         for (const e of list) {
@@ -35113,7 +35121,7 @@
         }
 
         if (widest > 0) {
-            row.style.gridTemplateColumns = "repeat(auto-fill, minmax(" + Math.min(room, widest) + "px, 1fr))";
+            row.style.gridTemplateColumns = "repeat(auto-fit, minmax(" + Math.min(room, widest) + "px, 1fr))";
         }
     }
 
@@ -35210,12 +35218,13 @@
     }
 
     // A line with its name on the left and what is chosen on the right
-    function crLine(name, right) {
+    // stack: the choice under the name, across the whole width
+    function crLine(name, right, stack) {
 
         const row = document.createElement("div");
         const label = document.createElement("span");
 
-        row.className = "crLine";
+        row.className = "crLine" + (stack ? " crStack" : "");
         label.className = "crLineName";
         label.textContent = name;
         row.appendChild(label);
@@ -35441,8 +35450,8 @@
             { label: "Female", value: "female" },
             { label: "Character", value: "character" }
         ], "voice");
-        ui.voice.classList.add("crEvenSeg");
-        ui.voiceBox.appendChild(crLine("Voice", [ui.voice]));
+        ui.voice.classList.add("crWide");
+        ui.voiceBox.appendChild(crLine("Voice", [ui.voice], true));
         ui.characterName = document.createElement("span");
         ui.characterName.className = "crName";
         ui.characterRow = crRow([ui.characterName, crChip("Choose", function () {
@@ -35472,22 +35481,39 @@
                     ? { start: crDraft.remix.trim_start_ms || 0, end: crDraft.remix.trim_end_ms || 0 } : null);
             }
         });
-        ui.remixClear = crChip("No remix", function () {
-            crSet({ remix: null, remixName: "", remixStyle: "", remixSource: null });
-        }, "fail");
+        // The way the song remixed was chosen shown pressed, and a tap on it
+        // again lets it go, a new song made
+        const viaChip = function (via, label, fn) {
+
+            const b = crChip(label, function () {
+
+                if (crDraft && crDraft.remix && crDraft.remixVia === via) {
+
+                    crSet({ remix: null, remixName: "", remixStyle: "", remixSource: null, remixVia: "" });
+                    return;
+                }
+
+                fn();
+            }, "crFill");
+
+            ui.remixVia[via] = b;
+
+            return b;
+        };
+
+        ui.remixVia = {};
         remix.appendChild(crRow([
-            crChip("Choose a song", function () {
+            viaChip("resources", "Choose a song", function () {
                 openCrPick("resources");
-            }, "crFill"),
-            crChip("Library song", function () {
+            }),
+            viaChip("library", "Library song", function () {
                 openCrPick("library");
-            }, "crFill"),
-            crChip("Upload a song", crUpload, "crFill"),
-            crChip("Record a song", crRecord, "crFill"),
-            ui.remixPart,
-            ui.remixStyle,
-            ui.remixClear
+            }),
+            viaChip("upload", "Upload a song", crUpload),
+            viaChip("record", "Record a song", crRecord)
         ], true));
+        ui.remixMore = crRow([ui.remixPart, ui.remixStyle], true);
+        remix.appendChild(ui.remixMore);
 
         // The length on a slider, all the way left automatic, with a step
         // of ten seconds either way on the buttons, and the wildness
@@ -35546,7 +35572,8 @@
             { label: "Play when ready", value: "now" },
             { label: "Play next", value: "after" }
         ], "playMode");
-        ready.appendChild(crLine("Play", [ui.playMode]));
+        ui.playMode.classList.add("crWide");
+        ready.appendChild(crLine("Play", [ui.playMode], true));
         ui.setOn = document.createElement("button");
         ui.setOn.type = "button";
         ui.setOn.className = "crSwitch";
@@ -35773,7 +35800,16 @@
             ui.remixPart.style.display = fresh.remix && fresh.remixSource ? "" : "none";
             ui.remixName.classList.toggle("crNone", !fresh.remix);
             ui.remixStyle.style.display = fresh.remix && fresh.remixStyle && fresh.remixStyle.trim() !== String(fresh.style || "").trim() ? "" : "none";
-            ui.remixClear.style.display = fresh.remix ? "" : "none";
+            ui.remixMore.style.display = fresh.remix ? "" : "none";
+
+            for (const via in ui.remixVia) {
+
+                const on = !!fresh.remix && fresh.remixVia === via;
+
+                ui.remixVia[via].classList.toggle("crOn", on);
+                ui.remixVia[via].setAttribute("aria-pressed", on ? "true" : "false");
+            }
+
             if (Array.isArray(c.models) && !ui.model) {
 
                 ui.model = crSegments(c.models, "model");
