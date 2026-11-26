@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.356";
+    const VERSION = "2.0.1.357";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -4700,6 +4700,7 @@
             trimZoom: 3,
             pauseOnDisconnect: false,
             noLoudWarning: false,
+            volLevels: 100,
             playOnConnect: "never",
             coverResend: "title",
             controlOrder: "repeat,shuffle,stop,play",
@@ -4972,6 +4973,7 @@
                     trimZoom: numberIn(parsed.trimZoom, 0, 10, 3),
                     pauseOnDisconnect: parsed.pauseOnDisconnect === true,
                     noLoudWarning: parsed.noLoudWarning === true,
+                    volLevels: volLevelsSetting(parsed.volLevels),
                     coverResend: ["art", "id", "title"].indexOf(parsed.coverResend) >= 0
                         ? parsed.coverResend
                         : "title",
@@ -19888,6 +19890,81 @@
         return isFinite(n) && n > 0 ? Math.max(5, Math.min(100, n)) : 0;
     }
 
+    // How many steps More volume steps has in all, from Android's own
+    // number to 100, 100 unless set. Below Android's number it is taken as
+    // that, see the app
+    function volLevelsSetting(v) {
+
+        const n = Math.round(Number(v));
+
+        return isFinite(n) && n >= 2 ? Math.min(100, n) : 100;
+    }
+
+    // The number of More volume steps, as a slider from Android's own
+    // number of steps to 100, the web view drawing its own
+    function volLevelsRow() {
+
+        const row = document.createElement("div");
+        const name = document.createElement("span");
+        const slider = document.createElement("input");
+        const shown = document.createElement("span");
+        const least = function () {
+
+            const max = Number(fineInfo().max);
+
+            return isFinite(max) && max >= 2 && max <= 100 ? max : 15;
+        };
+        const show = function () {
+            shown.textContent = String(Math.max(least(), volLevelsSetting(settings.volLevels)));
+        };
+        const take = function (keep) {
+
+            settings.volLevels = volLevelsSetting(slider.value);
+            show();
+
+            if (keep) {
+
+                saveSettings();
+                pushStepSizes();
+            }
+        };
+
+        row.dataset.hostSlider = "1";
+        row.classList.add("mp-mid10");
+        name.textContent = "Steps";
+        name.style.cssText = "flex:0 1 auto;min-width:0";
+        slider.type = "range";
+        slider.min = String(least());
+        slider.max = "100";
+        slider.step = "1";
+        slider.value = String(Math.max(least(), volLevelsSetting(settings.volLevels)));
+        slider.setAttribute("aria-label", "More volume steps, how many in all");
+        slider.style.cssText = "flex:1;min-width:0;accent-color:" + ACCENT;
+        shown.style.cssText = "flex:0 0 3.5em;text-align:right;font-variant-numeric:tabular-nums";
+        slider.addEventListener("input", function () {
+            take(false);
+        });
+        slider.addEventListener("change", function () {
+            take(true);
+        });
+        settingsRefreshers.push(function () {
+
+            slider.min = String(least());
+
+            if (document.activeElement !== slider) {
+                slider.value = String(Math.max(least(), volLevelsSetting(settings.volLevels)));
+            }
+
+            show();
+        });
+        show();
+        row.appendChild(name);
+        row.appendChild(slider);
+        row.appendChild(shown);
+
+        return row;
+    }
+
     // The step sizes set by hand, to the app, which evens out the volume
     // between the phone's steps by the one of the speaker in use. A
     // speaker without its own takes this device's
@@ -19947,7 +20024,7 @@
                 fallbackLow: s.fallback.lowDb || 0,
                 lowSteps: lowSteps,
                 fallbackLowSteps: s.fallback.lowSteps > 0 ? s.fallback.lowSteps - 1 : 0,
-                byGap: true
+                levels: volLevelsSetting(settings.volLevels)
             }));
         } catch (e) {
             dbgLog("Sound", "volume step sizes not taken: " + errText(e));
@@ -62731,6 +62808,7 @@
                     fineAsk("on", v);
                     window.MurekaHost.fineVolume(v ? "1" : "0");
                 }));
+                soundBox.appendChild(volLevelsRow());
                 soundBox.appendChild(makeBoolRow("Volume buttons move them a step at a time", function () {
                     return fineAsked("buttons");
                 }, function (v) {
@@ -62738,7 +62816,7 @@
                     fineAsk("buttons", v);
                     window.MurekaHost.volumeButtons(v ? "1" : "0");
                 }));
-                soundBox.appendChild(makeHint("More volume steps puts about 100 steps in place of Android's few media volume steps, the player's own sound evening out between them. Each is the same dB louder, so a gap between two of Android's steps has as many as its dB holds, a 6 dB gap twice as many as a 3 dB one, by the speaker's volume steps, trained or set by hand, else Android's own curve. Under Android's first step, the steps set for the speaker. With the volume buttons on as well, they move it a step at a time, with the app on screen and, while its music plays, outside it too, where Android shows its own slider."));
+                soundBox.appendChild(makeHint("More volume steps puts more steps in place of Android's few media volume steps, the player's own sound evening out between them. Steps sets how many in all, from as many as Android's own, where the steps above its first are Android's alone, to 100. Each is about the same dB louder, so a gap between two of Android's steps has as many as its dB holds, a 6 dB gap twice as many as a 3 dB one, by the speaker's volume steps, trained or set by hand, else Android's own curve. Under Android's first step, the steps set for the speaker. With the volume buttons on as well, they move it a step at a time, with the app on screen and, while its music plays, outside it too, where Android shows its own slider."));
 
                 // Android's warning before loud music, confirmed for it
                 // through the hotspot helper, so the car can turn it up

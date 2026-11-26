@@ -162,14 +162,16 @@ final class SysVolume {
     private static int lowSteps = 0;
     private static final int LOW_STEPS_MAX = 40;
 
-    // Whether the levels between two of the phone's steps follow the dB
-    // between them: the levels from the first step to the top as many as
-    // the percents there, each the same dB, the dB from the first step to
-    // the top over their number, so a gap of 6 dB has twice the levels of
-    // one of 3 dB. The steps' dB are those trained or set by hand for the
-    // speaker, else Android's curve. A player too old to ask for it has
-    // one at each whole percent
-    private static boolean byGap = false;
+    // How many steps more steps has in all, from the phone's own number up
+    // to 100. The levels from the first step to the top are one fewer,
+    // shared out between the gaps between the phone's steps by their dB,
+    // each gap at least one, so each level is about the same dB louder and
+    // a gap of 6 dB has twice the levels of one of 3 dB. As many as the
+    // phone's own, each gap has one, the phone's steps alone above the
+    // first. The steps' dB are those trained or set by hand for the
+    // speaker, else Android's curve. 0 from a player too old to send it,
+    // one level at each whole percent
+    private static int levels = 0;
     private static int delayFallback = -1;
     private static int stepDelay = -1;
 
@@ -423,34 +425,82 @@ final class SysVolume {
     }
 
     // How many levels from one of the phone's steps up to the next, step
-    // the upper one: one each whole percent, or the dB between the two
-    // over the dB a level, which is the dB from the first step to the top
-    // over the percents there
+    // the upper one: one each whole percent, or the gap's share of the
+    // levels set, see levels
     private static int spanLevels(int step, int max) {
 
         float lo = stepPct(step - 1, max);
         float hi = stepPct(step, max);
         int whole = Math.max(1, Math.round(hi - lo));
 
-        if (!byGap || audio == null || max < 2) {
+        if (levels <= 0 || audio == null || max < 2) {
             return whole;
         }
+
+        int[] shares = gapShares(max);
+
+        return shares == null ? whole : shares[step];
+    }
+
+    // The levels of each gap, at its upper step, shared out by the gaps'
+    // dB: each as near its share as whole levels go, at least one, the
+    // total the levels set. null when the steps tell no sensible dB
+    private static int[] gapShares(int max) {
 
         int type = outputType();
         boolean own = hasCurve(type, max);
-        float range = stepDb(max, max, type, own) - stepDb(1, max, type, own);
-        float each = range / (stepPct(max, max) - stepPct(1, max));
-        float gap = stepDb(step, max, type, own) - stepDb(step - 1, max, type, own);
+        int total = Math.max(max - 1, Math.min(99, levels - 1));
+        float[] want = new float[max + 1];
+        float sum = 0;
 
-        if (Float.isNaN(each) || Float.isInfinite(each) || each <= 0) {
-            return whole;
+        for (int s = 2; s <= max; s++) {
+
+            float g = stepDb(s, max, type, own) - stepDb(s - 1, max, type, own);
+
+            want[s] = Float.isNaN(g) || Float.isInfinite(g) || g <= 0 ? 0 : g;
+            sum += want[s];
         }
 
-        if (Float.isNaN(gap) || Float.isInfinite(gap) || gap <= 0) {
-            gap = each * (hi - lo);
+        if (sum <= 0) {
+            return null;
         }
 
-        return Math.max(1, Math.min(200, Math.round(gap / each)));
+        int[] out = new int[max + 1];
+        int given = 0;
+
+        for (int s = 2; s <= max; s++) {
+
+            want[s] = total * want[s] / sum;
+            out[s] = Math.max(1, Math.round(want[s]));
+            given += out[s];
+        }
+
+        // Too many: one off the gap furthest over its share that has more
+        // than one. Too few: one onto the gap furthest under its share
+        while (given != total) {
+
+            int pick = -1;
+
+            for (int s = 2; s <= max; s++) {
+
+                if (given > total && out[s] > 1 && (pick < 0 || out[s] - want[s] > out[pick] - want[pick])) {
+                    pick = s;
+                }
+
+                if (given < total && (pick < 0 || want[s] - out[s] > want[pick] - out[pick])) {
+                    pick = s;
+                }
+            }
+
+            if (pick < 0) {
+                break;
+            }
+
+            out[pick] += given > total ? -1 : 1;
+            given += given > total ? -1 : 1;
+        }
+
+        return out;
     }
 
     // The step whose span from the one below holds a level above the
@@ -881,7 +931,9 @@ final class SysVolume {
 
             lowStepsFallback = fbLowSteps > 0 && fbLowSteps <= LOW_STEPS_MAX ? fbLowSteps : 0;
 
-            byGap = o.optBoolean("byGap", false);
+            int n = o.optInt("levels", 0);
+
+            levels = n >= 2 && n <= 100 ? n : 0;
 
             JSONObject caps = o.optJSONObject("caps");
 
@@ -1448,7 +1500,7 @@ final class SysVolume {
             }
 
             o.put("lowSteps", lowSteps);
-            o.put("byGap", byGap);
+            o.put("levels", levels);
 
             if (training) {
 
