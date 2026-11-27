@@ -346,19 +346,37 @@ final class SysVolume {
                 return;
             }
 
-            // Moved by the phone's buttons, or night mode: more steps go on
-            // from that step, the player at its whole sound. Not while a
-            // step of its own is still waiting to be put in
+            // The step moved from outside the app, not while a step of its
+            // own is still waiting to be put in. With the buttons going
+            // through more steps, no press of them moves it: it is Android's
+            // or the speaker's, a Bluetooth speaker giving its own level say,
+            // and the level kept is put back. Else it may be the phone's own
+            // buttons, or Android or the speaker all the same, so it counts
+            // as one of the finer steps that way from the level kept, never
+            // as the whole of the new step with the player at its full
+            // sound, which from a low level was many times louder
             if (fineOn && !training && fineStep >= 0 && level != fineStep && max > 0 && stepWaiting < 0) {
 
-                fineBeforePress = finePct;
+                int dir = level > fineStep ? 1 : -1;
+                float was = finePct;
+
+                if (buttonsOn()) {
+
+                    Hub.note("Volume", "step " + level + " from " + fineStep + " put in by Android or the speaker, the buttons go"
+                        + " through more steps, back to the " + Math.round(was * 10) / 10f + "% kept");
+                    applyFine();
+                    Hub.setVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC), max);
+                    return;
+                }
+
+                fineBeforePress = was;
                 finePressAt = SystemClock.uptimeMillis();
-                fineStep = level;
-                finePct = stepPct(level, max);
-                fineGain = 1;
-                keepFine();
-                Hub.setFine(finePct);
-                Hub.command("fineGain", 1.0);
+                finePct = fineNext(was, dir, max);
+                Hub.note("Volume", "step " + level + " from " + fineStep + " by the phone's buttons, Android or the speaker: one finer step "
+                    + (dir > 0 ? "up" : "down") + ", " + Math.round(was * 10) / 10f + "% to " + Math.round(finePct * 10) / 10f + "%");
+                applyFine();
+                Hub.setVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC), max);
+                return;
             }
 
             // Another output, with a step size of its own perhaps
