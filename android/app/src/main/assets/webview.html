@@ -21077,14 +21077,22 @@
     // head less the delay of its way out, Bluetooth say. This page's sound
     // is kept on that place, plus the delay of its own way out where the
     // browser tells it, and plus how much later this browser is set to be,
-    // set by ear, see dualMs. Small differences are made up by playing a
-    // little faster or slower, at most 2 percent, unheard; only a
-    // difference of a quarter second or more jumps
+    // set by ear, see dualMs. Small differences are made up by playing half
+    // a percent faster or slower, 5 ms a second, begun past 15 ms and
+    // stopped within 3, the speed changed at most once a second. Without
+    // keeping the pitch, so the browser only plays the sound a little
+    // faster rather than stretching it, which crackles in Firefox when the
+    // speed changes often; half a percent is less than a tenth of a
+    // semitone, for a few seconds. Only a difference of a quarter second
+    // or more jumps
     const DUAL_JUMP_S = 0.25;
-    const DUAL_RATE_MOST = 0.02;
-    const DUAL_RATE_PER_S = 0.5;
-    const DUAL_STILL_S = 0.004;
+    const DUAL_RATE_STEP = 0.005;
+    const DUAL_START_S = 0.015;
+    const DUAL_STILL_S = 0.003;
+    const DUAL_RATE_EVERY_MS = 1000;
     const DUAL_STEP_MS = 100;
+    let dualRateAt = 0;
+    let dualRateChanges = 0;
     let dualTimer = 0;
     let dualClockTimer = 0;
     let dualClock = [];
@@ -21340,7 +21348,9 @@
         dualTimer = setInterval(dualStep, DUAL_STEP_MS);
 
         try {
-            audio.preservesPitch = true;
+            audio.preservesPitch = false;
+            audio.mozPreservesPitch = false;
+            audio.webkitPreservesPitch = false;
         } catch (e) {
             // Older browsers keep the pitch anyway or not at all
         }
@@ -21565,22 +21575,29 @@
             return;
         }
 
-        // The play head read in steps on some browsers, so the difference
-        // is smoothed a little before it steers
-        dualErr = dualErr === null ? err : dualErr * 0.7 + err * 0.3;
+        // The play head read in steps on some browsers, coarse ones where a
+        // guard against fingerprinting rounds it, so the difference is
+        // smoothed well before it steers
+        dualErr = dualErr === null ? err : dualErr * 0.85 + err * 0.15;
 
-        const rate = Math.abs(dualErr) < DUAL_STILL_S ? 1
-            : 1 - Math.max(-DUAL_RATE_MOST, Math.min(DUAL_RATE_MOST, dualErr * DUAL_RATE_PER_S));
+        // Steered past 15 ms, left be within 3, in between as it was
+        const off = Math.abs(dualErr);
+        const steering = audio.playbackRate !== 1;
+        const rate = off > DUAL_START_S || steering && off > DUAL_STILL_S ? 1 - Math.sign(dualErr) * DUAL_RATE_STEP : 1;
 
-        if (Math.abs(audio.playbackRate - rate) > 0.0005) {
+        if (audio.playbackRate !== rate && (rate === 1 || now - dualRateAt >= DUAL_RATE_EVERY_MS)) {
+
             audio.playbackRate = rate;
+            dualRateAt = now;
+            dualRateChanges++;
         }
 
         if (now - dualLogged > 30000) {
 
             dualLogged = now;
-            dbgLog("Audio", "in step with the Android device within " + Math.round(Math.abs(dualErr) * 1000) + " ms, playing at "
-                + (rate * 100).toFixed(1) + " %, " + dualPartsText());
+            dbgLog("Audio", "in step with the Android device within " + Math.round(off * 1000) + " ms, playing at "
+                + (audio.playbackRate * 100).toFixed(1) + " %, the speed changed " + dualRateChanges + " times in 30 s, " + dualPartsText());
+            dualRateChanges = 0;
         }
     }
 
