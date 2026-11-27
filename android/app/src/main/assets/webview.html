@@ -5810,6 +5810,10 @@
         gap: 6px;
     }
 
+    .dualDelayRow.dualBeepRow {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
     .dualDelayRow .mp-ui-btn {
         padding-left: 0;
         padding-right: 0;
@@ -5824,6 +5828,25 @@
 
     .dualDelayTold {
         padding: 2px 4px 4px;
+    }
+
+    /* The OpenSSL line and the passwords for https */
+    .tlsCmd,
+    .tlsField {
+        box-sizing: border-box;
+        width: 100%;
+        font: inherit;
+        font-size: 0.8em;
+        color: inherit;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 8px;
+        padding: 8px;
+    }
+
+    .tlsCmd {
+        font-family: ui-monospace, monospace;
+        resize: none;
     }
 
     /* What the measuring does now, a sentence rather than a number */
@@ -10802,6 +10825,283 @@
         }
     }
 
+    // Https for the web view, with a certificate made elsewhere and brought
+    // in from here, so a browser allows what it only allows a secure page,
+    // the microphone first of all, and remembers it. What the phone keeps,
+    // from /tls: on, port, whom it is for, its names, until when and its
+    // fingerprint
+    function tlsInfo() {
+
+        return plainFetch("/tls", { cache: "no-store" }).then(function (r) {
+            return r.ok ? r.json() : { on: false };
+        }).catch(function () {
+            return { on: false };
+        });
+    }
+
+    // This page over https, on the phone's https port, same address
+    function tlsUrl(info) {
+        return "https://" + location.hostname.replace(/^([0-9a-f:]+)$/i, function (h) {
+            return h.indexOf(":") >= 0 ? "[" + h + "]" : h;
+        }) + ":" + (info && info.port ? info.port : 8443) + "/";
+    }
+
+    // The box for it: what is kept, how to make one with OpenSSL for this
+    // address, the files to bring in, a PEM certificate and its key or a
+    // PKCS #12 file and its password, and with a password set for the web
+    // view, that too. Kept, it opens the page over https or takes it away
+    function openTlsBox() {
+
+        const box = $("menuItems");
+        const col = document.createElement("div");
+        const status = document.createElement("div");
+        const told = document.createElement("div");
+        const cmd = document.createElement("textarea");
+        const picks = document.createElement("div");
+        const pass = document.createElement("input");
+        const current = document.createElement("input");
+        const foot = document.createElement("div");
+        const files = { cert: null, key: null, p12: null };
+        const ipName = /^[0-9.]+$|:/.test(location.hostname);
+        let info = null;
+
+        if (isShown("songMenu")) {
+            menuGuardUntil = Date.now() + 700;
+        }
+
+        menuSong = null;
+        box.textContent = "";
+        $("menuBox").classList.remove("switchBox");
+        $("menuTitle").textContent = "Https for the web view";
+        $("bpmRow").style.display = "none";
+        $("titleRow").style.display = "none";
+        $("menuStars").style.display = "none";
+        menuLook("choice");
+        choiceText("A browser allows the microphone, and remembers that it did, only on a secure page. Make a certificate for this address, here with OpenSSL, bring in its two files, then open the page over https and accept the certificate, or import cert.pem in the browser as an authority to trust it for good. Settings kept in a browser are kept apart for the https page.");
+        col.className = "mp-ui-ch-col dualDelay tlsBox";
+        status.className = "dualDelayNow dualCalStatus";
+        told.className = "dualDelayTold";
+        cmd.className = "tlsCmd";
+        cmd.readOnly = true;
+        cmd.rows = 4;
+        cmd.value = "openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 3650 -subj \"/CN=Mureka Player\" -addext \"subjectAltName="
+            + (ipName ? "IP:" : "DNS:") + location.hostname.replace(/^\[|\]$/g, "") + "\"";
+        cmd.addEventListener("focus", function () {
+            cmd.select();
+        });
+        pass.type = "password";
+        pass.placeholder = "Password of the PKCS #12 file";
+        pass.className = "tlsField";
+        pass.autocomplete = "off";
+        current.type = "password";
+        current.placeholder = "The web view's password";
+        current.className = "tlsField";
+        current.autocomplete = "current-password";
+        picks.className = "mp-ui-ch-col";
+        foot.className = "mp-ui-ch-col";
+        col.appendChild(status);
+        col.appendChild(told);
+        col.appendChild(cmd);
+        col.appendChild(picks);
+        col.appendChild(pass);
+
+        if (state && state.loginOn === true) {
+            col.appendChild(current);
+        }
+
+        col.appendChild(foot);
+        box.appendChild(col);
+        $("songMenu").style.display = "flex";
+
+        const said = function (text) {
+
+            status.textContent = text;
+            status.style.display = text ? "" : "none";
+        };
+
+        // A file picked by a button, its name on the button after
+        const pick = function (label, accept, slot) {
+
+            const b = uiBtn(label, function () {
+
+                const input = document.createElement("input");
+
+                input.type = "file";
+                input.accept = accept;
+                input.addEventListener("change", function () {
+
+                    const f = input.files && input.files[0];
+
+                    if (!f) {
+                        return;
+                    }
+
+                    files[slot] = f;
+                    b.textContent = label + ": " + f.name;
+                    b.classList.add("ring");
+                    pass.style.display = files.p12 ? "" : "none";
+                });
+                input.click();
+            }, true);
+
+            picks.appendChild(b);
+        };
+
+        const read = function (f, binary) {
+
+            return new Promise(function (resolve, reject) {
+
+                const r = new FileReader();
+
+                r.onload = function () {
+                    resolve(r.result);
+                };
+                r.onerror = function () {
+                    reject(r.error);
+                };
+
+                if (binary) {
+                    r.readAsDataURL(f);
+                } else {
+                    r.readAsText(f);
+                }
+            });
+        };
+
+        const post = function (body) {
+
+            body.current = current.value;
+            said("Sending it to the Android device");
+
+            return plainFetch("/tls", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+                .then(function (r) {
+
+                    return r.json().catch(function () {
+                        return {};
+                    }).then(function (j) {
+
+                        if (r.status === 403) {
+                            throw new Error("The web view's password is wrong");
+                        }
+
+                        if (!r.ok) {
+                            throw new Error(j && j.error ? j.error : "Refused, HTTP " + r.status);
+                        }
+
+                        return j;
+                    });
+                });
+        };
+
+        const send = function () {
+
+            let body;
+
+            if (files.p12) {
+
+                body = read(files.p12, true).then(function (url) {
+                    return { p12: String(url).replace(/^data:[^,]*,/, ""), pass: pass.value };
+                });
+            } else if (files.cert && files.key) {
+
+                body = Promise.all([read(files.cert, false), read(files.key, false)]).then(function (t) {
+                    return { cert: t[0], key: t[1] };
+                });
+            } else {
+
+                said("Pick the certificate and its private key, or a PKCS #12 file");
+                return;
+            }
+
+            body.then(post).then(function (j) {
+
+                info = j;
+                said("Brought in. Https in a moment on port " + (j.port || 8443));
+                paint();
+            }, function (e) {
+                said(e && e.message ? e.message : String(e));
+            });
+        };
+
+        const paint = function () {
+
+            told.textContent = info && info.on
+                ? "Kept: " + (info.names && info.names.length ? info.names.join(", ") : info.subject) + ", until " + info.until
+                    + ". SHA-256 " + info.sha256
+                : "No certificate kept, the web view is http only.";
+            foot.textContent = "";
+
+            if (info && info.on && location.protocol !== "https:") {
+                foot.appendChild(uiBtn("Open this page over https", function () {
+                    location.href = tlsUrl(info);
+                }));
+            }
+
+            foot.appendChild(uiBtn("Bring it in", send, !!(info && info.on)));
+
+            if (info && info.on) {
+                foot.appendChild(uiBtn("Take https away", function () {
+
+                    post({ remove: true }).then(function (j) {
+
+                        info = j;
+                        said("Taken away, http only");
+                        paint();
+                    }, function (e) {
+                        said(e && e.message ? e.message : String(e));
+                    });
+                }));
+                foot.lastChild.classList.add("danger");
+            }
+
+            foot.appendChild(uiBtn("Done", closeSongMenu));
+        };
+
+        pick("Certificate", ".pem,.crt,.cer,application/x-pem-file", "cert");
+        pick("Private key", ".pem,.key", "key");
+        pick("Or a PKCS #12 file", ".p12,.pfx,application/x-pkcs12", "p12");
+        pass.style.display = "none";
+        said("");
+        paint();
+        tlsInfo().then(function (j) {
+
+            info = j;
+
+            if (col.isConnected) {
+                paint();
+            }
+        });
+    }
+
+    // On the settings' Web view page, under the password: https and what is
+    // kept for it, opening the box above
+    function addTlsRows(section) {
+
+        const r = document.createElement("div");
+        const t = document.createElement("div");
+        const b = document.createElement("button");
+
+        r.className = "pRow";
+        t.className = "pText";
+        t.textContent = "Https for the web view";
+        b.type = "button";
+        b.className = "pBtn";
+        b.textContent = "Set up";
+        b.addEventListener("click", openTlsBox);
+        r.appendChild(t);
+        r.appendChild(b);
+        section.appendChild(r);
+        tlsInfo().then(function (j) {
+
+            if (j && j.on) {
+
+                t.textContent = "Https on port " + j.port + (location.protocol === "https:" ? ", in use here" : "");
+                b.textContent = "Change";
+                b.classList.add("on");
+            }
+        });
+    }
+
     // The password on the settings' Web view page, done by this browser
     // itself, at the top under the page's head. Not on the app's own screen,
     // which never asks for one
@@ -10855,6 +11155,7 @@
             : "Off. Anyone on the Android device's hotspot, or on a Wi-Fi where the web view is allowed, can use the player and change your songs on Mureka.";
         hint.style.color = on ? "" : "#f5c518";
         section.appendChild(hint);
+        addTlsRows(section);
 
         // Under the page's head, before its first heading
         const first = Array.prototype.find.call(box.querySelectorAll(".pText"), function (el) {
@@ -20751,9 +21052,83 @@
             + ", set " + dualMs + " ms";
     }
 
+    // This browser's beeps, an octave over the Android device's, to set
+    // the delay by ear: one each time its song's place is a whole number of
+    // the interval the phone tells, put on the sound engine's clock a little
+    // ahead, each once. Through the song's own engine where it has one, so
+    // the beep comes out with the music
+    const WEB_BEEP_HZ = 1760;
+    let webBeepAt = -1;
+    let webBeepCtx = null;
+
+    function webBeepEngine() {
+
+        if (gainCtx && gainNode && gainCtx.state === "running") {
+            return gainCtx;
+        }
+
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+
+        if (!webBeepCtx && Ctx) {
+
+            try {
+                webBeepCtx = new Ctx();
+            } catch (e) {
+                webBeepCtx = null;
+            }
+        }
+
+        if (webBeepCtx && webBeepCtx.state !== "running") {
+            webBeepCtx.resume().catch(function () {
+            });
+        }
+
+        return webBeepCtx && webBeepCtx.state === "running" ? webBeepCtx : null;
+    }
+
+    function webBeepStep() {
+
+        const every = state && state.dual === true ? Number(state.beepEvery) || 0 : 0;
+
+        if (!every || audio.paused || !unlocked || localMute || calQuiet) {
+            return;
+        }
+
+        const pos = audio.currentTime;
+        const next = Math.ceil((pos + 0.01) / every) * every;
+
+        if (next - pos > 0.3 || Math.abs(next - webBeepAt) < 0.001) {
+            return;
+        }
+
+        const ctx = webBeepEngine();
+
+        if (!ctx) {
+            return;
+        }
+
+        const t = Math.max(ctx.currentTime, ctx.currentTime + (next - pos) / (audio.playbackRate || 1));
+        const level = 0.5 * webVolume() * fadeShare;
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+
+        webBeepAt = next;
+        osc.type = "sine";
+        osc.frequency.value = WEB_BEEP_HZ;
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(level, t + 0.003);
+        g.gain.setValueAtTime(level, t + 0.04);
+        g.gain.linearRampToValueAtTime(0, t + 0.06);
+        osc.connect(g);
+        g.connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.07);
+    }
+
     function dualStep() {
 
         dualMsSync();
+        webBeepStep();
 
         if (dualCalHold) {
 
@@ -32878,9 +33253,21 @@
         const shown = document.createElement("div");
         const speaker = document.createElement("div");
         const told = document.createElement("div");
+        const beepHead = document.createElement("div");
+        const beeps = document.createElement("div");
+        const beepBtns = [];
         const paint = function () {
 
             dualMsSync();
+
+            // The beeps asked for now ringed
+            const every = state && state.dual === true ? Number(state.beepEvery) || 0 : 0;
+
+            beepBtns.forEach(function (b) {
+
+                b.el.classList.toggle("ring", b.every === every);
+                b.el.classList.toggle("dim", b.every !== every);
+            });
             shown.textContent = dualMsText();
             speaker.textContent = "For " + dualSpeakerName(state);
 
@@ -32922,6 +33309,29 @@
         shown.className = "dualDelayNow";
         speaker.className = "dualDelaySpeaker";
         told.className = "dualDelayTold";
+        beepHead.className = "dualDelayTold";
+        beepHead.textContent = "Beeps to set it by ear: low from the Android device, high from this browser, heard as one when it is right";
+        beeps.className = "dualDelayRow dualBeepRow";
+        [0, 1, 2, 3, 5].forEach(function (every) {
+
+            const b = uiBtn(every ? every + " s" : "Off", function () {
+
+                // Woken within the tap, which a browser asks for
+                webBeepEngine();
+                webBeepAt = -1;
+                send("syncBeep", every);
+
+                if (state) {
+                    state.beepEvery = every;
+                }
+
+                paint();
+            }, true);
+
+            b.setAttribute("aria-label", every ? "A beep every " + every + " s" : "No beeps");
+            beepBtns.push({ el: b, every: every });
+            beeps.appendChild(b);
+        });
         row.appendChild(by("-100", -100));
         row.appendChild(by("-10", -10));
         row.appendChild(by("-1", -1));
@@ -32936,6 +33346,8 @@
             setDualMs(0);
             paint();
         }, true));
+        col.appendChild(beepHead);
+        col.appendChild(beeps);
         col.appendChild(uiBtn("Measure with a microphone", function () {
             openDualCal();
         }, true));
@@ -33937,6 +34349,17 @@
             said("");
             paintMic();
             footer();
+
+            // Or the page over https, the phone's certificate set up first
+            foot.insertBefore(uiBtn("Https for the web view", openTlsBox), foot.firstChild);
+            tlsInfo().then(function (j) {
+
+                if (j && j.on && col.isConnected && location.protocol !== "https:") {
+                    foot.insertBefore(uiBtn("Open this page over https", function () {
+                        location.href = tlsUrl(j);
+                    }), foot.firstChild);
+                }
+            });
             return;
         }
 

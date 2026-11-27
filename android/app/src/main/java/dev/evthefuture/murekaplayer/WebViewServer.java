@@ -156,6 +156,16 @@ final class WebViewServer {
 
     private volatile ServerSocket socket;
 
+    // The same web view over https on its own port, with a certificate
+    // brought in from a browser, see TlsKeys. Off until there is one
+    static final int TLS_PORT = 8443;
+    private volatile ServerSocket tlsSocket;
+    private volatile String tlsStatus = "off";
+
+    // The certificate and its key, from a browser, are a few kB as PEM or
+    // as a PKCS #12 file written out as text
+    private static final int MAX_TLS = 65536;
+
     // The last time a web view asked for the state. It starts a little in
     // the future, so after the app starts, an update in particular, a
     // browser playing the music has time to find the phone again before
@@ -271,6 +281,11 @@ final class WebViewServer {
         accept.setDaemon(true);
         accept.start();
 
+        Thread acceptTls = new Thread(this::acceptLoopTls, "car-server-tls");
+
+        acceptTls.setDaemon(true);
+        acceptTls.start();
+
         watch.scheduleWithFixedDelay(this::checkCar, 2, 2, TimeUnit.SECONDS);
     }
 
@@ -291,7 +306,84 @@ final class WebViewServer {
             // Closing anyway
         }
 
+        restartTls();
         pool.shutdownNow();
+    }
+
+    // The https socket closed, to be opened again with the certificate
+    // there is now, or none
+    private void restartTls() {
+
+        try {
+
+            ServerSocket s = tlsSocket;
+
+            if (s != null) {
+                s.close();
+            }
+        } catch (IOException e) {
+            // Closing anyway
+        }
+    }
+
+    // Like the plain one, over https while there is a certificate, looked
+    // for again every few seconds while there is none
+    private void acceptLoopTls() {
+
+        while (running) {
+
+            javax.net.ssl.SSLServerSocketFactory f;
+
+            try {
+                f = TlsKeys.factory(context);
+            } catch (java.security.GeneralSecurityException | IOException e) {
+
+                f = null;
+                tlsStatus = "certificate not usable: " + e.getMessage();
+            }
+
+            if (f == null) {
+
+                if (!TlsKeys.have(context)) {
+                    tlsStatus = "off";
+                }
+
+                Io.sleep(3000);
+                continue;
+            }
+
+            try (ServerSocket s = f.createServerSocket()) {
+
+                s.setReuseAddress(true);
+                s.bind(new InetSocketAddress(TLS_PORT));
+                tlsSocket = s;
+                tlsStatus = "listening";
+
+                while (running && !s.isClosed()) {
+
+                    final Socket client = s.accept();
+
+                    try {
+                        pool.execute(() -> handle(client));
+                    } catch (RejectedExecutionException e) {
+                        closeQuietly(client);
+                    }
+                }
+            } catch (IOException e) {
+
+                if (!running) {
+                    break;
+                }
+
+                tlsStatus = "port " + TLS_PORT + " busy, trying again";
+            } finally {
+                tlsSocket = null;
+            }
+
+            if (running) {
+                Io.sleep(1000);
+            }
+        }
     }
 
     // Keep a listening socket alive. A port still held by the previous
@@ -839,7 +931,7 @@ final class WebViewServer {
             big = "/setCover".equals(path) || "/importText".equals(path) || "/importApply".equals(path)
                 || "/shareLine".equals(path) || "/create".equals(path) || "/createUpload".equals(path);
 
-            int most = !big ? MAX_BODY : "/setCover".equals(path) ? MAX_COVER : "/createUpload".equals(path) ? MAX_SONG
+            int most = !big ? ("/tls".equals(path) ? MAX_TLS : MAX_BODY) : "/setCover".equals(path) ? MAX_COVER : "/createUpload".equals(path) ? MAX_SONG
                 : "/create".equals(path) ? MAX_CREATE : MAX_IMPORT;
 
             if (length < 0 || length > most) {
@@ -933,6 +1025,28 @@ final class WebViewServer {
             if ("POST".equals(method) && "/passwordOff".equals(path)) {
 
                 removePassword(out, body, who(c), appScreen);
+                return;
+            }
+
+            // The certificate for https: what is kept, and one brought in or
+            // taken away, which with a password set needs it too
+            if ("GET".equals(method) && "/tls".equals(path)) {
+
+                JSONObject info = TlsKeys.info(context, TLS_PORT);
+
+                try {
+                    info.put("status", tlsStatus);
+                } catch (JSONException e) {
+                    // Told without it
+                }
+
+                send(out, 200, "application/json", bytes(info.toString()));
+                return;
+            }
+
+            if ("POST".equals(method) && "/tls".equals(path)) {
+
+                changeTls(out, body, who(c), appScreen);
                 return;
             }
 
@@ -2383,6 +2497,48 @@ final class WebViewServer {
         } catch (JSONException e) {
             return "";
         }
+    }
+
+    // A certificate brought in, as PEM or as PKCS #12, or the one kept taken
+    // away. With a password set the current one has to be right, as for
+    // changing it, the app's own screen excepted. The https socket opens
+    // again with it
+    private void changeTls(OutputStream out, byte[] body, String who, boolean appScreen) throws IOException {
+
+        if (WebLogin.on(context) && !appScreen && !WebLogin.check(context, field(body, "current"), who)) {
+
+            send(out, 403, "application/json", bytes("{\"wrong\":true,\"wait\":" + WebLogin.waitSeconds(who) + "}"));
+            return;
+        }
+
+        try {
+
+            JSONObject req = new JSONObject(new String(body, StandardCharsets.UTF_8));
+
+            if (req.optBoolean("remove", false)) {
+                TlsKeys.remove(context);
+            } else if (!req.optString("p12", "").isEmpty()) {
+                TlsKeys.importP12(context, android.util.Base64.decode(req.optString("p12", ""), android.util.Base64.DEFAULT),
+                    req.optString("pass", "").toCharArray());
+            } else {
+                TlsKeys.importPem(context, req.optString("cert", ""), req.optString("key", ""));
+            }
+        } catch (JSONException | IllegalArgumentException | java.security.GeneralSecurityException | IOException e) {
+
+            JSONObject err = new JSONObject();
+
+            try {
+                err.put("error", String.valueOf(e.getMessage()));
+            } catch (JSONException ignored) {
+                // Told without words
+            }
+
+            send(out, 400, "application/json", bytes(err.toString()));
+            return;
+        }
+
+        restartTls();
+        send(out, 200, "application/json", bytes(TlsKeys.info(context, TLS_PORT).toString()));
     }
 
     // A new password. With one set already, the current one has to be right,
