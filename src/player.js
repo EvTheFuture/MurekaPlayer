@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.380";
+    const VERSION = "2.0.1.381";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -94784,6 +94784,99 @@
         return items;
     }
 
+    // Settings as copied, kept in this browser. How many were taken; throws
+    // on text that is not the web view's settings
+    function localCopyTake(text) {
+
+        let data = null;
+
+        try {
+            data = JSON.parse(String(text || "").trim());
+        } catch (e) {
+            data = null;
+        }
+
+        if (!data || data.kind !== "mureka-web-settings" || !data.items || typeof data.items !== "object") {
+            throw new Error("Not the web view's settings, copy them again at the other address");
+        }
+
+        let n = 0;
+
+        for (const k of Object.keys(data.items)) {
+
+            if (k.indexOf("mureka") === 0 && LOCAL_COPY_SKIP.indexOf(k) < 0 && typeof data.items[k] === "string") {
+
+                localStorage.setItem(k, data.items[k]);
+                n++;
+            }
+        }
+
+        dbgLog("Settings", "brought in " + n + " settings of this browser from " + (data.from || "elsewhere"));
+
+        return n;
+    }
+
+    // A box to paste copied settings into, read from the clipboard where
+    // the browser lets the page, else pasted by hand
+    function openLocalPaste() {
+
+        const box = $("menuItems");
+        const col = document.createElement("div");
+        const area = document.createElement("textarea");
+        const status = document.createElement("div");
+
+        if (isShown("songMenu")) {
+            menuGuardUntil = Date.now() + 700;
+        }
+
+        menuSong = null;
+        box.textContent = "";
+        $("menuBox").classList.remove("switchBox");
+        $("menuTitle").textContent = "Settings from the clipboard";
+        $("bpmRow").style.display = "none";
+        $("titleRow").style.display = "none";
+        $("menuStars").style.display = "none";
+        menuLook("choice");
+        choiceText("Paste the settings copied at the other address. They are kept in this browser at this address, and the page starts again with them.");
+        col.className = "mp-ui-ch-col dualDelay";
+        area.className = "tlsCmd";
+        area.rows = 5;
+        area.placeholder = "Paste here";
+        status.className = "dualDelayTold";
+        col.appendChild(area);
+        col.appendChild(status);
+        col.appendChild(uiBtn("Bring in", function () {
+
+            try {
+
+                const n = localCopyTake(area.value);
+
+                status.textContent = "Brought in " + n + " settings, starting again with them";
+                setTimeout(function () {
+                    location.reload();
+                }, 800);
+            } catch (e) {
+                status.textContent = e && e.message ? e.message : String(e);
+            }
+        }));
+        col.appendChild(uiBtn("Cancel", closeSongMenu));
+        box.appendChild(col);
+        $("songMenu").style.display = "flex";
+
+        if (navigator.clipboard && navigator.clipboard.readText && window.isSecureContext) {
+            navigator.clipboard.readText().then(function (text) {
+
+                if (text && !area.value) {
+                    area.value = text;
+                }
+            }, function () {
+                area.focus();
+            });
+        } else {
+            area.focus();
+        }
+    }
+
     function addLocalCopyRows(section) {
 
         const row = function (text, label, fn) {
@@ -94807,6 +94900,24 @@
         };
         const hint = document.createElement("div");
 
+        row("This browser's settings to the clipboard", "Copy", function (t) {
+
+            const items = localCopyItems();
+            const text = JSON.stringify({ kind: "mureka-web-settings", from: location.origin, at: new Date().toISOString(), items: items });
+            const done = function () {
+                t.textContent = "Copied, " + Object.keys(items).length + " settings. Paste them at the other address";
+            };
+
+            // The older way, which works on http too, within the tap
+            if (copyText(text)) {
+                done();
+            } else {
+                t.textContent = "The clipboard could not be reached, save them to a file instead";
+            }
+        });
+        row("Settings from the clipboard", "Paste", function () {
+            openLocalPaste();
+        });
         row("This browser's settings to a file", "Save", function (t) {
 
             const items = localCopyItems();
@@ -94840,24 +94951,8 @@
 
                 f.text().then(function (text) {
 
-                    const data = JSON.parse(text);
+                    const n = localCopyTake(text);
 
-                    if (!data || data.kind !== "mureka-web-settings" || !data.items || typeof data.items !== "object") {
-                        throw new Error("Not a file of the web view's settings");
-                    }
-
-                    let n = 0;
-
-                    for (const k of Object.keys(data.items)) {
-
-                        if (k.indexOf("mureka") === 0 && LOCAL_COPY_SKIP.indexOf(k) < 0 && typeof data.items[k] === "string") {
-
-                            localStorage.setItem(k, data.items[k]);
-                            n++;
-                        }
-                    }
-
-                    dbgLog("Settings", "brought in " + n + " settings of this browser from " + (data.from || "a file"));
                     t.textContent = "Brought in " + n + " settings, starting again with them";
                     setTimeout(function () {
                         location.reload();
@@ -94869,7 +94964,7 @@
             input.click();
         });
         hint.className = "pText small";
-        hint.textContent = "A browser keeps settings apart for each address, so at another address of the Android device, its name instead of its IP address, or https instead of http, it starts without them. Save them to a file here and bring them in there; the page starts again with them.";
+        hint.textContent = "A browser keeps settings apart for each address, so at another address of the Android device, its name instead of its IP address, or https instead of http, it starts without them. Copy them here and paste them there, or save them to a file; the page starts again with them.";
         section.appendChild(hint);
     }
 
