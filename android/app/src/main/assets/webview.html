@@ -5826,6 +5826,31 @@
         padding: 2px 4px 4px;
     }
 
+    /* What the measuring does now, a sentence rather than a number */
+    .dualDelayNow.dualCalStatus {
+        font-size: 1.05em;
+    }
+
+    /* The microphone's level while measuring the delay */
+    .dualCalMeter {
+        height: 8px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.12);
+        overflow: hidden;
+        margin: 2px 4px 6px;
+    }
+
+    .dualCalFill {
+        height: 100%;
+        width: 0;
+        background: var(--accent);
+        transition: width 0.1s linear;
+    }
+
+    .dualCalFill.low {
+        background: rgba(255, 255, 255, 0.35);
+    }
+
     #menuItems .dualDelay {
         grid-column: 1 / -1;
         padding: 4px 8px 8px;
@@ -33179,10 +33204,43 @@
         return sum / Math.max(1, c.length) || 1e-12;
     }
 
-    // Ten seconds or so from the microphone at the measuring rate, this
-    // browser quiet after the first five, with where this browser's song
-    // was as the recording started and where it went quiet
-    function dualCalRecord(deviceId, run, said) {
+    // The microphone, opened once while the measuring box is open, so the
+    // browser asks once and the sound can be routed to it in peace: the
+    // stream, its level now for the meter, and a taker for each block while
+    // a recording runs
+    let dualCalMic = null;
+
+    function dualCalClose() {
+
+        const m = dualCalMic;
+
+        dualCalMic = null;
+
+        if (!m) {
+            return;
+        }
+
+        m.proc.onaudioprocess = null;
+
+        try {
+
+            m.src.disconnect();
+            m.proc.disconnect();
+        } catch (e) {
+            // Gone already
+        }
+
+        m.stream.getTracks().forEach(function (t) {
+            t.stop();
+        });
+        m.ctx.close().catch(function () {
+        });
+    }
+
+    // Opened with the microphone asked for, or the one the browser offers;
+    // the browser may let another be picked as it asks, so what is open is
+    // told by its own name
+    function dualCalOpen(deviceId) {
 
         const want = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 };
 
@@ -33190,133 +33248,231 @@
             want.deviceId = { exact: deviceId };
         }
 
+        dualCalClose();
+
         return navigator.mediaDevices.getUserMedia({ audio: want }).then(function (stream) {
 
-            return new Promise(function (resolve, reject) {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            const track = stream.getAudioTracks()[0];
+            const sr = track && track.getSettings ? Number(track.getSettings().sampleRate) || 0 : 0;
+            let ctx;
+            let src;
 
-                const Ctx = window.AudioContext || window.webkitAudioContext;
-                const track = stream.getAudioTracks()[0];
-                const sr = track && track.getSettings ? Number(track.getSettings().sampleRate) || 0 : 0;
-                let ctx;
-                let src;
+            // At the microphone's own rate where it tells it: Firefox does
+            // not join sound of two rates
+            try {
 
-                // At the microphone's own rate where it tells it: Firefox
-                // does not join sound of two rates
-                try {
+                ctx = sr ? new Ctx({ sampleRate: sr }) : new Ctx();
+                src = ctx.createMediaStreamSource(stream);
+            } catch (e) {
 
-                    ctx = sr ? new Ctx({ sampleRate: sr }) : new Ctx();
-                    src = ctx.createMediaStreamSource(stream);
-                } catch (e) {
-
-                    if (ctx) {
-                        ctx.close().catch(function () {
-                        });
-                    }
-
-                    ctx = new Ctx();
-                    src = ctx.createMediaStreamSource(stream);
-                }
-
-                const proc = ctx.createScriptProcessor(2048, 1, 1);
-                const hush = ctx.createGain();
-                const rate = ctx.sampleRate;
-                const both = Math.round(DUAL_CAL_PART_S * rate);
-                const total = Math.round((DUAL_CAL_PART_S * 2 + DUAL_CAL_GAP_S) * rate);
-                const chunks = [];
-                let got = 0;
-                let pos0 = null;
-                let quietAt = -1;
-                let over = false;
-                let guard = 0;
-
-                const done = function (err) {
-
-                    if (over) {
-                        return;
-                    }
-
-                    over = true;
-                    clearTimeout(guard);
-                    proc.onaudioprocess = null;
-
-                    try {
-
-                        src.disconnect();
-                        proc.disconnect();
-                    } catch (e) {
-                        // Gone already
-                    }
-
-                    stream.getTracks().forEach(function (t) {
-                        t.stop();
-                    });
+                if (ctx) {
                     ctx.close().catch(function () {
                     });
+                }
 
-                    if (err) {
+                ctx = new Ctx();
+                src = ctx.createMediaStreamSource(stream);
+            }
 
-                        reject(err);
-                        return;
-                    }
+            const proc = ctx.createScriptProcessor(2048, 1, 1);
+            const hush = ctx.createGain();
+            const m = {
+                stream: stream,
+                ctx: ctx,
+                src: src,
+                proc: proc,
+                rate: ctx.sampleRate,
+                label: track && track.label ? track.label : "The microphone",
+                id: track && track.getSettings ? track.getSettings().deviceId || deviceId || "" : deviceId || "",
+                level: 0,
+                take: null
+            };
 
-                    const all = new Float32Array(got);
-                    let at = 0;
+            proc.onaudioprocess = function (ev) {
 
-                    for (const c of chunks) {
+                const d = ev.inputBuffer.getChannelData(0);
+                let sum = 0;
 
-                        all.set(c, at);
-                        at += c.length;
-                    }
+                for (let i = 0; i < d.length; i++) {
+                    sum += d[i] * d[i];
+                }
 
-                    resolve({
-                        data: dualCalDown(all, rate),
-                        pos0: pos0,
-                        quietAt: Math.round(quietAt * DUAL_CAL_RATE / rate)
-                    });
-                };
+                // Held a little and let fall slowly, so a beat or a pause
+                // in the music does not count as silence
+                m.level = Math.max(Math.sqrt(sum / d.length), m.level * 0.9);
 
-                proc.onaudioprocess = function (ev) {
+                if (m.take) {
+                    m.take(d);
+                }
+            };
 
-                    if (run !== dualCalRun) {
-
-                        done(new Error("Stopped"));
-                        return;
-                    }
-
-                    const d = ev.inputBuffer.getChannelData(0);
-
-                    // Where this browser's song was at the block's first
-                    // sample: where it is now, less the block
-                    if (pos0 === null) {
-                        pos0 = audio.currentTime - d.length / rate;
-                    }
-
-                    chunks.push(new Float32Array(d));
-                    got += d.length;
-
-                    if (quietAt < 0 && got >= both) {
-
-                        quietAt = got;
-                        calQuiet = true;
-                        applyWebVolume();
-                        said("Listening to the Android device alone");
-                    }
-
-                    if (got >= total) {
-                        done(null);
-                    }
-                };
-
-                hush.gain.value = 0;
-                src.connect(proc);
-                proc.connect(hush);
-                hush.connect(ctx.destination);
-                guard = setTimeout(function () {
-                    done(new Error("The microphone gave no sound"));
-                }, 25000);
-                ctx.resume().catch(function () {
-                });
+            hush.gain.value = 0;
+            src.connect(proc);
+            proc.connect(hush);
+            hush.connect(ctx.destination);
+            ctx.resume().catch(function () {
             });
+
+            // Put away when the stream ends, the microphone pulled out say
+            if (track) {
+                track.addEventListener("ended", function () {
+
+                    if (dualCalMic === m) {
+                        dualCalClose();
+                    }
+                });
+            }
+
+            dualCalMic = m;
+
+            return m;
+        });
+    }
+
+    // The level as dB below full, -100 for silence
+    function dualCalDb(level) {
+        return level > 0 ? Math.max(-100, 20 * Math.log10(level)) : -100;
+    }
+
+    // Waits, as long as it takes, until the microphone hears sound for half
+    // a second, so nothing is measured before the sound reaches it
+    const DUAL_CAL_HEARD_DB = -55;
+
+    function dualCalHear(run, said) {
+
+        return new Promise(function (resolve, reject) {
+
+            let since = 0;
+
+            const look = function () {
+
+                if (run !== dualCalRun || !dualCalMic) {
+
+                    reject(new Error("Stopped"));
+                    return;
+                }
+
+                if (dualCalDb(dualCalMic.level) >= DUAL_CAL_HEARD_DB) {
+
+                    if (!since) {
+                        since = Date.now();
+                    }
+
+                    if (Date.now() - since >= 500) {
+
+                        resolve();
+                        return;
+                    }
+                } else {
+
+                    since = 0;
+                    said("Waiting to hear the music");
+                }
+
+                setTimeout(look, 100);
+            };
+
+            look();
+        });
+    }
+
+    // Ten seconds or so from the open microphone at the measuring rate,
+    // this browser quiet after the first five, with where this browser's
+    // song was as the recording started and where it went quiet
+    function dualCalRecord(run, said) {
+
+        return new Promise(function (resolve, reject) {
+
+            const m = dualCalMic;
+
+            if (!m) {
+
+                reject(new Error("The microphone is not open"));
+                return;
+            }
+
+            const rate = m.rate;
+            const both = Math.round(DUAL_CAL_PART_S * rate);
+            const total = Math.round((DUAL_CAL_PART_S * 2 + DUAL_CAL_GAP_S) * rate);
+            const chunks = [];
+            let got = 0;
+            let pos0 = null;
+            let quietAt = -1;
+            let over = false;
+            let guard = 0;
+
+            const done = function (err) {
+
+                if (over) {
+                    return;
+                }
+
+                over = true;
+                clearTimeout(guard);
+
+                if (m.take === take) {
+                    m.take = null;
+                }
+
+                if (err) {
+
+                    reject(err);
+                    return;
+                }
+
+                const all = new Float32Array(got);
+                let at = 0;
+
+                for (const c of chunks) {
+
+                    all.set(c, at);
+                    at += c.length;
+                }
+
+                resolve({
+                    data: dualCalDown(all, rate),
+                    pos0: pos0,
+                    quietAt: Math.round(quietAt * DUAL_CAL_RATE / rate)
+                });
+            };
+
+            const take = function (d) {
+
+                if (run !== dualCalRun || dualCalMic !== m) {
+
+                    done(new Error("Stopped"));
+                    return;
+                }
+
+                // Where this browser's song was at the block's first sample:
+                // where it is now, less the block
+                if (pos0 === null) {
+                    pos0 = audio.currentTime - d.length / rate;
+                }
+
+                chunks.push(new Float32Array(d));
+                got += d.length;
+
+                if (quietAt < 0 && got >= both) {
+
+                    quietAt = got;
+                    calQuiet = true;
+                    applyWebVolume();
+                    said("Listening to the Android device alone");
+                }
+
+                if (got >= total) {
+                    done(null);
+                }
+            };
+
+            m.take = take;
+
+            // Blocks stopping coming, the microphone gone quiet for good
+            guard = setTimeout(function () {
+                done(new Error("The microphone stopped giving sound"));
+            }, 25000);
         });
     }
 
@@ -33418,9 +33574,10 @@
         });
     }
 
-    // Measured and the delay moved, three rounds at most. Gives the words
-    // for the outcome
-    async function dualCalMeasure(deviceId, said) {
+    // Measured with the open microphone and the delay moved, three rounds
+    // at most, each once the music is heard. Gives the words for the
+    // outcome
+    async function dualCalMeasure(said) {
 
         const run = ++dualCalSeq;
         let moved = 0;
@@ -33450,6 +33607,7 @@
                     return "";
                 }
 
+                await dualCalHear(run, said);
                 dualCalHold = true;
 
                 if (audio.playbackRate !== 1) {
@@ -33458,7 +33616,7 @@
 
                 said("Listening to both");
 
-                const rec = await dualCalRecord(deviceId, run, said);
+                const rec = await dualCalRecord(run, said);
 
                 calQuiet = false;
                 applyWebVolume();
@@ -33496,6 +33654,11 @@
                 }
 
                 const ms = Math.round(w.d * 1000);
+
+                // Further than the delay goes: more likely heard wrong
+                if (Math.abs(dualMs + ms) > DUAL_MS_MOST) {
+                    return "Measured this browser " + Math.abs(ms) + " ms " + (ms > 0 ? "ahead" : "behind") + ", more than the delay can be set to. Check that the microphone hears the music, not something else, and measure again.";
+                }
 
                 moved += ms;
                 setDualMs(dualMs + ms);
@@ -33536,17 +33699,25 @@
         }
     }
 
-    // The measuring box: the microphones to pick, the one used last ringed,
-    // and while measuring, what it does. A browser not allowing the
+    // The measuring box. The microphone is opened first, by name or the
+    // one the browser offers, and stays open while the box is, with its
+    // level shown, so the sound can be routed to it before measuring is
+    // started by hand; each round then waits until the music is heard. Put
+    // away, the box closes the microphone. A browser not allowing the
     // microphone on this address says how to allow it
     function openDualCal() {
 
         const box = $("menuItems");
         const col = document.createElement("div");
         const status = document.createElement("div");
+        const using = document.createElement("div");
+        const meter = document.createElement("div");
+        const fill = document.createElement("div");
         const mics = document.createElement("div");
         const foot = document.createElement("div");
         let chosen = "";
+        let busy = false;
+        let picking = false;
 
         try {
             chosen = localStorage.getItem("murekaCalMic") || "";
@@ -33568,9 +33739,15 @@
         menuLook("choice");
         col.className = "mp-ui-ch-col dualDelay";
         status.className = "dualDelayNow dualCalStatus";
+        using.className = "dualDelayTold";
+        meter.className = "dualCalMeter";
+        fill.className = "dualCalFill";
         mics.className = "mp-ui-ch-col";
         foot.className = "mp-ui-ch-col";
+        meter.appendChild(fill);
         col.appendChild(status);
+        col.appendChild(using);
+        col.appendChild(meter);
         col.appendChild(mics);
         col.appendChild(foot);
         box.appendChild(col);
@@ -33584,103 +33761,107 @@
                 status.style.display = text ? "" : "none";
             }
         };
-        const footer = function (busy) {
 
-            foot.textContent = "";
+        // The open microphone's name and level, read ten times a second;
+        // the box gone, measuring stops and the microphone is closed
+        const paintMic = function () {
 
-            if (busy) {
+            const m = dualCalMic;
 
-                foot.appendChild(uiBtn("Cancel", function () {
+            using.style.display = m ? "" : "none";
+            meter.style.display = m ? "" : "none";
 
-                    dualCalRun = 0;
-                    said("Stopped");
-                }));
+            if (!m) {
                 return;
             }
 
-            foot.appendChild(uiBtn("Back to the delay", function () {
-                openDualDelay();
-            }, true));
-            foot.appendChild(uiBtn("Done", closeSongMenu));
+            const db = dualCalDb(m.level);
+
+            using.textContent = m.label + ", hearing " + (db <= -100 ? "nothing" : Math.round(db) + " dB")
+                + (db < DUAL_CAL_HEARD_DB ? ", too quiet to measure" : "");
+            fill.style.width = Math.max(0, Math.min(100, (db + 80) / 80 * 100)) + "%";
+            fill.classList.toggle("low", db < DUAL_CAL_HEARD_DB);
         };
-        const measure = function (id) {
+        const watch = setInterval(function () {
 
-            chosen = id;
-
-            try {
-                localStorage.setItem("murekaCalMic", id);
-            } catch (e) {
-                // Picked again next time
-            }
-
-            mics.style.display = "none";
-            footer(true);
-
-            // The box put away stops it
-            const watch = setInterval(function () {
-
-                if (!col.isConnected || !isShown("songMenu")) {
-                    dualCalRun = 0;
-                }
-            }, 300);
-
-            dualCalMeasure(id, said).then(function (text) {
+            if (!col.isConnected || !isShown("songMenu")) {
 
                 clearInterval(watch);
+                dualCalRun = 0;
+                dualCalClose();
+                return;
+            }
+
+            paintMic();
+        }, 100);
+
+        const open = function (id) {
+
+            picking = false;
+            mics.textContent = "";
+            said("Opening the microphone");
+            footer();
+            dualCalOpen(id).then(function (m) {
+
+                chosen = m.id;
+
+                try {
+                    localStorage.setItem("murekaCalMic", m.id);
+                } catch (e) {
+                    // Picked again next time
+                }
 
                 if (!col.isConnected) {
+
+                    dualCalClose();
                     return;
                 }
 
-                if (text) {
-                    said(text);
-                }
+                said("Route the sound to the microphone until it hears the music, then start");
+                paintMic();
+                footer();
+            }, function (e) {
 
+                said(e && e.name === "NotAllowedError" ? "The microphone was not allowed. Allow it when the browser asks, or in its settings for this page."
+                    : e && e.name === "OverconstrainedError" ? "That microphone is not there any more. Pick another."
+                        : e && e.name === "NotFoundError" ? "No microphone found."
+                            : "The microphone could not be opened: " + (e && e.message ? e.message : String(e)));
                 listMics();
-                footer(false);
+                footer();
             });
         };
+
+        // The microphones by name, the one used last ringed. Named only once
+        // allowed, so before that just the one the browser offers
         const listMics = function () {
 
             mics.textContent = "";
-            mics.style.display = "";
             navigator.mediaDevices.enumerateDevices().then(function (all) {
 
                 const inputs = all.filter(function (d) {
-                    return d.kind === "audioinput";
+                    return d.kind === "audioinput" && d.label;
                 });
 
                 if (!col.isConnected) {
                     return;
                 }
 
-                // Named only once allowed: asked first, then listed again
-                if (!inputs.length || inputs.every(function (d) {
-                    return !d.label;
-                })) {
+                if (!inputs.length) {
 
-                    mics.appendChild(uiBtn("Allow the microphone", function () {
-
-                        navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
-
-                            stream.getTracks().forEach(function (t) {
-                                t.stop();
-                            });
-                            listMics();
-                        }, function () {
-                            said("The microphone was not allowed. Allow it for this page in the browser's settings.");
-                        });
+                    mics.appendChild(uiBtn("Open the microphone", function () {
+                        open(chosen);
                     }));
                     return;
                 }
 
-                inputs.forEach(function (d, i) {
+                inputs.forEach(function (d) {
 
-                    const b = uiBtn(d.label || "Microphone " + (i + 1), function () {
-                        measure(d.deviceId);
-                    }, d.deviceId !== chosen);
+                    const on = d.deviceId === (dualCalMic ? dualCalMic.id : chosen);
+                    const b = uiBtn(d.label, function () {
+                        open(d.deviceId);
+                    }, !on);
 
-                    if (d.deviceId === chosen) {
+                    if (on) {
                         b.classList.add("ring");
                     }
 
@@ -33691,19 +33872,79 @@
             });
         };
 
+        const start = function () {
+
+            busy = true;
+            picking = false;
+            mics.textContent = "";
+            footer();
+            dualCalMeasure(said).then(function (text) {
+
+                busy = false;
+
+                if (!col.isConnected) {
+                    return;
+                }
+
+                if (text) {
+                    said(text);
+                }
+
+                footer();
+            });
+        };
+
+        // The buttons for now: Stop while measuring, else Start once a
+        // microphone is open, another microphone to pick, back and done
+        function footer() {
+
+            foot.textContent = "";
+
+            if (busy) {
+
+                foot.appendChild(uiBtn("Stop", function () {
+
+                    dualCalRun = 0;
+                    said("Stopped");
+                }));
+                return;
+            }
+
+            if (dualCalMic) {
+
+                foot.appendChild(uiBtn("Start measuring", start));
+
+                if (!picking) {
+                    foot.appendChild(uiBtn("Another microphone", function () {
+
+                        picking = true;
+                        listMics();
+                        footer();
+                    }, true));
+                }
+            }
+
+            foot.appendChild(uiBtn("Back to the delay", function () {
+                openDualDelay();
+            }, true));
+            foot.appendChild(uiBtn("Done", closeSongMenu));
+        }
+
         if (!dualCalCan()) {
 
             choiceText("This browser allows a microphone only on https pages, and this page comes from the Android device over http. To allow it for this address: in Chrome or Edge open chrome://flags/#unsafely-treat-insecure-origin-as-secure, add "
                 + location.origin + ", turn it on and restart the browser. In Firefox set media.devices.insecure.enabled and media.getusermedia.insecure.enabled to true in about:config. Safari does not allow it.");
             said("");
-            footer(false);
+            paintMic();
+            footer();
             return;
         }
 
-        choiceText("Put the microphone where you listen, with both heard. It listens for ten seconds, first to both, then with this browser quiet to the Android device alone, and moves the delay until the two are heard as one. Pick the microphone to use; its own delay makes no difference, as both sounds go through it.");
+        choiceText("Put the microphone where you listen, with both heard. Open it and route the sound to it; the level shows what it hears. Then start: once it hears the music it listens ten seconds, first to both, then with this browser quiet to the Android device alone, and moves the delay until the two are heard as one. The microphone's own delay makes no difference, as both sounds go through it.");
         said(dualMsText() + " for " + dualSpeakerName(state));
+        paintMic();
         listMics();
-        footer(false);
+        footer();
     }
 
     $("soundPhone").addEventListener("click", function () {
