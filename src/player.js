@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.382";
+    const VERSION = "2.0.1.383";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -43701,7 +43701,14 @@
     // delay is right and as two when not. Off after ten minutes or when
     // Play on both ends. The interval in seconds, 0 for off
     const BEEP_EVERY = [0, 1, 2, 3, 5];
+
+    // For measuring by microphone, beeps at uneven places that repeat every
+    // 12 s, no two gaps between them the same, so the beeps of the two
+    // devices line up in one way only. The same in every browser
+    const BEEP_PATTERN = [0, 0.3, 1.2, 2.7, 4.5, 6.6, 9.6, 10.2];
+    const BEEP_PATTERN_S = 12;
     let hostBeepHz = 880;
+    let hostBeepPattern = false;
     let hostBeepEvery = 0;
     let hostBeepOnly = false;
     let hostBeepUntil = 0;
@@ -43716,8 +43723,9 @@
         const o = every && typeof every === "object" ? every : { every: every, only: false };
         const n = Number(o.every) || 0;
 
-        hostBeepEvery = BEEP_EVERY.indexOf(n) >= 0 && hostDual ? n : 0;
-        hostBeepOnly = hostBeepEvery > 0 && o.only === true;
+        hostBeepPattern = o.pattern === true && hostDual;
+        hostBeepEvery = hostBeepPattern ? 1 : BEEP_EVERY.indexOf(n) >= 0 && hostDual ? n : 0;
+        hostBeepOnly = hostBeepEvery > 0 && (o.only === true || hostBeepPattern);
 
         // The tone here, as the browser asking keeps it for this device
         if (Number(o.hz) >= 100 && Number(o.hz) <= 5000) {
@@ -43733,7 +43741,8 @@
             hostBeepTimer = setInterval(hostBeepStep, 50);
         }
 
-        dbgLog("Audio", hostBeepEvery ? "a beep every " + hostBeepEvery + " s at " + hostBeepHz + " Hz to set the delay by ear" + (hostBeepOnly ? ", the music silent" : "")
+        dbgLog("Audio", hostBeepPattern ? "beeps at " + hostBeepHz + " Hz in the pattern for measuring, the music silent"
+            : hostBeepEvery ? "a beep every " + hostBeepEvery + " s at " + hostBeepHz + " Hz to set the delay by ear" + (hostBeepOnly ? ", the music silent" : "")
             : "no beeps");
         applyCarAudioVolume();
 
@@ -43789,7 +43798,7 @@
         }
 
         const pos = songClockAt();
-        const next = Math.ceil((pos + 0.01) / hostBeepEvery) * hostBeepEvery;
+        const next = hostBeepPattern ? beepPatternNext(pos + 0.01) : Math.ceil((pos + 0.01) / hostBeepEvery) * hostBeepEvery;
 
         if (next - pos > 0.3 || Math.abs(next - hostBeepAt) < 0.001) {
             return;
@@ -43807,6 +43816,21 @@
         // same way out, through the same engines and their delays
         beepTone(ctx, ctx.currentTime + (next - pos) / (audio.playbackRate || 1), hostBeepHz, 0.5,
             ctx === fxCtx && fxCut ? fxCut : ctx.destination);
+    }
+
+    // The next place of the pattern for measuring at or after a song's place
+    function beepPatternNext(pos) {
+
+        const base = Math.floor(pos / BEEP_PATTERN_S) * BEEP_PATTERN_S;
+
+        for (const at of BEEP_PATTERN) {
+
+            if (base + at >= pos) {
+                return base + at;
+            }
+        }
+
+        return base + BEEP_PATTERN_S;
     }
 
     // One beep: a sine, 60 ms, its start sharp so the ear can place it
@@ -44113,6 +44137,7 @@
             beepEvery: hostBeepEvery,
             beepOnly: hostBeepOnly,
             beepHz: hostBeepHz,
+            beepPattern: hostBeepPattern,
             androidOutMs: hostAndroidOutMs(),
             fade: hostFade,
             seeks: hostSeeks,
@@ -105006,6 +105031,25 @@
 
     let webBeepQuiet = false;
 
+    // The pattern for measuring, the same as the Android device's: uneven
+    // places repeating every 12 s, the next at or after a song's place
+    const WEB_BEEP_PATTERN = [0, 0.3, 1.2, 2.7, 4.5, 6.6, 9.6, 10.2];
+    const WEB_BEEP_PATTERN_S = 12;
+
+    function webBeepPatternNext(pos) {
+
+        const base = Math.floor(pos / WEB_BEEP_PATTERN_S) * WEB_BEEP_PATTERN_S;
+
+        for (const at of WEB_BEEP_PATTERN) {
+
+            if (base + at >= pos) {
+                return base + at;
+            }
+        }
+
+        return base + WEB_BEEP_PATTERN_S;
+    }
+
     function webBeepStep() {
 
         const every = state && state.dual === true ? Number(state.beepEvery) || 0 : 0;
@@ -105017,12 +105061,12 @@
             applyWebVolume();
         }
 
-        if (!every || audio.paused || !unlocked || localMute || calQuiet) {
+        if (!every || audio.paused || !unlocked || localMute) {
             return;
         }
 
         const pos = audio.currentTime;
-        const next = Math.ceil((pos + 0.01) / every) * every;
+        const next = state.beepPattern === true ? webBeepPatternNext(pos + 0.01) : Math.ceil((pos + 0.01) / every) * every;
 
         if (next - pos > 0.3 || Math.abs(next - webBeepAt) < 0.001) {
             return;
@@ -105045,7 +105089,7 @@
 
         webBeepAt = next;
         osc.type = "sine";
-        osc.frequency.value = webBeepHz;
+        osc.frequency.value = dualCalWebHz || webBeepHz;
         g.gain.setValueAtTime(0, t);
         g.gain.linearRampToValueAtTime(level, t + 0.003);
         g.gain.setValueAtTime(level, t + 0.04);
@@ -109327,10 +109371,6 @@
     // The phone fading its song out for a new one: this browser fades along,
     // its level times this share, back to whole with the new song
     let fadeShare = 1;
-
-    // This browser quiet for a moment while the delay is measured by
-    // microphone, see dualCalRecord
-    let calQuiet = false;
     let fadeSeen = 0;
     let fadeTimer = 0;
     let fadeAt = 0;
@@ -109396,7 +109436,7 @@
 
     function applyWebVolume() {
 
-        const want = calQuiet ? 0 : webVolume() * fadeShare;
+        const want = webVolume() * fadeShare;
         const music = webBeepOnly() ? 0 : 1;
 
         // On an iPhone or iPad led through the gain as soon as it can be, so
@@ -117716,26 +117756,26 @@
         }, 250);
     }
 
-    // Measuring the delay with a microphone where both are heard. The
-    // microphone records ten seconds or so: five with both sounding, then,
-    // this browser quiet, five with the Android device alone. Each part is
-    // laid over the song itself, read from the phone, and where the song
-    // lines up best is where it was heard: the Android device's place from
-    // the second part, and in the first the one place more that was not
-    // there before, this browser's. The difference is how much earlier this
-    // browser is heard, and the delay is moved by it, then measured again
-    // until within 8 ms, three times at most. The microphone's own delay,
-    // its filtering say, is the same for both sounds and makes no
-    // difference; only what it does to the sound itself might, so the
-    // browser's own echo cancelling, noise suppression and level are off
+    // Measuring the delay with a microphone where both are heard, by beeps
+    // rather than the music: the music silent on both, each device beeps in
+    // the same uneven pattern on its song's clock, the Android device in a
+    // low tone and this browser in a high one, through the same way out as
+    // the music. The microphone listens about 16 s; for each tone the
+    // moments it starts are found, and the one shift that lines up the two
+    // patterns is how much later this browser is heard. The delay is moved
+    // by it and measured again until within 5 ms, three times at most. The
+    // microphone's own delay makes no difference, both tones going through
+    // it; the browser's echo cancelling, noise suppression and level are
+    // off, as they work against a steady tone
     const DUAL_CAL_RATE = 16000;
+    const DUAL_CAL_LISTEN_S = 16;
     const DUAL_CAL_SEARCH_S = 6;
-    const DUAL_CAL_PART_S = 5;
-    const DUAL_CAL_GAP_S = 0.7;
-    const DUAL_CAL_CLOSE_S = 0.008;
-    let dualCalRef = null;
+    const DUAL_CAL_CLOSE_S = 0.005;
+    const DUAL_CAL_PHONE_HZ = 880;
+    const DUAL_CAL_WEB_HZ = 1320;
     let dualCalRun = 0;
     let dualCalSeq = 0;
+    let dualCalWebHz = 0;
 
     // A microphone at all: on https pages, or on this address once the
     // browser is told it is safe. Firefox allowing it on http still calls
@@ -117770,57 +117810,6 @@
         }
 
         return out;
-    }
-
-    // The song playing, from the phone, as one channel at the measuring
-    // rate, kept for the next measuring of the same song
-    function dualCalSong(src) {
-
-        if (dualCalRef && dualCalRef.src === src) {
-            return Promise.resolve(dualCalRef.data);
-        }
-
-        const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-
-        return fetch(songAt(src)).then(function (r) {
-
-            if (!r.ok) {
-                throw new Error("The song could not be read from the Android device");
-            }
-
-            return r.arrayBuffer();
-        }).then(function (buf) {
-
-            let ctx;
-
-            // Read at the measuring rate where the browser can, else at its
-            // own and brought down after
-            try {
-                ctx = new Offline(1, DUAL_CAL_RATE, DUAL_CAL_RATE);
-            } catch (e) {
-                ctx = new Offline(1, 48000, 48000);
-            }
-
-            return new Promise(function (resolve, reject) {
-                ctx.decodeAudioData(buf, resolve, reject);
-            });
-        }).then(function (ab) {
-
-            const mono = new Float32Array(ab.length);
-
-            for (let c = 0; c < ab.numberOfChannels; c++) {
-
-                const d = ab.getChannelData(c);
-
-                for (let i = 0; i < d.length; i++) {
-                    mono[i] += d[i] / ab.numberOfChannels;
-                }
-            }
-
-            dualCalRef = { src: src, data: dualCalDown(mono, ab.sampleRate) };
-
-            return dualCalRef.data;
-        });
     }
 
     // A Fourier transform in place, the length a power of two
@@ -117890,77 +117879,137 @@
         }
     }
 
-    // How well the recording x lines up with the song r at each place, one
-    // value for each sample x can be moved along r. Each tone counts about
-    // the same however loud, so the bass and the room do not smear it, and
-    // only 150 Hz to 4 kHz, where the microphone and the speakers agree
-    function dualCalCorr(x, r) {
+    // How loud one tone is in the recording, a value each millisecond, over
+    // 4 ms at a time
+    function dualCalTone(data, hz) {
 
-        let n = 1;
-
-        while (n < x.length + r.length) {
-            n <<= 1;
-        }
-
-        const xr = new Float64Array(n);
-        const xi = new Float64Array(n);
-        const rr = new Float64Array(n);
-        const ri = new Float64Array(n);
-        const lo = Math.floor(150 / DUAL_CAL_RATE * n);
-        const hi = Math.ceil(4000 / DUAL_CAL_RATE * n);
-
-        xr.set(x);
-        rr.set(r);
-        dualCalFft(xr, xi, false);
-        dualCalFft(rr, ri, false);
+        const win = 64;
+        const hop = DUAL_CAL_RATE / 1000;
+        const n = Math.max(0, Math.floor((data.length - win) / hop));
+        const out = new Float32Array(n);
+        const w = 2 * Math.PI * hz / DUAL_CAL_RATE;
+        const coeff = 2 * Math.cos(w);
 
         for (let k = 0; k < n; k++) {
 
-            const f = k <= n / 2 ? k : n - k;
+            let s1 = 0;
+            let s2 = 0;
+            const at = k * hop;
 
-            if (f < lo || f > hi) {
+            for (let i = 0; i < win; i++) {
 
-                xr[k] = 0;
-                xi[k] = 0;
-                continue;
+                const s0 = data[at + i] + coeff * s1 - s2;
+
+                s2 = s1;
+                s1 = s0;
             }
 
-            const a = xr[k] * rr[k] + xi[k] * ri[k];
-            const b = xr[k] * ri[k] - xi[k] * rr[k];
-            const m = Math.pow(a * a + b * b, 0.4) + 1e-12;
-
-            xr[k] = a / m;
-            xi[k] = b / m;
-        }
-
-        dualCalFft(xr, xi, true);
-
-        return xr.subarray(0, r.length - x.length + 1);
-    }
-
-    // A piece of the song, silence before its start and after its end
-    function dualCalSlice(ref, from, len) {
-
-        const out = new Float32Array(len);
-        const a = Math.max(0, from);
-        const b = Math.min(ref.length, from + len);
-
-        if (b > a) {
-            out.set(ref.subarray(a, b), a - from);
+            out[k] = Math.sqrt(Math.max(0, s1 * s1 + s2 * s2 - coeff * s1 * s2)) / win;
         }
 
         return out;
     }
 
-    function dualCalMeanAbs(c) {
+    // Where a tone begins, each millisecond: how much it rose over the last
+    // few, above its quiet level, so each beep is a short sharp peak. With
+    // how many beeps were heard
+    function dualCalOnsets(level) {
 
-        let sum = 0;
+        const sorted = Array.from(level).sort(function (a, b) {
+            return a - b;
+        });
+        const quiet = sorted[Math.floor(sorted.length / 2)] || 0;
+        const loud = sorted[Math.floor(sorted.length * 0.995)] || 0;
+        const out = new Float64Array(level.length);
+        let beeps = 0;
+        let lastBeep = -1000;
 
-        for (let i = 0; i < c.length; i++) {
-            sum += Math.abs(c[i]);
+        for (let k = 4; k < level.length; k++) {
+
+            const rise = level[k] - level[k - 4];
+
+            out[k] = rise > 0 && level[k] > quiet * 3 ? rise : 0;
+
+            if (level[k] > quiet + (loud - quiet) / 2 && level[k - 1] <= quiet + (loud - quiet) / 2 && k - lastBeep > 150) {
+
+                beeps++;
+                lastBeep = k;
+            }
         }
 
-        return sum / Math.max(1, c.length) || 1e-12;
+        return { onsets: out, beeps: beeps, clear: loud > quiet * 6 };
+    }
+
+    // Seconds the second's beeps come after the first's, the one shift in
+    // ±6 s that lines them up best, to the tenth of a millisecond, and how
+    // clearly it stands out
+    function dualCalShift(a, b) {
+
+        let n = 1;
+
+        while (n < a.length + b.length) {
+            n <<= 1;
+        }
+
+        const ar = new Float64Array(n);
+        const ai = new Float64Array(n);
+        const br = new Float64Array(n);
+        const bi = new Float64Array(n);
+
+        ar.set(a);
+        br.set(b);
+        dualCalFft(ar, ai, false);
+        dualCalFft(br, bi, false);
+
+        for (let k = 0; k < n; k++) {
+
+            const re = ar[k] * br[k] + ai[k] * bi[k];
+            const im = ar[k] * bi[k] - ai[k] * br[k];
+
+            ar[k] = re;
+            ai[k] = im;
+        }
+
+        dualCalFft(ar, ai, true);
+
+        const most = DUAL_CAL_SEARCH_S * 1000;
+        const at = function (lag) {
+            return ar[(lag + n) % n];
+        };
+        let best = 0;
+        let sum = 0;
+        let count = 0;
+
+        for (let lag = -most; lag <= most; lag++) {
+
+            const v = at(lag);
+
+            sum += Math.abs(v);
+            count++;
+
+            if (v > at(best)) {
+                best = lag;
+            }
+        }
+
+        // Between the milliseconds, by the peak's two neighbours
+        const l = at(best - 1);
+        const c = at(best);
+        const r = at(best + 1);
+        const den = l - 2 * c + r;
+        const frac = den < 0 ? Math.max(-0.5, Math.min(0.5, 0.5 * (l - r) / den)) : 0;
+
+        // The next best, away from the peak, for how clearly it stands out
+        let second = 0;
+
+        for (let lag = -most; lag <= most; lag++) {
+
+            if (Math.abs(lag - best) > 40 && at(lag) > second) {
+                second = at(lag);
+            }
+        }
+
+        return { s: (best + frac) / 1000, stand: c / (sum / Math.max(1, count) || 1e-12), over: second > 0 ? c / second : 99 };
     }
 
     // The microphone, opened once while the measuring box is open, so the
@@ -118136,10 +118185,8 @@
         });
     }
 
-    // Ten seconds or so from the open microphone at the measuring rate,
-    // this browser quiet after the first five, with where this browser's
-    // song was as the recording started and where it went quiet
-    function dualCalRecord(run, said) {
+    // Some seconds from the open microphone at the measuring rate
+    function dualCalRecord(run, seconds) {
 
         return new Promise(function (resolve, reject) {
 
@@ -118152,12 +118199,9 @@
             }
 
             const rate = m.rate;
-            const both = Math.round(DUAL_CAL_PART_S * rate);
-            const total = Math.round((DUAL_CAL_PART_S * 2 + DUAL_CAL_GAP_S) * rate);
+            const total = Math.round(seconds * rate);
             const chunks = [];
             let got = 0;
-            let pos0 = null;
-            let quietAt = -1;
             let over = false;
             let guard = 0;
 
@@ -118189,11 +118233,7 @@
                     at += c.length;
                 }
 
-                resolve({
-                    data: dualCalDown(all, rate),
-                    pos0: pos0,
-                    quietAt: Math.round(quietAt * DUAL_CAL_RATE / rate)
-                });
+                resolve(dualCalDown(all, rate));
             };
 
             const take = function (d) {
@@ -118204,22 +118244,8 @@
                     return;
                 }
 
-                // Where this browser's song was at the block's first sample:
-                // where it is now, less the block
-                if (pos0 === null) {
-                    pos0 = audio.currentTime - d.length / rate;
-                }
-
                 chunks.push(new Float32Array(d));
                 got += d.length;
-
-                if (quietAt < 0 && got >= both) {
-
-                    quietAt = got;
-                    calQuiet = true;
-                    applyWebVolume();
-                    said("Listening to the Android device alone");
-                }
 
                 if (got >= total) {
                     done(null);
@@ -118231,81 +118257,8 @@
             // Blocks stopping coming, the microphone gone quiet for good
             guard = setTimeout(function () {
                 done(new Error("The microphone stopped giving sound"));
-            }, 25000);
+            }, (seconds + 10) * 1000);
         });
-    }
-
-    // Where the Android device and this browser were heard in a recording:
-    // null for the Android device not heard, d null for no second sound,
-    // else how many seconds earlier this browser is heard
-    function dualCalWork(rec, ref) {
-
-        const fs = DUAL_CAL_RATE;
-        const n = DUAL_CAL_PART_S * fs;
-        const search = DUAL_CAL_SEARCH_S * fs;
-        const startA = Math.round(rec.pos0 * fs) - search;
-        const bAt = rec.quietAt + Math.round(DUAL_CAL_GAP_S * fs);
-
-        if (rec.data.length < bAt + n) {
-            return null;
-        }
-
-        const cA = dualCalCorr(rec.data.subarray(0, n), dualCalSlice(ref, startA, n + 2 * search));
-        const cB = dualCalCorr(rec.data.subarray(bAt, bAt + n), dualCalSlice(ref, startA + bAt, n + 2 * search));
-        let phone = 0;
-
-        for (let i = 1; i < cB.length; i++) {
-
-            if (cB[i] > cB[phone]) {
-                phone = i;
-            }
-        }
-
-        const phoneStand = cB[phone] / dualCalMeanAbs(cB);
-
-        if (phoneStand < 10) {
-            return { phoneStand: phoneStand, d: null, heard: false };
-        }
-
-        // The Android device in the first part, the same place give or take
-        // a few samples
-        let pa = Math.max(0, phone - 4);
-
-        for (let i = pa; i <= Math.min(cA.length - 1, phone + 4); i++) {
-
-            if (cA[i] > cA[pa]) {
-                pa = i;
-            }
-        }
-
-        const hA = cA[pa] > 0 ? cA[pa] : 1e-12;
-        const hB = cB[phone];
-        const near = Math.round(DUAL_CAL_CLOSE_S * fs);
-        let best = -1;
-        let bestScore = 0;
-
-        for (let i = 0; i < cA.length; i++) {
-
-            if (Math.abs(i - phone) <= near) {
-                continue;
-            }
-
-            const score = cA[i] / hA - Math.max(0, cB[i] / hB);
-
-            if (score > bestScore) {
-
-                bestScore = score;
-                best = i;
-            }
-        }
-
-        const stand = best >= 0 ? cA[best] / dualCalMeanAbs(cA) : 0;
-
-        if (best < 0 || bestScore < 0.25 || stand < 10) {
-            return { phoneStand: phoneStand, d: null, heard: true, stand: stand };
-        }
-
-        return { phoneStand: phoneStand, d: (best - phone) / fs, heard: true, stand: stand };
     }
 
     // This browser's song put straight on its place now, after the delay
@@ -118334,11 +118287,19 @@
     }
 
     // Measured with the open microphone and the delay moved, three rounds
-    // at most, each once the music is heard. Gives the words for the
-    // outcome
+    // at most. The beeps in the pattern asked of the phone, its tone and
+    // this browser's apart, the beeps as they were given back after. Gives
+    // the words for the outcome
     async function dualCalMeasure(said) {
 
         const run = ++dualCalSeq;
+        const before = state ? { every: Number(state.beepEvery) || 0, only: state.beepOnly === true } : { every: 0, only: false };
+        // The two tones apart, and neither a whole multiple of the other, as
+        // a speaker gives a tone's multiples too: else 880 and 1320 Hz
+        const ratio = Math.max(phoneBeepHz, webBeepHz) / Math.min(phoneBeepHz, webBeepHz);
+        const apart = ratio >= 1.4 && Math.abs(ratio - Math.round(ratio)) > 0.15;
+        const phoneHz = apart ? phoneBeepHz : DUAL_CAL_PHONE_HZ;
+        const webHz = apart ? webBeepHz : DUAL_CAL_WEB_HZ;
         let moved = 0;
 
         dualCalRun = run;
@@ -118349,23 +118310,32 @@
 
                 const s = state;
 
-                if (!s || s.dual !== true || !s.playing || !s.src || !unlocked || localMute) {
-                    return "Measuring needs Play on both with a song playing in this browser and on the Android device.";
+                if (!s || s.dual !== true || !s.src || !unlocked || localMute) {
+                    return "Measuring needs Play on both with this browser playing.";
                 }
 
-                if (s.duration && s.duration - (s.position || 0) < 16) {
-                    return "The song ends too soon to measure. Measure again when the next one plays.";
+                // The pattern asked for, then waited for until the phone tells
+                // it beeps so, and a moment more for both to begin
+                dualCalWebHz = webHz;
+                webBeepEngine();
+                webBeepAt = -1;
+                send("syncBeep", { every: 1, only: true, pattern: true, hz: phoneHz });
+                said("Asking the Android device to beep");
+
+                for (let i = 0; i < 40 && !(state && state.beepPattern === true); i++) {
+
+                    await dualCalWait(100);
+
+                    if (run !== dualCalRun) {
+                        return "";
+                    }
                 }
 
-                said("Reading the song");
-
-                const src = s.src;
-                const ref = await dualCalSong(src);
-
-                if (run !== dualCalRun) {
-                    return "";
+                if (!(state && state.beepPattern === true)) {
+                    return "The Android device did not start beeping. Measure again.";
                 }
 
+                await dualCalWait(1500);
                 await dualCalHear(run, said);
                 dualCalHold = true;
 
@@ -118373,64 +118343,62 @@
                     audio.playbackRate = 1;
                 }
 
-                said("Listening to both");
+                said("Listening to the beeps, " + DUAL_CAL_LISTEN_S + " s");
 
-                const rec = await dualCalRecord(run, said);
+                const rec = await dualCalRecord(run, DUAL_CAL_LISTEN_S);
 
-                calQuiet = false;
-                applyWebVolume();
                 dualCalHold = false;
-
-                if (!state || state.src !== src) {
-                    return "The song changed while listening. Measure again.";
-                }
-
                 said("Working it out");
                 await dualCalWait(50);
 
-                const w = dualCalWork(rec, ref);
+                const p = dualCalOnsets(dualCalTone(rec, phoneHz));
+                const w = dualCalOnsets(dualCalTone(rec, webHz));
 
-                dbgLog("Audio", "measured by microphone, round " + round + ": "
-                    + (!w ? "too short" : !w.heard ? "the Android device not heard (" + w.phoneStand.toFixed(1) + ")"
-                        : w.d === null ? "no second sound (" + (w.stand || 0).toFixed(1) + ")"
-                            : "this browser " + Math.round(w.d * 1000) + " ms ahead (" + w.stand.toFixed(1) + ", " + w.phoneStand.toFixed(1) + ")"));
+                if (!p.clear || p.beeps < 3) {
 
-                if (!w) {
-                    return "The recording came out too short. Measure again.";
+                    dbgLog("Audio", "measured by microphone, round " + round + ": the Android device's beeps not heard (" + p.beeps + ")");
+                    return "The microphone did not hear the Android device's beeps clearly. Move it closer, or turn the Android device up, and measure again.";
                 }
 
-                if (!w.heard) {
-                    return "The microphone did not hear the Android device clearly. Move it closer, or turn the Android device up, and measure again.";
+                if (!w.clear || w.beeps < 3) {
+
+                    dbgLog("Audio", "measured by microphone, round " + round + ": this browser's beeps not heard (" + w.beeps + ")");
+                    return "The microphone did not hear this browser's beeps clearly. Turn this browser up, or move the microphone closer, and measure again.";
                 }
 
-                if (w.d === null || Math.abs(w.d) < DUAL_CAL_CLOSE_S) {
+                const sh = dualCalShift(p.onsets, w.onsets);
+                const ms = Math.round(sh.s * 1000);
 
-                    if (round === 1 && w.d === null) {
-                        return "Only one sound heard: in step within 8 ms already, or the microphone does not hear this browser. If it is off, turn this browser up or move the microphone closer and measure again.";
-                    }
+                dbgLog("Audio", "measured by microphone, round " + round + ": this browser heard " + Math.abs(ms) + " ms "
+                    + (ms > 0 ? "after" : "before") + " the Android device, beeps " + p.beeps + " and " + w.beeps + ", standing out "
+                    + sh.stand.toFixed(1) + ", " + sh.over.toFixed(1) + " times the next best");
 
-                    return "In step within 8 ms" + (moved ? ", moved " + (moved > 0 ? "+" : "") + moved + " ms" : "") + ". " + dualMsText() + " for " + dualSpeakerName(state) + ".";
+                if (sh.over < 1.5 || sh.stand < 8) {
+                    return "The beeps did not line up clearly. Keep the room quiet, or move the microphone, and measure again.";
                 }
 
-                const ms = Math.round(w.d * 1000);
-
-                // Further than the delay goes: more likely heard wrong
-                if (Math.abs(dualMs + ms) > DUAL_MS_MOST) {
-                    return "Measured this browser " + Math.abs(ms) + " ms " + (ms > 0 ? "ahead" : "behind") + ", more than the delay can be set to. Check that the microphone hears the music, not something else, and measure again.";
+                if (Math.abs(sh.s) < DUAL_CAL_CLOSE_S) {
+                    return "In step within " + Math.max(1, Math.abs(ms)) + " ms" + (moved ? ", moved " + (moved > 0 ? "+" : "") + moved + " ms" : "") + ". "
+                        + dualMsText() + " for " + dualSpeakerName(state) + ".";
                 }
 
-                moved += ms;
-                setDualMs(dualMs + ms);
+                // Heard later by that much: played earlier by it
+                if (Math.abs(dualMs - ms) > DUAL_MS_MOST) {
+                    return "Measured this browser " + Math.abs(ms) + " ms " + (ms > 0 ? "behind" : "ahead") + ", more than the delay can be set to. Measure again.";
+                }
+
+                moved -= ms;
+                setDualMs(dualMs - ms);
                 dualSnap();
-                said("This browser " + Math.abs(ms) + " ms " + (ms > 0 ? "ahead" : "behind") + ", moved, " + (round < 3 ? "listening again" : "done"));
-                await dualCalWait(3000);
+                said("This browser " + Math.abs(ms) + " ms " + (ms > 0 ? "behind" : "ahead") + ", moved, " + (round < 3 ? "listening again" : "done"));
+                await dualCalWait(2500);
 
                 if (run !== dualCalRun) {
                     return "";
                 }
             }
 
-            return "Moved " + (moved > 0 ? "+" : "") + moved + " ms in all, not yet within 8 ms. " + dualMsText()
+            return "Moved " + (moved > 0 ? "+" : "") + moved + " ms in all, not yet within 5 ms. " + dualMsText()
                 + " for " + dualSpeakerName(state) + ". Measure again to go on.";
         } catch (e) {
 
@@ -118440,17 +118408,12 @@
                 return "";
             }
 
-            return e && e.name === "NotAllowedError" ? "The microphone was not allowed. Allow it for this page and measure again."
-                : e && e.name === "OverconstrainedError" ? "That microphone is not there any more. Pick another."
-                    : "Measuring stopped: " + (e && e.message ? e.message : String(e));
+            return "Measuring stopped: " + (e && e.message ? e.message : String(e));
         } finally {
 
-            if (calQuiet || dualCalHold) {
-
-                calQuiet = false;
-                dualCalHold = false;
-                applyWebVolume();
-            }
+            dualCalHold = false;
+            dualCalWebHz = 0;
+            send("syncBeep", { every: before.every, only: before.only, hz: phoneBeepHz });
 
             if (dualCalRun === run) {
                 dualCalRun = 0;
@@ -118576,7 +118539,7 @@
                     return;
                 }
 
-                said("Route the sound to the microphone until it hears the music, then start");
+                said("Route the sound to the microphone until it hears it, then start");
                 paintMic();
                 footer();
             }, function (e) {
@@ -118715,7 +118678,7 @@
             return;
         }
 
-        choiceText("Put the microphone where you listen, with both heard. Open it and route the sound to it; the level shows what it hears. Then start: once it hears the music it listens ten seconds, first to both, then with this browser quiet to the Android device alone, and moves the delay until the two are heard as one. The microphone's own delay makes no difference, as both sounds go through it.");
+        choiceText("Put the microphone where you listen, with both heard. Open it and route the sound to it; the level shows what it hears. Then start: the music goes silent and both beep in a pattern, the Android device low and this browser high, through the same way out as the music. Once it hears them it listens 16 s and moves the delay until the beeps are heard as one. The microphone's own delay makes no difference, as both go through it.");
         said(dualMsText() + " for " + dualSpeakerName(state));
         paintMic();
         listMics();
