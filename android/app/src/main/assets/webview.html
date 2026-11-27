@@ -18878,6 +18878,13 @@
 
         paintPhoneSound(s);
         dualMsSync();
+
+        // Beeps alone ended along with Play on both: the music back
+        if (webBeepQuiet !== webBeepOnly()) {
+
+            webBeepQuiet = webBeepOnly();
+            applyWebVolume();
+        }
         const dual = carAudio && s.dual === true;
 
         $("soundPhone").classList.toggle("on", (!carAudio || dual) && !localMute);
@@ -21086,9 +21093,23 @@
         return webBeepCtx && webBeepCtx.state === "running" ? webBeepCtx : null;
     }
 
+    // Beeps alone asked for, the music silent on both devices under them
+    function webBeepOnly() {
+        return !!(state && state.dual === true && Number(state.beepEvery) > 0 && state.beepOnly === true);
+    }
+
+    let webBeepQuiet = false;
+
     function webBeepStep() {
 
         const every = state && state.dual === true ? Number(state.beepEvery) || 0 : 0;
+
+        // The music silenced or given back as beeps alone come and go
+        if (webBeepOnly() !== webBeepQuiet) {
+
+            webBeepQuiet = webBeepOnly();
+            applyWebVolume();
+        }
 
         if (!every || audio.paused || !unlocked || localMute || calQuiet) {
             return;
@@ -25423,7 +25444,7 @@
 
     function applyWebVolume() {
 
-        const want = calQuiet ? 0 : webVolume() * fadeShare;
+        const want = calQuiet || webBeepOnly() ? 0 : webVolume() * fadeShare;
 
         // On an iPhone or iPad led through the gain as soon as it can be, so
         // the level and the fades with the phone are heard. Safari plays on
@@ -33268,6 +33289,10 @@
                 b.el.classList.toggle("ring", b.every === every);
                 b.el.classList.toggle("dim", b.every !== every);
             });
+
+            if (beepOnly.checked !== (every > 0 && !!state && state.beepOnly === true)) {
+                beepOnly.checked = every > 0 && !!state && state.beepOnly === true;
+            }
             shown.textContent = dualMsText();
             speaker.textContent = "For " + dualSpeakerName(state);
 
@@ -33309,23 +33334,36 @@
         shown.className = "dualDelayNow";
         speaker.className = "dualDelaySpeaker";
         told.className = "dualDelayTold";
+        // The beeps asked of the phone, which tells every browser; woken
+        // within the tap, which a browser asks for
+        const askBeeps = function (every, only) {
+
+            webBeepEngine();
+            webBeepAt = -1;
+            send("syncBeep", { every: every, only: only && every > 0 });
+
+            if (state) {
+
+                state.beepEvery = every;
+                state.beepOnly = only && every > 0;
+            }
+
+            paint();
+        };
+        const beepOnly = uiTick("Beeps only, the music silent", function (on) {
+
+            const every = state && state.dual === true ? Number(state.beepEvery) || 0 : 0;
+
+            askBeeps(on && !every ? 2 : every, on);
+        });
+
         beepHead.className = "dualDelayTold";
         beepHead.textContent = "Beeps to set it by ear: low from the Android device, high from this browser, heard as one when it is right";
         beeps.className = "dualDelayRow dualBeepRow";
         [0, 1, 2, 3, 5].forEach(function (every) {
 
             const b = uiBtn(every ? every + " s" : "Off", function () {
-
-                // Woken within the tap, which a browser asks for
-                webBeepEngine();
-                webBeepAt = -1;
-                send("syncBeep", every);
-
-                if (state) {
-                    state.beepEvery = every;
-                }
-
-                paint();
+                askBeeps(every, beepOnly.checked);
             }, true);
 
             b.setAttribute("aria-label", every ? "A beep every " + every + " s" : "No beeps");
@@ -33348,6 +33386,7 @@
         }, true));
         col.appendChild(beepHead);
         col.appendChild(beeps);
+        col.appendChild(beepOnly.el);
         col.appendChild(uiBtn("Measure with a microphone", function () {
             openDualCal();
         }, true));

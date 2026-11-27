@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.372";
+    const VERSION = "2.0.1.373";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -22261,7 +22261,7 @@
         // there was an element to set it on: a new element plays at its
         // whole sound, and the same share sent again changes nothing, so
         // the song played louder than the level shown after each start
-        audio.volume = phoneHushed() ? CAR_SHADOW_VOLUME : volScale();
+        audio.volume = musicHushed() ? CAR_SHADOW_VOLUME : volScale();
 
         // Asked for with CORS from the start while sound profiles are on, so
         // the first song streamed can go through the profile as well
@@ -26179,7 +26179,7 @@
 
 
     function volScale() {
-        return phoneHushed() ? 1 : fineGain;
+        return musicHushed() ? 1 : fineGain;
     }
 
     // A new level from the app, the sound moved to it at once unless a fade
@@ -26204,7 +26204,7 @@
 
         fineGain = v;
 
-        if (audio && !iosGain && !phoneHushed()) {
+        if (audio && !iosGain && !musicHushed()) {
             audio.volume = Math.max(0, Math.min(1, level * volScale()));
         }
     }
@@ -26309,7 +26309,7 @@
 
         const same = currentSong && currentSong.song_id === resumeFadeId;
         const ms = fadeMs("resume");
-        const target = phoneHushed() ? CAR_SHADOW_VOLUME : 1;
+        const target = musicHushed() ? CAR_SHADOW_VOLUME : 1;
 
         resumeFadeId = null;
 
@@ -26381,7 +26381,7 @@
 
             const k = Math.max(0, Math.min(1, (Date.now() - t0) / ms));
 
-            audio.volume = target * k * (phoneHushed() ? 1 : volScale());
+            audio.volume = target * k * (musicHushed() ? 1 : volScale());
 
             if (k >= 1) {
 
@@ -26489,7 +26489,7 @@
     // fade in of its own there
     function seekFadeIn(fade, len, from) {
 
-        const target = phoneHushed() ? CAR_SHADOW_VOLUME : 1;
+        const target = musicHushed() ? CAR_SHADOW_VOLUME : 1;
         const el = audio;
         let ready = false;
         const same = function () {
@@ -26532,7 +26532,7 @@
 
                 const k = Math.min(1, (Date.now() - t0) / len);
 
-                audio.volume = target * k * (phoneHushed() ? 1 : volScale());
+                audio.volume = target * k * (musicHushed() ? 1 : volScale());
 
                 if (k >= 1) {
                     endSeekFade();
@@ -39319,9 +39319,9 @@
             add("Loaded", loaded + " %");
             add("Ready state", ["Nothing", "Metadata", "Current data", "Future data", "Enough data"][audio.readyState] || audio.readyState);
             add("Network state", ["Empty", "Idle", "Loading", "No source"][audio.networkState] || audio.networkState);
-            add("Volume", phoneHushed() ? "Silent here, the web view sets its own" : Math.round((audio.volume || 0) * 100) + " %");
+            add("Volume", musicHushed() ? "Silent here, the web view sets its own" : Math.round((audio.volume || 0) * 100) + " %");
 
-            if (!phoneHushed() && audio.muted) {
+            if (!musicHushed() && audio.muted) {
                 sub("Muted", "Yes");
             }
 
@@ -43688,6 +43688,12 @@
         return hostCarAudio && !hostDual;
     }
 
+    // The music here as good as silent: the browser alone heard, or beeps
+    // only to set the delay by ear, the song going on silently under them
+    function musicHushed() {
+        return phoneHushed() || hostBeepEvery > 0 && hostBeepOnly;
+    }
+
     // Beeps to set the delay of Play on both by ear, asked for by a browser:
     // a short tone each time the song's place is a whole number of the
     // interval, here low, in the browsers an octave higher, each through
@@ -43697,16 +43703,21 @@
     const BEEP_EVERY = [0, 1, 2, 3, 5];
     const BEEP_HZ = 880;
     let hostBeepEvery = 0;
+    let hostBeepOnly = false;
     let hostBeepUntil = 0;
     let hostBeepAt = -1;
     let hostBeepTimer = 0;
     let hostBeepCtx = null;
 
+    // The interval, or with only, beeps alone: the music silent on both
+    // devices, the song played on silently if it stood, so the beeps go on
     function hostBeepSet(every) {
 
-        const n = Number(every) || 0;
+        const o = every && typeof every === "object" ? every : { every: every, only: false };
+        const n = Number(o.every) || 0;
 
         hostBeepEvery = BEEP_EVERY.indexOf(n) >= 0 && hostDual ? n : 0;
+        hostBeepOnly = hostBeepEvery > 0 && o.only === true;
         hostBeepUntil = Date.now() + 10 * 60000;
         hostBeepAt = -1;
         clearInterval(hostBeepTimer);
@@ -43716,7 +43727,13 @@
             hostBeepTimer = setInterval(hostBeepStep, 50);
         }
 
-        dbgLog("Audio", hostBeepEvery ? "a beep every " + hostBeepEvery + " s to set the delay by ear" : "no beeps");
+        dbgLog("Audio", hostBeepEvery ? "a beep every " + hostBeepEvery + " s to set the delay by ear" + (hostBeepOnly ? ", the music silent" : "")
+            : "no beeps");
+        applyCarAudioVolume();
+
+        if (hostBeepOnly && audio && audio.src && audio.paused) {
+            togglePlayPause();
+        }
     }
 
     // The engine the music goes through, so the beep comes out with it, or
@@ -43876,7 +43893,7 @@
         }
 
         audio.muted = false;
-        audio.volume = phoneHushed() ? CAR_SHADOW_VOLUME : volScale();
+        audio.volume = musicHushed() ? CAR_SHADOW_VOLUME : volScale();
 
         // The gain of a fade on an iPhone back to whole
         if (iosGain) {
@@ -44084,6 +44101,7 @@
 
             // The beeps to set the delay by ear, 0 for none
             beepEvery: hostBeepEvery,
+            beepOnly: hostBeepOnly,
             androidOutMs: hostAndroidOutMs(),
             fade: hostFade,
             seeks: hostSeeks,
@@ -51267,7 +51285,7 @@
         // A new song must not come in at full volume while the browser plays
         document.addEventListener("play", function () {
 
-            if (phoneHushed() && audio && audio.volume !== CAR_SHADOW_VOLUME) {
+            if (musicHushed() && audio && audio.volume !== CAR_SHADOW_VOLUME) {
                 applyCarAudioVolume();
             }
         }, true);
@@ -102408,6 +102426,13 @@
 
         paintPhoneSound(s);
         dualMsSync();
+
+        // Beeps alone ended along with Play on both: the music back
+        if (webBeepQuiet !== webBeepOnly()) {
+
+            webBeepQuiet = webBeepOnly();
+            applyWebVolume();
+        }
         const dual = carAudio && s.dual === true;
 
         $("soundPhone").classList.toggle("on", (!carAudio || dual) && !localMute);
@@ -104616,9 +104641,23 @@
         return webBeepCtx && webBeepCtx.state === "running" ? webBeepCtx : null;
     }
 
+    // Beeps alone asked for, the music silent on both devices under them
+    function webBeepOnly() {
+        return !!(state && state.dual === true && Number(state.beepEvery) > 0 && state.beepOnly === true);
+    }
+
+    let webBeepQuiet = false;
+
     function webBeepStep() {
 
         const every = state && state.dual === true ? Number(state.beepEvery) || 0 : 0;
+
+        // The music silenced or given back as beeps alone come and go
+        if (webBeepOnly() !== webBeepQuiet) {
+
+            webBeepQuiet = webBeepOnly();
+            applyWebVolume();
+        }
 
         if (!every || audio.paused || !unlocked || localMute || calQuiet) {
             return;
@@ -108953,7 +108992,7 @@
 
     function applyWebVolume() {
 
-        const want = calQuiet ? 0 : webVolume() * fadeShare;
+        const want = calQuiet || webBeepOnly() ? 0 : webVolume() * fadeShare;
 
         // On an iPhone or iPad led through the gain as soon as it can be, so
         // the level and the fades with the phone are heard. Safari plays on
@@ -116798,6 +116837,10 @@
                 b.el.classList.toggle("ring", b.every === every);
                 b.el.classList.toggle("dim", b.every !== every);
             });
+
+            if (beepOnly.checked !== (every > 0 && !!state && state.beepOnly === true)) {
+                beepOnly.checked = every > 0 && !!state && state.beepOnly === true;
+            }
             shown.textContent = dualMsText();
             speaker.textContent = "For " + dualSpeakerName(state);
 
@@ -116839,23 +116882,36 @@
         shown.className = "dualDelayNow";
         speaker.className = "dualDelaySpeaker";
         told.className = "dualDelayTold";
+        // The beeps asked of the phone, which tells every browser; woken
+        // within the tap, which a browser asks for
+        const askBeeps = function (every, only) {
+
+            webBeepEngine();
+            webBeepAt = -1;
+            send("syncBeep", { every: every, only: only && every > 0 });
+
+            if (state) {
+
+                state.beepEvery = every;
+                state.beepOnly = only && every > 0;
+            }
+
+            paint();
+        };
+        const beepOnly = uiTick("Beeps only, the music silent", function (on) {
+
+            const every = state && state.dual === true ? Number(state.beepEvery) || 0 : 0;
+
+            askBeeps(on && !every ? 2 : every, on);
+        });
+
         beepHead.className = "dualDelayTold";
         beepHead.textContent = "Beeps to set it by ear: low from the Android device, high from this browser, heard as one when it is right";
         beeps.className = "dualDelayRow dualBeepRow";
         [0, 1, 2, 3, 5].forEach(function (every) {
 
             const b = uiBtn(every ? every + " s" : "Off", function () {
-
-                // Woken within the tap, which a browser asks for
-                webBeepEngine();
-                webBeepAt = -1;
-                send("syncBeep", every);
-
-                if (state) {
-                    state.beepEvery = every;
-                }
-
-                paint();
+                askBeeps(every, beepOnly.checked);
             }, true);
 
             b.setAttribute("aria-label", every ? "A beep every " + every + " s" : "No beeps");
@@ -116878,6 +116934,7 @@
         }, true));
         col.appendChild(beepHead);
         col.appendChild(beeps);
+        col.appendChild(beepOnly.el);
         col.appendChild(uiBtn("Measure with a microphone", function () {
             openDualCal();
         }, true));
