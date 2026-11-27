@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.376";
+    const VERSION = "2.0.1.377";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -89375,6 +89375,20 @@
         accent-color: var(--accent);
     }
 
+    /* What the sound engine tells, as it tells it */
+    .dualDelayEngine {
+        white-space: pre-line;
+        font-family: ui-monospace, monospace;
+        font-size: 0.72em;
+        opacity: 0.6;
+        text-align: center;
+        padding: 0 4px 4px;
+    }
+
+    .dualDelayVols {
+        padding: 4px 0;
+    }
+
     .dualDelayEnds {
         display: flex;
         justify-content: space-between;
@@ -116957,6 +116971,45 @@
     // question
     let dualDelayTimer = 0;
 
+    // What this browser's sound engine tells of its delay, as it tells it:
+    // its own buffer, the way out to the speakers, and the delay its own
+    // clock shows between what it plays and what is heard, with its state
+    // and rate, and whether the song goes through it. Lines for the delay
+    // window and the log
+    function webEngineLines() {
+
+        const ctx = gainCtx || webBeepCtx;
+
+        if (!ctx) {
+            return ["No sound engine woken in this browser yet"];
+        }
+
+        const ms = function (v) {
+            return typeof v === "number" && isFinite(v) ? (v * 1000).toFixed(1) + " ms" : "not told";
+        };
+        let byClock = "not told";
+
+        if (typeof ctx.getOutputTimestamp === "function" && ctx.state === "running") {
+
+            try {
+
+                const ts = ctx.getOutputTimestamp();
+
+                if (ts && typeof ts.contextTime === "number" && ts.performanceTime > 0) {
+                    byClock = ms(ctx.currentTime - ts.contextTime - (performance.now() - ts.performanceTime) / 1000);
+                }
+            } catch (e) {
+                byClock = "not told";
+            }
+        }
+
+        return [
+            "Sound engine " + ctx.state + ", " + ctx.sampleRate + " Hz, the song " + (ctx === gainCtx && gainNode ? "through it" : "not through it"),
+            "Base latency " + ms(ctx.baseLatency) + ", output latency " + ms(ctx.outputLatency) + ", by its clock " + byClock,
+            "Allowed for: " + Math.round(dualOwnLag() * 1000) + " ms"
+        ];
+    }
+
     // Beeps only, the music silent, as last ticked in this browser
     let beepOnlyKept = false;
 
@@ -116977,6 +117030,9 @@
         const beepHead = document.createElement("div");
         const beeps = document.createElement("div");
         const beepBtns = [];
+        const engine = document.createElement("div");
+        const vols = document.createElement("div");
+        const volRows = [];
         const slider = document.createElement("input");
         const ends = document.createElement("div");
         const endLo = document.createElement("span");
@@ -117030,9 +117086,106 @@
             setDualMs(Number(slider.value));
             shown.textContent = dualMsText();
         };
+        // A volume, the Android device's or this browser's, as in the
+        // volume popup: quieter, the slider, louder and the level now
+        const volRowFor = function (t) {
+
+            const wrap = document.createElement("div");
+            const name = document.createElement("div");
+            const row = document.createElement("div");
+            const down = document.createElement("button");
+            const bar = document.createElement("input");
+            const up = document.createElement("button");
+            const now = document.createElement("span");
+            let moving = false;
+
+            name.className = "dualDelayTold";
+            name.textContent = t.name;
+            row.className = "volRow";
+            now.className = "volNow";
+            down.type = "button";
+            down.className = "chip iconOnly";
+            down.setAttribute("aria-label", "Quieter, " + t.name);
+            down.appendChild(icon("arrowDown"));
+            up.type = "button";
+            up.className = "chip iconOnly";
+            up.setAttribute("aria-label", "Louder, " + t.name);
+            up.appendChild(icon("arrowUp"));
+            bar.type = "range";
+            bar.className = "volSlider";
+            bar.min = "0";
+            bar.setAttribute("aria-label", "Volume, " + t.name);
+            bar.addEventListener("pointerdown", function () {
+                moving = true;
+            });
+            bar.addEventListener("input", function () {
+
+                moving = true;
+                volSetFor(t, Number(bar.value), false);
+                now.textContent = volTextOf(t, Number(bar.value));
+            });
+            bar.addEventListener("change", function () {
+
+                moving = false;
+                volSetFor(t, Number(bar.value), true);
+            });
+
+            const nudge = function (by) {
+
+                const level = volLevelOf(t);
+
+                if (level < 0) {
+                    return;
+                }
+
+                if (t.kind === "phone" && volFineOn()) {
+                    volFineNudge(t, by);
+                } else {
+                    volSetFor(t, level + by * (t.kind === "phone" ? 1 : 5), true);
+                }
+            };
+
+            down.addEventListener("click", function () {
+                nudge(-1);
+            });
+            up.addEventListener("click", function () {
+                nudge(1);
+            });
+            row.appendChild(down);
+            row.appendChild(bar);
+            row.appendChild(up);
+            row.appendChild(now);
+            wrap.appendChild(name);
+            wrap.appendChild(row);
+            volRows.push({
+                el: wrap,
+                paint: function () {
+
+                    const top = volTopOf(t);
+                    const level = volLevelOf(t);
+
+                    bar.max = String(top);
+                    bar.step = t.kind === "phone" && volFineOn() ? "any" : "1";
+
+                    if (!moving && level >= 0) {
+                        bar.value = String(level);
+                    }
+
+                    now.textContent = volTextOf(t, level);
+                }
+            });
+
+            return wrap;
+        };
         const paint = function () {
 
             dualMsSync();
+
+            // The two volumes and what the sound engine tells, as they are
+            volRows.forEach(function (v) {
+                v.paint();
+            });
+            engine.textContent = webEngineLines().join("\n");
 
             // The slider where the delay is, left alone while it is moved
             if (!sliding) {
@@ -117249,6 +117402,10 @@
             setDualMs(Number(slider.value));
             paint();
         });
+        vols.className = "dualDelayVols";
+        vols.appendChild(volRowFor({ key: "phone", kind: "phone", name: "Volume of the Android device" }));
+        vols.appendChild(volRowFor({ key: "here", kind: "here", name: "Volume of " + browserName() }));
+        engine.className = "dualDelayEngine";
         col.appendChild(speaker);
         col.appendChild(shown);
         col.appendChild(slider);
@@ -117263,13 +117420,16 @@
         col.appendChild(beeps);
         col.appendChild(beepOnly.el);
         col.appendChild(tones);
+        col.appendChild(vols);
         col.appendChild(uiBtn("Measure with a microphone", function () {
             openDualCal();
         }, true));
         col.appendChild(told);
+        col.appendChild(engine);
         col.appendChild(uiBtn("Done", closeSongMenu));
         box.appendChild(col);
         paint();
+        dbgLog("Audio", "the sound engine here: " + webEngineLines().join("; "));
         $("songMenu").style.display = "flex";
         clearInterval(dualDelayTimer);
         dualDelayTimer = setInterval(function () {
