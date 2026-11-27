@@ -20492,6 +20492,10 @@
     let dualSettle = 0;
     let dualLogged = 0;
 
+    // Held at the normal speed while the delay is measured, see
+    // dualCalMeasure
+    let dualCalHold = false;
+
     // How much later this browser's sound is set to be heard than the
     // phone's, in ms, less is earlier. One for each of the phone's speakers,
     // the phone itself and each Bluetooth device by name, as each has a
@@ -20726,6 +20730,15 @@
 
         dualMsSync();
 
+        if (dualCalHold) {
+
+            if (audio.playbackRate !== 1) {
+                audio.playbackRate = 1;
+            }
+
+            return;
+        }
+
         const s = state;
 
         if (!s || !s.dual || !s.playing || dualOffset === null || audio.paused || audio.seeking || audio.readyState < 3
@@ -20740,9 +20753,16 @@
             return;
         }
 
+        const now = Date.now();
+
+        // Just moved there: the play head given a moment to get there, so a
+        // move that takes is not asked for again and again
+        if (now < dualSettle) {
+            return;
+        }
+
         const target = dualTarget();
         const err = audio.currentTime - target;
-        const now = Date.now();
 
         // Far off, a new song or a jump on the phone: there at once, then
         // left to settle before it is steered
@@ -20760,10 +20780,6 @@
                 // Tried again on the next step
             }
 
-            return;
-        }
-
-        if (now < dualSettle) {
             return;
         }
 
@@ -24938,6 +24954,10 @@
     // The phone fading its song out for a new one: this browser fades along,
     // its level times this share, back to whole with the new song
     let fadeShare = 1;
+
+    // This browser quiet for a moment while the delay is measured by
+    // microphone, see dualCalRecord
+    let calQuiet = false;
     let fadeSeen = 0;
     let fadeTimer = 0;
     let fadeAt = 0;
@@ -25003,7 +25023,7 @@
 
     function applyWebVolume() {
 
-        const want = webVolume() * fadeShare;
+        const want = calQuiet ? 0 : webVolume() * fadeShare;
 
         // On an iPhone or iPad led through the gain as soon as it can be, so
         // the level and the fades with the phone are heard. Safari plays on
@@ -32891,6 +32911,9 @@
             setDualMs(0);
             paint();
         }, true));
+        col.appendChild(uiBtn("Measure with a microphone", function () {
+            openDualCal();
+        }, true));
         col.appendChild(told);
         col.appendChild(uiBtn("Done", closeSongMenu));
         box.appendChild(col);
@@ -32907,6 +32930,759 @@
 
             paint();
         }, 1000);
+    }
+
+    // Measuring the delay with a microphone where both are heard. The
+    // microphone records ten seconds or so: five with both sounding, then,
+    // this browser quiet, five with the Android device alone. Each part is
+    // laid over the song itself, read from the phone, and where the song
+    // lines up best is where it was heard: the Android device's place from
+    // the second part, and in the first the one place more that was not
+    // there before, this browser's. The difference is how much earlier this
+    // browser is heard, and the delay is moved by it, then measured again
+    // until within 8 ms, three times at most. The microphone's own delay,
+    // its filtering say, is the same for both sounds and makes no
+    // difference; only what it does to the sound itself might, so the
+    // browser's own echo cancelling, noise suppression and level are off
+    const DUAL_CAL_RATE = 16000;
+    const DUAL_CAL_SEARCH_S = 4;
+    const DUAL_CAL_PART_S = 5;
+    const DUAL_CAL_GAP_S = 0.7;
+    const DUAL_CAL_CLOSE_S = 0.008;
+    let dualCalRef = null;
+    let dualCalRun = 0;
+    let dualCalSeq = 0;
+
+    // A microphone at all: only on https pages, or on this address once
+    // the browser is told it is safe
+    function dualCalCan() {
+        return !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    }
+
+    // Sound brought down to the measuring rate, each new sample the average
+    // of the old ones it stands for
+    function dualCalDown(data, rate) {
+
+        if (rate === DUAL_CAL_RATE) {
+            return data;
+        }
+
+        const step = rate / DUAL_CAL_RATE;
+        const n = Math.floor(data.length / step);
+        const out = new Float32Array(n);
+        const sum = new Float64Array(data.length + 1);
+
+        for (let i = 0; i < data.length; i++) {
+            sum[i + 1] = sum[i] + data[i];
+        }
+
+        for (let i = 0; i < n; i++) {
+
+            const a = Math.floor(i * step);
+            const b = Math.max(a + 1, Math.min(data.length, Math.floor((i + 1) * step)));
+
+            out[i] = (sum[b] - sum[a]) / (b - a);
+        }
+
+        return out;
+    }
+
+    // The song playing, from the phone, as one channel at the measuring
+    // rate, kept for the next measuring of the same song
+    function dualCalSong(src) {
+
+        if (dualCalRef && dualCalRef.src === src) {
+            return Promise.resolve(dualCalRef.data);
+        }
+
+        const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+
+        return fetch(songAt(src)).then(function (r) {
+
+            if (!r.ok) {
+                throw new Error("The song could not be read from the Android device");
+            }
+
+            return r.arrayBuffer();
+        }).then(function (buf) {
+
+            let ctx;
+
+            // Read at the measuring rate where the browser can, else at its
+            // own and brought down after
+            try {
+                ctx = new Offline(1, DUAL_CAL_RATE, DUAL_CAL_RATE);
+            } catch (e) {
+                ctx = new Offline(1, 48000, 48000);
+            }
+
+            return new Promise(function (resolve, reject) {
+                ctx.decodeAudioData(buf, resolve, reject);
+            });
+        }).then(function (ab) {
+
+            const mono = new Float32Array(ab.length);
+
+            for (let c = 0; c < ab.numberOfChannels; c++) {
+
+                const d = ab.getChannelData(c);
+
+                for (let i = 0; i < d.length; i++) {
+                    mono[i] += d[i] / ab.numberOfChannels;
+                }
+            }
+
+            dualCalRef = { src: src, data: dualCalDown(mono, ab.sampleRate) };
+
+            return dualCalRef.data;
+        });
+    }
+
+    // A Fourier transform in place, the length a power of two
+    function dualCalFft(re, im, inverse) {
+
+        const n = re.length;
+
+        for (let i = 1, j = 0; i < n; i++) {
+
+            let bit = n >> 1;
+
+            for (; j & bit; bit >>= 1) {
+                j ^= bit;
+            }
+
+            j ^= bit;
+
+            if (i < j) {
+
+                const tr = re[i];
+                const ti = im[i];
+
+                re[i] = re[j];
+                im[i] = im[j];
+                re[j] = tr;
+                im[j] = ti;
+            }
+        }
+
+        for (let len = 2; len <= n; len <<= 1) {
+
+            const half = len >> 1;
+            const ang = (inverse ? 2 : -2) * Math.PI / len;
+            const wr = Math.cos(ang);
+            const wi = Math.sin(ang);
+
+            for (let i = 0; i < n; i += len) {
+
+                let cr = 1;
+                let ci = 0;
+
+                for (let k = 0; k < half; k++) {
+
+                    const p = i + k;
+                    const q = p + half;
+                    const br = re[q] * cr - im[q] * ci;
+                    const bi = re[q] * ci + im[q] * cr;
+                    const t = cr * wr - ci * wi;
+
+                    re[q] = re[p] - br;
+                    im[q] = im[p] - bi;
+                    re[p] += br;
+                    im[p] += bi;
+                    ci = cr * wi + ci * wr;
+                    cr = t;
+                }
+            }
+        }
+
+        if (inverse) {
+
+            for (let i = 0; i < n; i++) {
+
+                re[i] /= n;
+                im[i] /= n;
+            }
+        }
+    }
+
+    // How well the recording x lines up with the song r at each place, one
+    // value for each sample x can be moved along r. Each tone counts about
+    // the same however loud, so the bass and the room do not smear it, and
+    // only 150 Hz to 4 kHz, where the microphone and the speakers agree
+    function dualCalCorr(x, r) {
+
+        let n = 1;
+
+        while (n < x.length + r.length) {
+            n <<= 1;
+        }
+
+        const xr = new Float64Array(n);
+        const xi = new Float64Array(n);
+        const rr = new Float64Array(n);
+        const ri = new Float64Array(n);
+        const lo = Math.floor(150 / DUAL_CAL_RATE * n);
+        const hi = Math.ceil(4000 / DUAL_CAL_RATE * n);
+
+        xr.set(x);
+        rr.set(r);
+        dualCalFft(xr, xi, false);
+        dualCalFft(rr, ri, false);
+
+        for (let k = 0; k < n; k++) {
+
+            const f = k <= n / 2 ? k : n - k;
+
+            if (f < lo || f > hi) {
+
+                xr[k] = 0;
+                xi[k] = 0;
+                continue;
+            }
+
+            const a = xr[k] * rr[k] + xi[k] * ri[k];
+            const b = xr[k] * ri[k] - xi[k] * rr[k];
+            const m = Math.pow(a * a + b * b, 0.4) + 1e-12;
+
+            xr[k] = a / m;
+            xi[k] = b / m;
+        }
+
+        dualCalFft(xr, xi, true);
+
+        return xr.subarray(0, r.length - x.length + 1);
+    }
+
+    // A piece of the song, silence before its start and after its end
+    function dualCalSlice(ref, from, len) {
+
+        const out = new Float32Array(len);
+        const a = Math.max(0, from);
+        const b = Math.min(ref.length, from + len);
+
+        if (b > a) {
+            out.set(ref.subarray(a, b), a - from);
+        }
+
+        return out;
+    }
+
+    function dualCalMeanAbs(c) {
+
+        let sum = 0;
+
+        for (let i = 0; i < c.length; i++) {
+            sum += Math.abs(c[i]);
+        }
+
+        return sum / Math.max(1, c.length) || 1e-12;
+    }
+
+    // Ten seconds or so from the microphone at the measuring rate, this
+    // browser quiet after the first five, with where this browser's song
+    // was as the recording started and where it went quiet
+    function dualCalRecord(deviceId, run, said) {
+
+        const want = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 };
+
+        if (deviceId) {
+            want.deviceId = { exact: deviceId };
+        }
+
+        return navigator.mediaDevices.getUserMedia({ audio: want }).then(function (stream) {
+
+            return new Promise(function (resolve, reject) {
+
+                const Ctx = window.AudioContext || window.webkitAudioContext;
+                const ctx = new Ctx();
+                const src = ctx.createMediaStreamSource(stream);
+                const proc = ctx.createScriptProcessor(2048, 1, 1);
+                const hush = ctx.createGain();
+                const rate = ctx.sampleRate;
+                const both = Math.round(DUAL_CAL_PART_S * rate);
+                const total = Math.round((DUAL_CAL_PART_S * 2 + DUAL_CAL_GAP_S) * rate);
+                const chunks = [];
+                let got = 0;
+                let pos0 = null;
+                let quietAt = -1;
+                let over = false;
+                let guard = 0;
+
+                const done = function (err) {
+
+                    if (over) {
+                        return;
+                    }
+
+                    over = true;
+                    clearTimeout(guard);
+                    proc.onaudioprocess = null;
+
+                    try {
+
+                        src.disconnect();
+                        proc.disconnect();
+                    } catch (e) {
+                        // Gone already
+                    }
+
+                    stream.getTracks().forEach(function (t) {
+                        t.stop();
+                    });
+                    ctx.close().catch(function () {
+                    });
+
+                    if (err) {
+
+                        reject(err);
+                        return;
+                    }
+
+                    const all = new Float32Array(got);
+                    let at = 0;
+
+                    for (const c of chunks) {
+
+                        all.set(c, at);
+                        at += c.length;
+                    }
+
+                    resolve({
+                        data: dualCalDown(all, rate),
+                        pos0: pos0,
+                        quietAt: Math.round(quietAt * DUAL_CAL_RATE / rate)
+                    });
+                };
+
+                proc.onaudioprocess = function (ev) {
+
+                    if (run !== dualCalRun) {
+
+                        done(new Error("Stopped"));
+                        return;
+                    }
+
+                    const d = ev.inputBuffer.getChannelData(0);
+
+                    // Where this browser's song was at the block's first
+                    // sample: where it is now, less the block
+                    if (pos0 === null) {
+                        pos0 = audio.currentTime - d.length / rate;
+                    }
+
+                    chunks.push(new Float32Array(d));
+                    got += d.length;
+
+                    if (quietAt < 0 && got >= both) {
+
+                        quietAt = got;
+                        calQuiet = true;
+                        applyWebVolume();
+                        said("Listening to the Android device alone");
+                    }
+
+                    if (got >= total) {
+                        done(null);
+                    }
+                };
+
+                hush.gain.value = 0;
+                src.connect(proc);
+                proc.connect(hush);
+                hush.connect(ctx.destination);
+                guard = setTimeout(function () {
+                    done(new Error("The microphone gave no sound"));
+                }, 25000);
+                ctx.resume().catch(function () {
+                });
+            });
+        });
+    }
+
+    // Where the Android device and this browser were heard in a recording:
+    // null for the Android device not heard, d null for no second sound,
+    // else how many seconds earlier this browser is heard
+    function dualCalWork(rec, ref) {
+
+        const fs = DUAL_CAL_RATE;
+        const n = DUAL_CAL_PART_S * fs;
+        const search = DUAL_CAL_SEARCH_S * fs;
+        const startA = Math.round(rec.pos0 * fs) - search;
+        const bAt = rec.quietAt + Math.round(DUAL_CAL_GAP_S * fs);
+
+        if (rec.data.length < bAt + n) {
+            return null;
+        }
+
+        const cA = dualCalCorr(rec.data.subarray(0, n), dualCalSlice(ref, startA, n + 2 * search));
+        const cB = dualCalCorr(rec.data.subarray(bAt, bAt + n), dualCalSlice(ref, startA + bAt, n + 2 * search));
+        let phone = 0;
+
+        for (let i = 1; i < cB.length; i++) {
+
+            if (cB[i] > cB[phone]) {
+                phone = i;
+            }
+        }
+
+        const phoneStand = cB[phone] / dualCalMeanAbs(cB);
+
+        if (phoneStand < 10) {
+            return { phoneStand: phoneStand, d: null, heard: false };
+        }
+
+        // The Android device in the first part, the same place give or take
+        // a few samples
+        let pa = Math.max(0, phone - 4);
+
+        for (let i = pa; i <= Math.min(cA.length - 1, phone + 4); i++) {
+
+            if (cA[i] > cA[pa]) {
+                pa = i;
+            }
+        }
+
+        const hA = cA[pa] > 0 ? cA[pa] : 1e-12;
+        const hB = cB[phone];
+        const near = Math.round(DUAL_CAL_CLOSE_S * fs);
+        let best = -1;
+        let bestScore = 0;
+
+        for (let i = 0; i < cA.length; i++) {
+
+            if (Math.abs(i - phone) <= near) {
+                continue;
+            }
+
+            const score = cA[i] / hA - Math.max(0, cB[i] / hB);
+
+            if (score > bestScore) {
+
+                bestScore = score;
+                best = i;
+            }
+        }
+
+        const stand = best >= 0 ? cA[best] / dualCalMeanAbs(cA) : 0;
+
+        if (best < 0 || bestScore < 0.25 || stand < 10) {
+            return { phoneStand: phoneStand, d: null, heard: true, stand: stand };
+        }
+
+        return { phoneStand: phoneStand, d: (best - phone) / fs, heard: true, stand: stand };
+    }
+
+    // This browser's song put straight on its place now, after the delay
+    // moved, rather than played a little faster or slower to it
+    function dualSnap() {
+
+        if (!state || !state.dual || dualOffset === null || audio.paused) {
+            return;
+        }
+
+        try {
+            audio.currentTime = Math.max(0, dualTarget() + 0.05);
+        } catch (e) {
+            // Steered there instead
+        }
+
+        dualErr = null;
+        dualSettle = Date.now() + 700;
+    }
+
+    function dualCalWait(ms) {
+
+        return new Promise(function (resolve) {
+            setTimeout(resolve, ms);
+        });
+    }
+
+    // Measured and the delay moved, three rounds at most. Gives the words
+    // for the outcome
+    async function dualCalMeasure(deviceId, said) {
+
+        const run = ++dualCalSeq;
+        let moved = 0;
+
+        dualCalRun = run;
+
+        try {
+
+            for (let round = 1; round <= 3; round++) {
+
+                const s = state;
+
+                if (!s || s.dual !== true || !s.playing || !s.src || !unlocked || localMute) {
+                    return "Measuring needs Play on both with a song playing in this browser and on the Android device.";
+                }
+
+                if (s.duration && s.duration - (s.position || 0) < 16) {
+                    return "The song ends too soon to measure. Measure again when the next one plays.";
+                }
+
+                said("Reading the song");
+
+                const src = s.src;
+                const ref = await dualCalSong(src);
+
+                if (run !== dualCalRun) {
+                    return "";
+                }
+
+                dualCalHold = true;
+
+                if (audio.playbackRate !== 1) {
+                    audio.playbackRate = 1;
+                }
+
+                said("Listening to both");
+
+                const rec = await dualCalRecord(deviceId, run, said);
+
+                calQuiet = false;
+                applyWebVolume();
+                dualCalHold = false;
+
+                if (!state || state.src !== src) {
+                    return "The song changed while listening. Measure again.";
+                }
+
+                said("Working it out");
+                await dualCalWait(50);
+
+                const w = dualCalWork(rec, ref);
+
+                dbgLog("Audio", "measured by microphone, round " + round + ": "
+                    + (!w ? "too short" : !w.heard ? "the Android device not heard (" + w.phoneStand.toFixed(1) + ")"
+                        : w.d === null ? "no second sound (" + (w.stand || 0).toFixed(1) + ")"
+                            : "this browser " + Math.round(w.d * 1000) + " ms ahead (" + w.stand.toFixed(1) + ", " + w.phoneStand.toFixed(1) + ")"));
+
+                if (!w) {
+                    return "The recording came out too short. Measure again.";
+                }
+
+                if (!w.heard) {
+                    return "The microphone did not hear the Android device clearly. Move it closer, or turn the Android device up, and measure again.";
+                }
+
+                if (w.d === null || Math.abs(w.d) < DUAL_CAL_CLOSE_S) {
+
+                    if (round === 1 && w.d === null) {
+                        return "Only one sound heard: in step within 8 ms already, or the microphone does not hear this browser. If it is off, turn this browser up or move the microphone closer and measure again.";
+                    }
+
+                    return "In step within 8 ms" + (moved ? ", moved " + (moved > 0 ? "+" : "") + moved + " ms" : "") + ". " + dualMsText() + " for " + dualSpeakerName(state) + ".";
+                }
+
+                const ms = Math.round(w.d * 1000);
+
+                moved += ms;
+                setDualMs(dualMs + ms);
+                dualSnap();
+                said("This browser " + Math.abs(ms) + " ms " + (ms > 0 ? "ahead" : "behind") + ", moved, " + (round < 3 ? "listening again" : "done"));
+                await dualCalWait(3000);
+
+                if (run !== dualCalRun) {
+                    return "";
+                }
+            }
+
+            return "Moved " + (moved > 0 ? "+" : "") + moved + " ms in all, not yet within 8 ms. " + dualMsText()
+                + " for " + dualSpeakerName(state) + ". Measure again to go on.";
+        } catch (e) {
+
+            dbgLog("Audio", "measuring by microphone stopped: " + (e && e.message ? e.message : e));
+
+            if (run !== dualCalRun) {
+                return "";
+            }
+
+            return e && e.name === "NotAllowedError" ? "The microphone was not allowed. Allow it for this page and measure again."
+                : e && e.name === "OverconstrainedError" ? "That microphone is not there any more. Pick another."
+                    : "Measuring stopped: " + (e && e.message ? e.message : String(e));
+        } finally {
+
+            if (calQuiet || dualCalHold) {
+
+                calQuiet = false;
+                dualCalHold = false;
+                applyWebVolume();
+            }
+
+            if (dualCalRun === run) {
+                dualCalRun = 0;
+            }
+        }
+    }
+
+    // The measuring box: the microphones to pick, the one used last ringed,
+    // and while measuring, what it does. A browser not allowing the
+    // microphone on this address says how to allow it
+    function openDualCal() {
+
+        const box = $("menuItems");
+        const col = document.createElement("div");
+        const status = document.createElement("div");
+        const mics = document.createElement("div");
+        const foot = document.createElement("div");
+        let chosen = "";
+
+        try {
+            chosen = localStorage.getItem("murekaCalMic") || "";
+        } catch (e) {
+            chosen = "";
+        }
+
+        if (isShown("songMenu")) {
+            menuGuardUntil = Date.now() + 700;
+        }
+
+        menuSong = null;
+        box.textContent = "";
+        $("menuBox").classList.remove("switchBox");
+        $("menuTitle").textContent = "Measure with a microphone";
+        $("bpmRow").style.display = "none";
+        $("titleRow").style.display = "none";
+        $("menuStars").style.display = "none";
+        menuLook("choice");
+        col.className = "mp-ui-ch-col dualDelay";
+        status.className = "dualDelayNow dualCalStatus";
+        mics.className = "mp-ui-ch-col";
+        foot.className = "mp-ui-ch-col";
+        col.appendChild(status);
+        col.appendChild(mics);
+        col.appendChild(foot);
+        box.appendChild(col);
+        $("songMenu").style.display = "flex";
+
+        const said = function (text) {
+
+            if (col.isConnected) {
+
+                status.textContent = text;
+                status.style.display = text ? "" : "none";
+            }
+        };
+        const footer = function (busy) {
+
+            foot.textContent = "";
+
+            if (busy) {
+
+                foot.appendChild(uiBtn("Cancel", function () {
+
+                    dualCalRun = 0;
+                    said("Stopped");
+                }));
+                return;
+            }
+
+            foot.appendChild(uiBtn("Back to the delay", function () {
+                openDualDelay();
+            }, true));
+            foot.appendChild(uiBtn("Done", closeSongMenu));
+        };
+        const measure = function (id) {
+
+            chosen = id;
+
+            try {
+                localStorage.setItem("murekaCalMic", id);
+            } catch (e) {
+                // Picked again next time
+            }
+
+            mics.style.display = "none";
+            footer(true);
+
+            // The box put away stops it
+            const watch = setInterval(function () {
+
+                if (!col.isConnected || !isShown("songMenu")) {
+                    dualCalRun = 0;
+                }
+            }, 300);
+
+            dualCalMeasure(id, said).then(function (text) {
+
+                clearInterval(watch);
+
+                if (!col.isConnected) {
+                    return;
+                }
+
+                if (text) {
+                    said(text);
+                }
+
+                listMics();
+                footer(false);
+            });
+        };
+        const listMics = function () {
+
+            mics.textContent = "";
+            mics.style.display = "";
+            navigator.mediaDevices.enumerateDevices().then(function (all) {
+
+                const inputs = all.filter(function (d) {
+                    return d.kind === "audioinput";
+                });
+
+                if (!col.isConnected) {
+                    return;
+                }
+
+                // Named only once allowed: asked first, then listed again
+                if (!inputs.length || inputs.every(function (d) {
+                    return !d.label;
+                })) {
+
+                    mics.appendChild(uiBtn("Allow the microphone", function () {
+
+                        navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+
+                            stream.getTracks().forEach(function (t) {
+                                t.stop();
+                            });
+                            listMics();
+                        }, function () {
+                            said("The microphone was not allowed. Allow it for this page in the browser's settings.");
+                        });
+                    }));
+                    return;
+                }
+
+                inputs.forEach(function (d, i) {
+
+                    const b = uiBtn(d.label || "Microphone " + (i + 1), function () {
+                        measure(d.deviceId);
+                    }, d.deviceId !== chosen);
+
+                    if (d.deviceId === chosen) {
+                        b.classList.add("ring");
+                    }
+
+                    mics.appendChild(b);
+                });
+            }, function () {
+                said("The microphones could not be listed.");
+            });
+        };
+
+        if (!dualCalCan()) {
+
+            choiceText("This browser allows a microphone only on https pages, and this page comes from the Android device over http. To allow it for this address: in Chrome or Edge open chrome://flags/#unsafely-treat-insecure-origin-as-secure, add "
+                + location.origin + ", turn it on and restart the browser. In Firefox set media.devices.insecure.enabled and media.getusermedia.insecure.enabled to true in about:config. Safari does not allow it.");
+            said("");
+            footer(false);
+            return;
+        }
+
+        choiceText("Put the microphone where you listen, with both heard. It listens for ten seconds, first to both, then with this browser quiet to the Android device alone, and moves the delay until the two are heard as one. Pick the microphone to use; its own delay makes no difference, as both sounds go through it.");
+        said(dualMsText() + " for " + dualSpeakerName(state));
+        listMics();
+        footer(false);
     }
 
     $("soundPhone").addEventListener("click", function () {
