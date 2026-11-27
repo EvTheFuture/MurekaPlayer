@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.373";
+    const VERSION = "2.0.1.374";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -89358,6 +89358,12 @@
         gap: 6px;
     }
 
+    .dualDelaySlider {
+        width: 100%;
+        margin: 2px 0 8px;
+        accent-color: var(--accent);
+    }
+
     .dualDelayRow.dualBeepRow {
         grid-template-columns: repeat(5, minmax(0, 1fr));
     }
@@ -104382,7 +104388,7 @@
     // the phone itself and each Bluetooth device by name, as each has a
     // delay of its own, kept in this browser. A speaker not set yet starts
     // from the one delay kept before there was one for each
-    const DUAL_MS_MOST = 3000;
+    const DUAL_MS_MOST = 5000;
     let dualMs = 0;
     let dualKey = "";
     let dualMsBy = {};
@@ -116825,9 +116831,16 @@
         const beepHead = document.createElement("div");
         const beeps = document.createElement("div");
         const beepBtns = [];
+        const slider = document.createElement("input");
+        let sliding = false;
         const paint = function () {
 
             dualMsSync();
+
+            // The slider where the delay is, left alone while it is moved
+            if (!sliding) {
+                slider.value = String(dualMs);
+            }
 
             // The beeps asked for now ringed
             const every = state && state.dual === true ? Number(state.beepEvery) || 0 : 0;
@@ -116924,8 +116937,31 @@
         row.appendChild(by("+1", 1));
         row.appendChild(by("+10", 10));
         row.appendChild(by("+100", 100));
+        // The whole range at once, 10 ms a step, for a speaker seconds late;
+        // the buttons for the last few ms
+        slider.type = "range";
+        slider.className = "dualDelaySlider";
+        slider.min = String(-DUAL_MS_MOST);
+        slider.max = String(DUAL_MS_MOST);
+        slider.step = "10";
+        slider.setAttribute("aria-label", "How much later this browser plays, ms");
+        slider.addEventListener("pointerdown", function () {
+            sliding = true;
+        });
+        slider.addEventListener("input", function () {
+
+            setDualMs(Number(slider.value));
+            shown.textContent = dualMsText();
+        });
+        slider.addEventListener("change", function () {
+
+            sliding = false;
+            setDualMs(Number(slider.value));
+            paint();
+        });
         col.appendChild(speaker);
         col.appendChild(shown);
+        col.appendChild(slider);
         col.appendChild(row);
         col.appendChild(uiBtn("Back to 0 ms", function () {
 
@@ -116969,7 +117005,7 @@
     // difference; only what it does to the sound itself might, so the
     // browser's own echo cancelling, noise suppression and level are off
     const DUAL_CAL_RATE = 16000;
-    const DUAL_CAL_SEARCH_S = 4;
+    const DUAL_CAL_SEARCH_S = 6;
     const DUAL_CAL_PART_S = 5;
     const DUAL_CAL_GAP_S = 0.7;
     const DUAL_CAL_CLOSE_S = 0.008;
