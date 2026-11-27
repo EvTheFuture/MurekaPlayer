@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.383";
+    const VERSION = "2.0.1.384";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -117213,37 +117213,34 @@
     // browser it moves here
     $("soundCar").addEventListener("click", function () {
 
-        const fromPhone = !!state && (!state.carAudio || state.dual === true);
+        // The tap lets the browser play, the answer comes after it
+        unlockAudio();
+        openMusicHere("");
+    });
+
+    // The question of where the music plays, the way chosen ringed, the
+    // others plain. A way picked is asked of the phone and ringed at once,
+    // the box left open for the delay under it; it is put away by its
+    // close button, Escape or a swipe
+    function openMusicHere(picked) {
+
         const go = function (both) {
 
             setLocalMute(false);
             unlockAudio();
             send("carAudio", both ? "both" : true);
+            openMusicHere(both ? "both" : "only");
         };
+        const only = picked ? picked === "only" : !!state && state.carAudio && !state.dual;
+        const both = picked ? picked === "both" : !!state && state.dual === true;
 
-        if (!fromPhone) {
-
-            go(false);
-            return;
-        }
-
-        // The tap lets the browser play, the answer comes after it. The way
-        // chosen now ringed, the others plain
-        const only = !!state && state.carAudio && !state.dual;
-        const both = !!state && state.dual === true;
-
-        unlockAudio();
         openChoice("Music in this browser", [
             { label: "Play only here", sub: "The Android device goes quiet", cls: only ? "inset" : "", tick: only ? undefined : false,
                 fn: function () {
-
-                    closeSongMenu();
                     go(false);
                 } },
             { label: "Play on both", sub: "Here and on the Android device, in step", cls: both ? "inset" : "", tick: both ? undefined : false,
                 fn: function () {
-
-                    closeSongMenu();
                     go(true);
                 } },
             { label: "Delay in this browser", sub: dualMsText() + ", set by ear until both sound as one", tick: false, fn: function () {
@@ -117252,7 +117249,7 @@
                 openDualDelay();
             } }
         ]);
-    });
+    }
 
     // How much later this browser plays than the phone, in words
     function dualMsText() {
@@ -117265,6 +117262,106 @@
     // speaker and the delays the two devices tell, which are allowed for
     // already, read again while it is open. In the song menu's box like a
     // question
+    // A volume, the Android device's or this browser's, as in the volume
+    // popup: quieter, the slider, louder and the level now, painted again
+    // by its paint
+    function dualVolRow(t) {
+
+        const wrap = document.createElement("div");
+        const name = document.createElement("div");
+        const row = document.createElement("div");
+        const down = document.createElement("button");
+        const bar = document.createElement("input");
+        const up = document.createElement("button");
+        const now = document.createElement("span");
+        let moving = false;
+
+        name.className = "dualDelayTold";
+        name.textContent = t.name;
+        row.className = "volRow";
+        now.className = "volNow";
+        down.type = "button";
+        down.className = "chip iconOnly";
+        down.setAttribute("aria-label", "Quieter, " + t.name);
+        down.appendChild(icon("arrowDown"));
+        up.type = "button";
+        up.className = "chip iconOnly";
+        up.setAttribute("aria-label", "Louder, " + t.name);
+        up.appendChild(icon("arrowUp"));
+        bar.type = "range";
+        bar.className = "volSlider";
+        bar.min = "0";
+        bar.setAttribute("aria-label", "Volume, " + t.name);
+        bar.addEventListener("pointerdown", function () {
+            moving = true;
+        });
+        bar.addEventListener("input", function () {
+
+            moving = true;
+            volSetFor(t, Number(bar.value), false);
+            now.textContent = volTextOf(t, Number(bar.value));
+        });
+        bar.addEventListener("change", function () {
+
+            moving = false;
+            volSetFor(t, Number(bar.value), true);
+        });
+
+        const nudge = function (by) {
+
+            const level = volLevelOf(t);
+
+            if (level < 0) {
+                return;
+            }
+
+            if (t.kind === "phone" && volFineOn()) {
+                volFineNudge(t, by);
+            } else {
+                volSetFor(t, level + by * (t.kind === "phone" ? 1 : 5), true);
+            }
+        };
+
+        down.addEventListener("click", function () {
+            nudge(-1);
+        });
+        up.addEventListener("click", function () {
+            nudge(1);
+        });
+        row.appendChild(down);
+        row.appendChild(bar);
+        row.appendChild(up);
+        row.appendChild(now);
+        wrap.appendChild(name);
+        wrap.appendChild(row);
+        return {
+            el: wrap,
+            paint: function () {
+
+                const top = volTopOf(t);
+                const level = volLevelOf(t);
+
+                bar.max = String(top);
+                bar.step = t.kind === "phone" && volFineOn() ? "any" : "1";
+
+                if (!moving && level >= 0) {
+                    bar.value = String(level);
+                }
+
+                now.textContent = volTextOf(t, level);
+            }
+        };
+    }
+
+    // The two volumes for the delay and the measuring: the Android
+    // device's and this browser's
+    function dualVols() {
+        return [
+            dualVolRow({ key: "phone", kind: "phone", name: "Volume of the Android device" }),
+            dualVolRow({ key: "here", kind: "here", name: "Volume of " + browserName() })
+        ];
+    }
+
     let dualDelayTimer = 0;
 
     // What this browser's sound engine tells of its delay, as it tells it:
@@ -117381,97 +117478,6 @@
             slider.value = String(way > 0 ? winLo + SPAN : winLo);
             setDualMs(Number(slider.value));
             shown.textContent = dualMsText();
-        };
-        // A volume, the Android device's or this browser's, as in the
-        // volume popup: quieter, the slider, louder and the level now
-        const volRowFor = function (t) {
-
-            const wrap = document.createElement("div");
-            const name = document.createElement("div");
-            const row = document.createElement("div");
-            const down = document.createElement("button");
-            const bar = document.createElement("input");
-            const up = document.createElement("button");
-            const now = document.createElement("span");
-            let moving = false;
-
-            name.className = "dualDelayTold";
-            name.textContent = t.name;
-            row.className = "volRow";
-            now.className = "volNow";
-            down.type = "button";
-            down.className = "chip iconOnly";
-            down.setAttribute("aria-label", "Quieter, " + t.name);
-            down.appendChild(icon("arrowDown"));
-            up.type = "button";
-            up.className = "chip iconOnly";
-            up.setAttribute("aria-label", "Louder, " + t.name);
-            up.appendChild(icon("arrowUp"));
-            bar.type = "range";
-            bar.className = "volSlider";
-            bar.min = "0";
-            bar.setAttribute("aria-label", "Volume, " + t.name);
-            bar.addEventListener("pointerdown", function () {
-                moving = true;
-            });
-            bar.addEventListener("input", function () {
-
-                moving = true;
-                volSetFor(t, Number(bar.value), false);
-                now.textContent = volTextOf(t, Number(bar.value));
-            });
-            bar.addEventListener("change", function () {
-
-                moving = false;
-                volSetFor(t, Number(bar.value), true);
-            });
-
-            const nudge = function (by) {
-
-                const level = volLevelOf(t);
-
-                if (level < 0) {
-                    return;
-                }
-
-                if (t.kind === "phone" && volFineOn()) {
-                    volFineNudge(t, by);
-                } else {
-                    volSetFor(t, level + by * (t.kind === "phone" ? 1 : 5), true);
-                }
-            };
-
-            down.addEventListener("click", function () {
-                nudge(-1);
-            });
-            up.addEventListener("click", function () {
-                nudge(1);
-            });
-            row.appendChild(down);
-            row.appendChild(bar);
-            row.appendChild(up);
-            row.appendChild(now);
-            wrap.appendChild(name);
-            wrap.appendChild(row);
-            volRows.push({
-                el: wrap,
-                paint: function () {
-
-                    const top = volTopOf(t);
-                    const level = volLevelOf(t);
-
-                    bar.max = String(top);
-                    bar.step = t.kind === "phone" && volFineOn() ? "any" : "1";
-
-                    if (!moving && level >= 0) {
-                        bar.value = String(level);
-                    }
-
-                    now.textContent = volTextOf(t, level);
-                }
-            });
-
-            return wrap;
         };
         const paint = function () {
 
@@ -117699,8 +117705,11 @@
             paint();
         });
         vols.className = "dualDelayVols";
-        vols.appendChild(volRowFor({ key: "phone", kind: "phone", name: "Volume of the Android device" }));
-        vols.appendChild(volRowFor({ key: "here", kind: "here", name: "Volume of " + browserName() }));
+        dualVols().forEach(function (v) {
+
+            volRows.push(v);
+            vols.appendChild(v.el);
+        });
         engine.className = "dualDelayEngine";
         col.appendChild(speaker);
         col.appendChild(shown);
@@ -118436,6 +118445,8 @@
         const meter = document.createElement("div");
         const fill = document.createElement("div");
         const mics = document.createElement("div");
+        const vols = document.createElement("div");
+        const volRows = dualVols();
         const foot = document.createElement("div");
         let chosen = "";
         let busy = false;
@@ -118467,10 +118478,15 @@
         mics.className = "mp-ui-ch-col";
         foot.className = "mp-ui-ch-col";
         meter.appendChild(fill);
+        vols.className = "dualDelayVols";
+        volRows.forEach(function (v) {
+            vols.appendChild(v.el);
+        });
         col.appendChild(status);
         col.appendChild(using);
         col.appendChild(meter);
         col.appendChild(mics);
+        col.appendChild(vols);
         col.appendChild(foot);
         box.appendChild(col);
         $("songMenu").style.display = "flex";
@@ -118489,6 +118505,10 @@
         const paintMic = function () {
 
             const m = dualCalMic;
+
+            volRows.forEach(function (v) {
+                v.paint();
+            });
 
             using.style.display = m ? "" : "none";
             meter.style.display = m ? "" : "none";
