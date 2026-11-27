@@ -11197,6 +11197,123 @@
         }
     }
 
+    // All this browser keeps for the web view, carried to another address
+    // of the same Android device, its name instead of its IP address say,
+    // which a browser keeps apart: saved to a file here and brought in
+    // there. Not this browser's own number among the web view's browsers,
+    // nor a microphone's, which mean nothing at another address
+    const LOCAL_COPY_SKIP = ["murekaCarClient", "murekaCalMic"];
+
+    function localCopyItems() {
+
+        const items = {};
+
+        try {
+
+            for (let i = 0; i < localStorage.length; i++) {
+
+                const k = localStorage.key(i);
+
+                if (k && k.indexOf("mureka") === 0 && LOCAL_COPY_SKIP.indexOf(k) < 0) {
+                    items[k] = localStorage.getItem(k);
+                }
+            }
+        } catch (e) {
+            return items;
+        }
+
+        return items;
+    }
+
+    function addLocalCopyRows(section) {
+
+        const row = function (text, label, fn) {
+
+            const r = document.createElement("div");
+            const t = document.createElement("div");
+            const b = document.createElement("button");
+
+            r.className = "pRow";
+            t.className = "pText";
+            t.textContent = text;
+            b.type = "button";
+            b.className = "pBtn";
+            b.textContent = label;
+            b.addEventListener("click", function () {
+                fn(t);
+            });
+            r.appendChild(t);
+            r.appendChild(b);
+            section.appendChild(r);
+        };
+        const hint = document.createElement("div");
+
+        row("This browser's settings to a file", "Save", function (t) {
+
+            const items = localCopyItems();
+            const body = JSON.stringify({ kind: "mureka-web-settings", from: location.origin, at: new Date().toISOString(), items: items }, null, 1);
+            const a = document.createElement("a");
+            const url = URL.createObjectURL(new Blob([body], { type: "application/json" }));
+
+            a.href = url;
+            a.download = "mureka-web-settings.json";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(function () {
+                URL.revokeObjectURL(url);
+            }, 10000);
+            t.textContent = "Saved, " + Object.keys(items).length + " settings";
+        });
+        row("Settings from a file", "Bring in", function (t) {
+
+            const input = document.createElement("input");
+
+            input.type = "file";
+            input.accept = ".json,application/json";
+            input.addEventListener("change", function () {
+
+                const f = input.files && input.files[0];
+
+                if (!f) {
+                    return;
+                }
+
+                f.text().then(function (text) {
+
+                    const data = JSON.parse(text);
+
+                    if (!data || data.kind !== "mureka-web-settings" || !data.items || typeof data.items !== "object") {
+                        throw new Error("Not a file of the web view's settings");
+                    }
+
+                    let n = 0;
+
+                    for (const k of Object.keys(data.items)) {
+
+                        if (k.indexOf("mureka") === 0 && LOCAL_COPY_SKIP.indexOf(k) < 0 && typeof data.items[k] === "string") {
+
+                            localStorage.setItem(k, data.items[k]);
+                            n++;
+                        }
+                    }
+
+                    dbgLog("Settings", "brought in " + n + " settings of this browser from " + (data.from || "a file"));
+                    t.textContent = "Brought in " + n + " settings, starting again with them";
+                    setTimeout(function () {
+                        location.reload();
+                    }, 800);
+                }).catch(function (e) {
+                    t.textContent = e && e.message ? e.message : "The file could not be read";
+                });
+            });
+            input.click();
+        });
+        hint.className = "pText small";
+        hint.textContent = "A browser keeps settings apart for each address, so at another address of the Android device, its name instead of its IP address, or https instead of http, it starts without them. Save them to a file here and bring them in there; the page starts again with them.";
+        section.appendChild(hint);
+    }
+
     // The switch at the top of the main settings page, and on the pages
     // the dots and this browser's values in the rows that can be its own
     function addLocalSection(box) {
@@ -11281,6 +11398,7 @@
                 + "nothing about you. Switching it off deletes them."));
             section.appendChild(r);
             section.appendChild(hint);
+            addLocalCopyRows(section);
             box.insertBefore(section, box.firstChild);
             return;
         }
