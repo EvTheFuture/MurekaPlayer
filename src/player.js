@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.377";
+    const VERSION = "2.0.1.378";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -94619,7 +94619,7 @@
                 : "No certificate kept, the web view is http only.";
             foot.textContent = "";
 
-            if (info && info.on && location.protocol !== "https:") {
+            if (info && info.on && location.protocol !== "https:" && !appScreen) {
                 foot.appendChild(uiBtn("Open this page over https", function () {
                     location.href = tlsUrl(info);
                 }));
@@ -94743,7 +94743,6 @@
             : "Off. Anyone on the Android device's hotspot, or on a Wi-Fi where the web view is allowed, can use the player and change your songs on Mureka.";
         hint.style.color = on ? "" : "#f5c518";
         section.appendChild(hint);
-        addTlsRows(section);
 
         // Under the page's head, before its first heading
         const first = Array.prototype.find.call(box.querySelectorAll(".pText"), function (el) {
@@ -94769,7 +94768,34 @@
         const local = localSettings();
 
         if (page === "Web view") {
+
             addPasswordRows(box);
+
+            // Https on every screen, the app's own too, where the files
+            // may be on the Android device itself
+            if (!box.querySelector(".tlsRows")) {
+
+                const tls = document.createElement("div");
+                const pw = box.querySelector(".pwRows");
+
+                tls.className = "tlsRows";
+                addTlsRows(tls);
+
+                if (pw && pw.nextSibling) {
+                    box.insertBefore(tls, pw.nextSibling);
+                } else if (pw) {
+                    box.appendChild(tls);
+                } else {
+
+                    const first = box.querySelector(".pRow");
+
+                    if (first) {
+                        box.insertBefore(tls, first);
+                    } else {
+                        box.appendChild(tls);
+                    }
+                }
+            }
         }
 
         if (!page) {
@@ -117426,6 +117452,13 @@
         }, true));
         col.appendChild(told);
         col.appendChild(engine);
+
+        // Over http, the way to https, which a browser needs before it
+        // remembers the microphone
+        if (location.protocol !== "https:") {
+            col.appendChild(uiBtn("Https for the web view", openTlsBox, true));
+        }
+
         col.appendChild(uiBtn("Done", closeSongMenu));
         box.appendChild(col);
         paint();
@@ -118423,6 +118456,11 @@
             foot.appendChild(uiBtn("Back to the delay", function () {
                 openDualDelay();
             }, true));
+
+            if (location.protocol !== "https:" && dualCalCan()) {
+                foot.appendChild(uiBtn("Https for the web view", openTlsBox, true));
+            }
+
             foot.appendChild(uiBtn("Done", closeSongMenu));
         }
 
