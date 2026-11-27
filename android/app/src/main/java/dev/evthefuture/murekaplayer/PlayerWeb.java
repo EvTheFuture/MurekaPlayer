@@ -1133,6 +1133,13 @@ final class PlayerWeb {
             }
         }
 
+        // How long the music takes from the mixer to the ear in ms, as
+        // Android tells it for the way out in use, Bluetooth included
+        @JavascriptInterface
+        public int outputLatencyMs() {
+            return onMureka ? OutLatency.ms(appContext) : 0;
+        }
+
         // How far the player turns its own sound down under more volume
         // steps, 1 while they are off
         @JavascriptInterface

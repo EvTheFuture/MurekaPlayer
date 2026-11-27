@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.367";
+    const VERSION = "2.0.1.368";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -42127,6 +42127,68 @@
         return Math.max(0, Math.min(2, Number(iosCtx.outputLatency) || 0));
     }
 
+    // On the Android device, the delay of the way out as Android tells it,
+    // Bluetooth with the delay the speaker reports included, which the
+    // sound engine of the web view does not count. Only what it adds over
+    // the engine's own output delay, so nothing is counted twice. Kept to
+    // the playing in step with a browser, the play head here as it was
+    function wayOutLag() {
+
+        if (!window.MurekaHost || typeof window.MurekaHost.outputLatencyMs !== "function") {
+            return 0;
+        }
+
+        let host = 0;
+
+        try {
+            host = (Number(window.MurekaHost.outputLatencyMs()) || 0) / 1000;
+        } catch (e) {
+            return 0;
+        }
+
+        const ctx = fxCtx && fxEl === audio && fxCtx.state === "running" ? fxCtx : null;
+        const out = ctx ? Number(ctx.outputLatency) || 0 : 0;
+
+        return Math.max(0, Math.min(4, host - out));
+    }
+
+    // The way out's delay in the log as it changes by more than a bit,
+    // another speaker connected or the same one started again
+    let wayOutLogged = -1;
+
+    function noteWayOut() {
+
+        if (!audio || audio.paused || !window.MurekaHost || typeof window.MurekaHost.outputLatencyMs !== "function") {
+            return;
+        }
+
+        const ms = Number(window.MurekaHost.outputLatencyMs()) || 0;
+
+        if (Math.abs(ms - wayOutLogged) < 15) {
+            return;
+        }
+
+        wayOutLogged = ms;
+        dbgLog("Audio", "Android's way out " + ms + " ms, " + Math.round(wayOutLag() * 1000) + " ms of it over the engine's own");
+    }
+
+    // All Android tells for its way out in ms, for the state, -1 away from
+    // the app. A change is noted in the log on the way
+    function hostAndroidOutMs() {
+
+        if (!window.MurekaHost || typeof window.MurekaHost.outputLatencyMs !== "function") {
+            return -1;
+        }
+
+        noteWayOut();
+
+        try {
+            return Number(window.MurekaHost.outputLatencyMs()) || 0;
+        } catch (e) {
+            return -1;
+        }
+    }
+
     // The engine's lag in the log whenever it or the way out changes by
     // more than a bit, headphones connected say
     let lagLogged = -1;
@@ -43902,6 +43964,11 @@
             // way out, Bluetooth say, as the sound engine tells it, for a
             // browser heard at once to keep in step
             heardMs: Math.round(heardLag() * 1000),
+
+            // What Android adds for its way out over that, Bluetooth with
+            // the speaker's own delay, and all it tells for it
+            wayOutMs: Math.round(wayOutLag() * 1000),
+            androidOutMs: hostAndroidOutMs(),
             fade: hostFade,
             seeks: hostSeeks,
             signedIn: authState,
@@ -54421,7 +54488,7 @@
             + " | ready " + audio.readyState + " net " + audio.networkState
             + " | src " + src
             + " | vol " + dbgNum(audio.volume) + (audio.muted ? " muted" : "")
-            + " | heard after " + Math.round(heardLag() * 1000) + " ms"
+            + " | heard after " + Math.round(heardLag() * 1000) + " ms, way out +" + Math.round(wayOutLag() * 1000) + " ms"
             + (audio.error ? " | error " + audio.error.code : "");
     }
 
@@ -89153,6 +89220,17 @@
         padding-right: 0;
     }
 
+    .dualDelaySpeaker,
+    .dualDelayTold {
+        text-align: center;
+        font-size: 0.8em;
+        opacity: 0.6;
+    }
+
+    .dualDelayTold {
+        padding: 2px 4px 4px;
+    }
+
     #menuItems .dualDelay {
         grid-column: 1 / -1;
         padding: 4px 8px 8px;
@@ -101878,6 +101956,7 @@
         const alone = !s || Number(s.clients) < 2;
 
         paintPhoneSound(s);
+        dualMsSync();
         const dual = carAudio && s.dual === true;
 
         $("soundPhone").classList.toggle("on", (!carAudio || dual) && !localMute);
@@ -103819,21 +103898,63 @@
     let dualLogged = 0;
 
     // How much later this browser's sound is set to be heard than the
-    // phone's, in ms, kept in this browser. Less is earlier
+    // phone's, in ms, less is earlier. One for each of the phone's speakers,
+    // the phone itself and each Bluetooth device by name, as each has a
+    // delay of its own, kept in this browser. A speaker not set yet starts
+    // from the one delay kept before there was one for each
+    const DUAL_MS_MOST = 3000;
     let dualMs = 0;
+    let dualKey = "";
+    let dualMsBy = {};
+    let dualMsOld = 0;
 
     try {
-        dualMs = Math.max(-1000, Math.min(1000, Math.round(Number(localStorage.getItem("murekaDualMs")) || 0)));
+
+        dualMsOld = Math.round(Number(localStorage.getItem("murekaDualMs")) || 0);
+        dualMsBy = JSON.parse(localStorage.getItem("murekaDualMsBy") || "{}") || {};
     } catch (e) {
-        dualMs = 0;
+        dualMsBy = {};
+    }
+
+    // The phone's speaker now, as the key of its delay and in words
+    function dualSpeaker(s) {
+        return s && s.btOut ? "bt:" + String(s.btName || "") : "phone";
+    }
+
+    function dualSpeakerName(s) {
+        return s && s.btOut ? (s.btName ? String(s.btName) : "Bluetooth") : "The Android device's own speaker";
+    }
+
+    // The delay of the speaker playing now taken up, as the phone moves to
+    // another one
+    function dualMsSync() {
+
+        const k = dualSpeaker(state);
+
+        if (k === dualKey) {
+            return;
+        }
+
+        const had = dualKey !== "";
+        const ms = Object.prototype.hasOwnProperty.call(dualMsBy, k) ? Number(dualMsBy[k]) : dualMsOld;
+
+        dualKey = k;
+        dualMs = Math.max(-DUAL_MS_MOST, Math.min(DUAL_MS_MOST, Math.round(ms) || 0));
+        dualErr = null;
+
+        if (had && state && state.dual === true) {
+            dbgLog("Audio", "the phone plays on " + dualSpeakerName(state) + ", this browser " + dualMsText().toLowerCase() + " for it");
+        }
     }
 
     function setDualMs(ms) {
 
-        dualMs = Math.max(-1000, Math.min(1000, Math.round(ms)));
+        dualMsSync();
+        dualMs = Math.max(-DUAL_MS_MOST, Math.min(DUAL_MS_MOST, Math.round(ms)));
+        dualMsBy[dualKey] = dualMs;
 
         try {
-            localStorage.setItem("murekaDualMs", String(dualMs));
+            localStorage.setItem("murekaDualMsBy", JSON.stringify(dualMsBy));
         } catch (e) {
             // A browser that keeps nothing, kept this visit
         }
@@ -103843,6 +103964,12 @@
         if (volOpen()) {
             paintVol(false);
         }
+    }
+
+    // The delays as told: the phone's, from its play head to the ear, and
+    // this browser's own, in ms
+    function dualPhoneHeardMs() {
+        return state ? (Number(state.heardMs) || 0) + (Number(state.wayOutMs) || 0) : 0;
     }
 
     // The phone's time asked for, and the difference to this browser's
@@ -103935,7 +104062,7 @@
 
     // Where this page's song should be now to be heard with the phone's
     function dualTarget() {
-        return dualPhonePlace() - (Number(state.heardMs) || 0) / 1000 + dualOwnLag() - dualMs / 1000;
+        return dualPhonePlace() - dualPhoneHeardMs() / 1000 + dualOwnLag() - dualMs / 1000;
     }
 
     function dualStart() {
@@ -103944,7 +104071,8 @@
             return;
         }
 
-        dbgLog("Audio", "heard here and on the Android device, kept in step, this browser " + dualMs + " ms later");
+        dbgLog("Audio", "heard here and on the Android device, kept in step, this browser " + dualMsText().toLowerCase() + " for "
+            + dualSpeakerName(state));
         dualClock = [];
         dualOffset = null;
         dualAnchor = null;
@@ -103982,7 +104110,26 @@
         }
     }
 
+    // Each part of the playing in step for the log: the phone's delay as
+    // its engine and Android tell it, this browser's, the clocks and the
+    // delay set by hand
+    function dualPartsText() {
+
+        const s = state || {};
+        const best = dualClock.reduce(function (b, c) {
+            return !b || c.took < b.took ? c : b;
+        }, null);
+
+        return "the phone heard after " + dualPhoneHeardMs() + " ms (engine " + (Number(s.heardMs) || 0) + ", Android's way out "
+            + (Number(s.androidOutMs) >= 0 ? s.androidOutMs + " ms, " + (Number(s.wayOutMs) || 0) + " of it added" : "not told") + ")"
+            + " on " + dualSpeakerName(s) + ", here " + Math.round(dualOwnLag() * 1000) + " ms"
+            + ", clocks " + (dualOffset === null ? "not known" : Math.round(dualOffset) + " ms apart within " + Math.round(best ? best.took / 2 : 0) + " ms")
+            + ", set " + dualMs + " ms";
+    }
+
     function dualStep() {
+
+        dualMsSync();
 
         const s = state;
 
@@ -104006,7 +104153,8 @@
         // left to settle before it is steered
         if (Math.abs(err) > DUAL_JUMP_S) {
 
-            dbgLog("Audio", "in step with the Android device again, " + (err > 0 ? "back " : "on ") + Math.round(Math.abs(err) * 1000) + " ms");
+            dbgLog("Audio", "in step with the Android device again, " + (err > 0 ? "back " : "on ") + Math.round(Math.abs(err) * 1000) + " ms, "
+                + dualPartsText());
             audio.playbackRate = 1;
             dualErr = null;
             dualSettle = now + 700;
@@ -104039,7 +104187,7 @@
 
             dualLogged = now;
             dbgLog("Audio", "in step with the Android device within " + Math.round(Math.abs(dualErr) * 1000) + " ms, playing at "
-                + (rate * 100).toFixed(1) + " %");
+                + (rate * 100).toFixed(1) + " %, " + dualPartsText());
         }
     }
 
@@ -108911,15 +109059,15 @@
             head.textContent = "In step with the Android device";
             steps.className = "volRow volDualRow";
             shown.className = "volNow volDualNow";
-            steps.appendChild(by("-50", -50));
+            steps.appendChild(by("-100", -100));
             steps.appendChild(by("-10", -10));
             steps.appendChild(by("-1", -1));
             steps.appendChild(shown);
             steps.appendChild(by("+1", 1));
             steps.appendChild(by("+10", 10));
-            steps.appendChild(by("+50", 50));
+            steps.appendChild(by("+100", 100));
             hint.className = "ceLabel";
-            hint.textContent = "How much later this browser plays than the Android device, kept in this browser. Listen where both are heard and move it until they sound as one: a flam or an echo means it is off. Less is earlier.";
+            hint.textContent = "How much later this browser plays than the Android device, kept in this browser for each of its speakers. Listen where both are heard and move it until they sound as one: a flam or an echo means it is off. Less is earlier.";
             dual.appendChild(head);
             dual.appendChild(steps);
             dual.appendChild(hint);
@@ -116075,16 +116223,33 @@
     }
 
     // The delay of this browser against the phone, set by ear: how much
-    // later it plays, a press moving it 1, 10 or 50 ms, kept in this
-    // browser. In the song menu's box like a question
+    // later it plays, a press moving it 1, 10 or 100 ms, kept in this
+    // browser for the speaker the phone plays on. Under it, small, the
+    // speaker and the delays the two devices tell, which are allowed for
+    // already, read again while it is open. In the song menu's box like a
+    // question
+    let dualDelayTimer = 0;
+
     function openDualDelay() {
 
         const box = $("menuItems");
         const col = document.createElement("div");
         const row = document.createElement("div");
         const shown = document.createElement("div");
+        const speaker = document.createElement("div");
+        const told = document.createElement("div");
         const paint = function () {
+
+            dualMsSync();
             shown.textContent = dualMsText();
+            speaker.textContent = "For " + dualSpeakerName(state);
+
+            const s = state || {};
+            const android = Number(s.androidOutMs);
+
+            told.textContent = "Allowed for already: the Android device " + dualPhoneHeardMs() + " ms"
+                + (android >= 0 ? " (Android tells " + android + " ms for its way out)" : "")
+                + ", this browser " + Math.round(dualOwnLag() * 1000) + " ms";
         };
         const by = function (label, ms) {
 
@@ -116115,12 +116280,15 @@
         col.className = "mp-ui-ch-col dualDelay";
         row.className = "dualDelayRow";
         shown.className = "dualDelayNow";
-        row.appendChild(by("-50", -50));
+        speaker.className = "dualDelaySpeaker";
+        told.className = "dualDelayTold";
+        row.appendChild(by("-100", -100));
         row.appendChild(by("-10", -10));
         row.appendChild(by("-1", -1));
         row.appendChild(by("+1", 1));
         row.appendChild(by("+10", 10));
-        row.appendChild(by("+50", 50));
+        row.appendChild(by("+100", 100));
+        col.appendChild(speaker);
         col.appendChild(shown);
         col.appendChild(row);
         col.appendChild(uiBtn("Back to 0 ms", function () {
@@ -116128,10 +116296,22 @@
             setDualMs(0);
             paint();
         }, true));
+        col.appendChild(told);
         col.appendChild(uiBtn("Done", closeSongMenu));
         box.appendChild(col);
         paint();
         $("songMenu").style.display = "flex";
+        clearInterval(dualDelayTimer);
+        dualDelayTimer = setInterval(function () {
+
+            if (!col.isConnected || !isShown("songMenu")) {
+
+                clearInterval(dualDelayTimer);
+                return;
+            }
+
+            paint();
+        }, 1000);
     }
 
     $("soundPhone").addEventListener("click", function () {
