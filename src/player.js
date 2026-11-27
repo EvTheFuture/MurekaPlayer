@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.374";
+    const VERSION = "2.0.1.375";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -43796,11 +43796,15 @@
         }
 
         hostBeepAt = next;
-        beepTone(ctx, ctx.currentTime + (next - pos) / (audio.playbackRate || 1), BEEP_HZ, 0.5);
+
+        // Where the song comes into the sound profile, so the beep goes the
+        // same way out, through the same engines and their delays
+        beepTone(ctx, ctx.currentTime + (next - pos) / (audio.playbackRate || 1), BEEP_HZ, 0.5,
+            ctx === fxCtx && fxCut ? fxCut : ctx.destination);
     }
 
     // One beep: a sine, 60 ms, its start sharp so the ear can place it
-    function beepTone(ctx, when, hz, level) {
+    function beepTone(ctx, when, hz, level, into) {
 
         const osc = ctx.createOscillator();
         const g = ctx.createGain();
@@ -43813,7 +43817,7 @@
         g.gain.setValueAtTime(level, t + 0.04);
         g.gain.linearRampToValueAtTime(0, t + 0.06);
         osc.connect(g);
-        g.connect(ctx.destination);
+        g.connect(into);
         osc.start(t);
         osc.stop(t + 0.07);
     }
@@ -104628,6 +104632,10 @@
             return gainCtx;
         }
 
+        // The song's engine woken and the song led through it, then the
+        // beeps go the same way from the next one on
+        gainWake();
+
         const Ctx = window.AudioContext || window.webkitAudioContext;
 
         if (!webBeepCtx && Ctx) {
@@ -104683,7 +104691,11 @@
         }
 
         const t = Math.max(ctx.currentTime, ctx.currentTime + (next - pos) / (audio.playbackRate || 1));
-        const level = 0.5 * webVolume() * fadeShare;
+
+        // Into the song's own way, after the music's part, through the
+        // volume and out, or straight out of an engine of its own
+        const along = ctx === gainCtx && gainNode;
+        const level = along ? 0.5 : 0.5 * webVolume() * fadeShare;
         const osc = ctx.createOscillator();
         const g = ctx.createGain();
 
@@ -104695,14 +104707,33 @@
         g.gain.setValueAtTime(level, t + 0.04);
         g.gain.linearRampToValueAtTime(0, t + 0.06);
         osc.connect(g);
-        g.connect(ctx.destination);
+        g.connect(along ? gainNode : ctx.destination);
         osc.start(t);
         osc.stop(t + 0.07);
+    }
+
+    // The song led through the sound engine once it is awake, tried again
+    // now and then while it is not
+    let dualWireTried = 0;
+
+    function dualWire() {
+
+        if (gainNode || Date.now() - dualWireTried < 1000) {
+            return;
+        }
+
+        dualWireTried = Date.now();
+        gainWake();
+
+        if (gainCtx && gainCtx.state === "running") {
+            applyWebVolume();
+        }
     }
 
     function dualStep() {
 
         dualMsSync();
+        dualWire();
         webBeepStep();
 
         if (dualCalHold) {
@@ -108860,9 +108891,20 @@
     let gainCtx = null;
     let gainNode = null;
 
+    // Before the gain, the music alone, silent for beeps alone while the
+    // beeps, which come in after it, go on
+    let gainMusic = null;
+
+    // Playing on both, the song goes through the sound engine here too, as
+    // the beeps to set the delay do, so the two take the same way out and
+    // the engine's own delay is known and allowed for
+    function webDualOn() {
+        return !!(state && state.carAudio && state.dual === true);
+    }
+
     function gainWake() {
 
-        if (!volumeFixed) {
+        if (!volumeFixed && !webDualOn()) {
             return;
         }
 
@@ -108909,15 +108951,19 @@
 
             const source = gainCtx.createMediaElementSource(audio);
 
+            gainMusic = gainCtx.createGain();
             gainNode = gainCtx.createGain();
-            source.connect(gainNode);
+            source.connect(gainMusic);
+            gainMusic.connect(gainNode);
             gainNode.connect(gainCtx.destination);
             audio.volume = 1;
-            dbgLog("Audio", "the volume here goes through a gain, Safari ignores a page's own volume");
+            dbgLog("Audio", volumeFixed ? "the volume here goes through a gain, Safari ignores a page's own volume"
+                : "the song goes through the sound engine here, as the beeps do, its delay " + Math.round(dualOwnLag() * 1000) + " ms allowed for");
         } catch (e) {
 
             dbgLog("Audio", "no gain for the volume: " + (e && e.message ? e.message : e));
             gainNode = null;
+            gainMusic = null;
         }
 
         return gainNode !== null;
@@ -108998,18 +109044,27 @@
 
     function applyWebVolume() {
 
-        const want = calQuiet || webBeepOnly() ? 0 : webVolume() * fadeShare;
+        const want = calQuiet ? 0 : webVolume() * fadeShare;
+        const music = webBeepOnly() ? 0 : 1;
 
         // On an iPhone or iPad led through the gain as soon as it can be, so
         // the level and the fades with the phone are heard. Safari plays on
-        // through it with the screen locked
-        if (volumeFixed && (gainNode || wireGain())) {
+        // through it with the screen locked. Playing on both, everywhere
+        if ((volumeFixed || gainNode || webDualOn()) && (gainNode || wireGain())) {
 
             if (gainNode.gain.value !== want) {
                 gainNode.gain.value = want;
             }
-        } else if (audio.volume !== want) {
-            audio.volume = want;
+
+            if (gainMusic && gainMusic.gain.value !== music) {
+                gainMusic.gain.value = music;
+            }
+
+            if (!volumeFixed && audio.volume !== 1) {
+                audio.volume = 1;
+            }
+        } else if (audio.volume !== want * music) {
+            audio.volume = want * music;
         }
 
         paintVolIcon();
@@ -116982,14 +117037,23 @@
         clearInterval(dualDelayTimer);
         dualDelayTimer = setInterval(function () {
 
+            // Put away, the beeps it started stop with it
             if (!col.isConnected || !isShown("songMenu")) {
 
                 clearInterval(dualDelayTimer);
+
+                if (state && Number(state.beepEvery) > 0) {
+
+                    send("syncBeep", { every: 0, only: false });
+                    state.beepEvery = 0;
+                    state.beepOnly = false;
+                }
+
                 return;
             }
 
             paint();
-        }, 1000);
+        }, 250);
     }
 
     // Measuring the delay with a microphone where both are heard. The
