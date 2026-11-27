@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.369";
+    const VERSION = "2.0.1.370";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -116358,10 +116358,11 @@
     let dualCalRun = 0;
     let dualCalSeq = 0;
 
-    // A microphone at all: only on https pages, or on this address once
-    // the browser is told it is safe
+    // A microphone at all: on https pages, or on this address once the
+    // browser is told it is safe. Firefox allowing it on http still calls
+    // the page not secure, so what counts is the microphone being offered
     function dualCalCan() {
-        return !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+        return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && navigator.mediaDevices.enumerateDevices);
     }
 
     // Sound brought down to the measuring rate, each new sample the average
@@ -116599,8 +116600,28 @@
             return new Promise(function (resolve, reject) {
 
                 const Ctx = window.AudioContext || window.webkitAudioContext;
-                const ctx = new Ctx();
-                const src = ctx.createMediaStreamSource(stream);
+                const track = stream.getAudioTracks()[0];
+                const sr = track && track.getSettings ? Number(track.getSettings().sampleRate) || 0 : 0;
+                let ctx;
+                let src;
+
+                // At the microphone's own rate where it tells it: Firefox
+                // does not join sound of two rates
+                try {
+
+                    ctx = sr ? new Ctx({ sampleRate: sr }) : new Ctx();
+                    src = ctx.createMediaStreamSource(stream);
+                } catch (e) {
+
+                    if (ctx) {
+                        ctx.close().catch(function () {
+                        });
+                    }
+
+                    ctx = new Ctx();
+                    src = ctx.createMediaStreamSource(stream);
+                }
+
                 const proc = ctx.createScriptProcessor(2048, 1, 1);
                 const hush = ctx.createGain();
                 const rate = ctx.sampleRate;
