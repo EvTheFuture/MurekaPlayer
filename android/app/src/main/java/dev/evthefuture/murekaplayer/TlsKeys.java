@@ -329,6 +329,45 @@ final class TlsKeys {
         out.write(content, 0, n);
     }
 
+    // The DNS names the certificate kept is for, lower case, none without
+    // one. Only these, as the key that goes with them is the phone's own,
+    // so a page reaching the phone by such a name is the web view's
+    static java.util.Set<String> dnsNames(Context c) {
+
+        java.util.Set<String> out = new java.util.HashSet<>();
+
+        try {
+
+            if (!have(c)) {
+                return out;
+            }
+
+            Certificate cert = load(c).getCertificate(ALIAS);
+
+            if (!(cert instanceof X509Certificate)) {
+                return out;
+            }
+
+            Collection<List<?>> alt = ((X509Certificate) cert).getSubjectAlternativeNames();
+
+            if (alt == null) {
+                return out;
+            }
+
+            for (List<?> e : alt) {
+
+                // Type 2 is a DNS name
+                if (e.size() > 1 && Integer.valueOf(2).equals(e.get(0)) && e.get(1) instanceof String) {
+                    out.add(((String) e.get(1)).toLowerCase(Locale.ROOT));
+                }
+            }
+        } catch (GeneralSecurityException | IOException e) {
+            out.clear();
+        }
+
+        return out;
+    }
+
     // What the browser shows of the certificate kept: whom it is for, its
     // names, until when, and its SHA-256 fingerprint to compare with the
     // browser's. Only on, the port, with none

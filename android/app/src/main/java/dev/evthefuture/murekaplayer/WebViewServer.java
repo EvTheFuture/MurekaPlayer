@@ -162,6 +162,10 @@ final class WebViewServer {
     private volatile ServerSocket tlsSocket;
     private volatile String tlsStatus = "off";
 
+    // The DNS names of the certificate kept, the phone's own too, as only
+    // the phone has the key for them; read as https opens or closes
+    private static volatile java.util.Set<String> certNames = java.util.Collections.emptySet();
+
     // The certificate and its key, from a browser, are a few kB as PEM or
     // as a PKCS #12 file written out as text
     private static final int MAX_TLS = 65536;
@@ -341,6 +345,8 @@ final class WebViewServer {
                 f = null;
                 tlsStatus = "certificate not usable: " + e.getMessage();
             }
+
+            certNames = TlsKeys.dnsNames(context);
 
             if (f == null) {
 
@@ -1819,9 +1825,9 @@ final class WebViewServer {
     }
 
     // Whether a request comes from the web view's own page. The address
-    // asked for must be the phone's: an IP address, a .local name or
-    // localhost, so a website whose name was made to point at the phone
-    // gets nothing. A POST must come from a page on that same address, and
+    // asked for must be the phone's: an IP address, a .local name,
+    // localhost or a DNS name of the certificate kept for https, so a
+    // website whose name was made to point at the phone gets nothing. A POST must come from a page on that same address, and
     // be of a type a browser only sends from another website after asking
     // first, which this server never agrees to
     static boolean sameSite(String method, String host, String origin, String contentType) {
@@ -1882,10 +1888,11 @@ final class WebViewServer {
         return colon >= 0 ? h.substring(0, colon) : h;
     }
 
-    // An address or name that can only be the phone itself
+    // An address or name that can only be the phone itself, or a name of
+    // the certificate it keeps for https
     private static boolean ownName(String name) {
 
-        if (name.startsWith("[") || "localhost".equals(name) || name.endsWith(".local")) {
+        if (name.startsWith("[") || "localhost".equals(name) || name.endsWith(".local") || certNames.contains(name)) {
             return true;
         }
 

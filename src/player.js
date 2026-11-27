@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.378";
+    const VERSION = "2.0.1.379";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -94465,7 +94465,7 @@
         $("titleRow").style.display = "none";
         $("menuStars").style.display = "none";
         menuLook("choice");
-        choiceText("A browser allows the microphone, and remembers that it did, only on a secure page. Make a certificate for this address, here with OpenSSL, bring in its two files, then open the page over https and accept the certificate, or import cert.pem in the browser as an authority to trust it for good. Settings kept in a browser are kept apart for the https page.");
+        choiceText("A browser allows the microphone, and remembers that it did, only on a secure page. Make a certificate for this address, here with OpenSSL, or bring in one of your own for a name of yours, its full chain and key, then open the page over https and accept the certificate, or import cert.pem in the browser as an authority to trust it for good. The DNS names in the certificate reach the web view too, over http and https. Settings kept in a browser are kept apart for the https page.");
         col.className = "mp-ui-ch-col dualDelay tlsBox";
         status.className = "dualDelayNow dualCalStatus";
         told.className = "dualDelayTold";
