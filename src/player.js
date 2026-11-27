@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.384";
+    const VERSION = "2.0.1.385";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -55703,11 +55703,19 @@
 
         const b = document.createElement("button");
 
+        // The label in the middle by its capitals and baseline, not by the
+        // font's own top and bottom room, which in Mureka's font sits the
+        // letters low
         b.textContent = label;
         b.style.cssText = [
             "flex:1",
             "min-height:30px",
             "box-sizing:border-box",
+            "display:inline-flex",
+            "align-items:center",
+            "justify-content:center",
+            "text-align:center",
+            "text-box:trim-both cap alphabetic",
             "padding:7px 4px",
             "border:none",
             "border-radius:6px",
@@ -77277,7 +77285,8 @@
         ui.makeBottom = makeButton("Create", ACCENT, "#000", function () {
             createFromPage(false);
         });
-        ui.makeBottom.style.padding = "10px 18px";
+        ui.makeBottom.style.padding = "13px 18px";
+        ui.makeBottom.style.flex = "0 0 auto";
         ui.acts.push(ui.makeBottom);
         createEl.appendChild(ui.makeBottom);
 
