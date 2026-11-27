@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.375";
+    const VERSION = "2.0.1.376";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -43701,7 +43701,7 @@
     // delay is right and as two when not. Off after ten minutes or when
     // Play on both ends. The interval in seconds, 0 for off
     const BEEP_EVERY = [0, 1, 2, 3, 5];
-    const BEEP_HZ = 880;
+    let hostBeepHz = 880;
     let hostBeepEvery = 0;
     let hostBeepOnly = false;
     let hostBeepUntil = 0;
@@ -43718,6 +43718,12 @@
 
         hostBeepEvery = BEEP_EVERY.indexOf(n) >= 0 && hostDual ? n : 0;
         hostBeepOnly = hostBeepEvery > 0 && o.only === true;
+
+        // The tone here, as the browser asking keeps it for this device
+        if (Number(o.hz) >= 100 && Number(o.hz) <= 5000) {
+            hostBeepHz = Math.round(Number(o.hz));
+        }
+
         hostBeepUntil = Date.now() + 10 * 60000;
         hostBeepAt = -1;
         clearInterval(hostBeepTimer);
@@ -43727,7 +43733,7 @@
             hostBeepTimer = setInterval(hostBeepStep, 50);
         }
 
-        dbgLog("Audio", hostBeepEvery ? "a beep every " + hostBeepEvery + " s to set the delay by ear" + (hostBeepOnly ? ", the music silent" : "")
+        dbgLog("Audio", hostBeepEvery ? "a beep every " + hostBeepEvery + " s at " + hostBeepHz + " Hz to set the delay by ear" + (hostBeepOnly ? ", the music silent" : "")
             : "no beeps");
         applyCarAudioVolume();
 
@@ -43799,7 +43805,7 @@
 
         // Where the song comes into the sound profile, so the beep goes the
         // same way out, through the same engines and their delays
-        beepTone(ctx, ctx.currentTime + (next - pos) / (audio.playbackRate || 1), BEEP_HZ, 0.5,
+        beepTone(ctx, ctx.currentTime + (next - pos) / (audio.playbackRate || 1), hostBeepHz, 0.5,
             ctx === fxCtx && fxCut ? fxCut : ctx.destination);
     }
 
@@ -44106,6 +44112,7 @@
             // The beeps to set the delay by ear, 0 for none
             beepEvery: hostBeepEvery,
             beepOnly: hostBeepOnly,
+            beepHz: hostBeepHz,
             androidOutMs: hostAndroidOutMs(),
             fade: hostFade,
             seeks: hostSeeks,
@@ -89368,6 +89375,15 @@
         accent-color: var(--accent);
     }
 
+    .dualDelayEnds {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.75em;
+        opacity: 0.55;
+        margin: -6px 2px 6px;
+        font-variant-numeric: tabular-nums;
+    }
+
     .dualDelayRow.dualBeepRow {
         grid-template-columns: repeat(5, minmax(0, 1fr));
     }
@@ -104555,6 +104571,51 @@
         return dualPhonePlace() - dualPhoneHeardMs() / 1000 + dualOwnLag() - dualMs / 1000;
     }
 
+    // The smallest step this browser's clock takes, in ms, looked at for
+    // 60 ms; none in that time is Infinity
+    function dualClockStep() {
+
+        let a = performance.now();
+        let least = Infinity;
+        const until = a + 60;
+
+        while (a < until) {
+
+            const b = performance.now();
+
+            if (b > a) {
+
+                least = Math.min(least, b - a);
+                a = b;
+            }
+        }
+
+        return least;
+    }
+
+    // Each new song, once it has played a few seconds, the parts of the
+    // playing in step in the log, as the delay may differ from song to song
+    let dualSongSrc = "";
+    let dualSongLogAt = 0;
+
+    function dualSongNote() {
+
+        const now = Date.now();
+
+        if (state && state.src && state.src !== dualSongSrc) {
+
+            dualSongSrc = state.src;
+            dualSongLogAt = now + 6000;
+        }
+
+        if (dualSongLogAt && now >= dualSongLogAt) {
+
+            dualSongLogAt = 0;
+            dbgLog("Audio", "the new song " + (dualErr === null ? "" : "within " + Math.round(Math.abs(dualErr) * 1000) + " ms of its place, ")
+                + "at " + (audio.currentTime || 0).toFixed(2) + " s, " + dualPartsText());
+        }
+    }
+
     function dualStart() {
 
         if (dualTimer) {
@@ -104563,6 +104624,13 @@
 
         dbgLog("Audio", "heard here and on the Android device, kept in step, this browser " + dualMsText().toLowerCase() + " for "
             + dualSpeakerName(state));
+
+        // A browser guarding against fingerprinting, as LibreWolf does, gives
+        // its clock in coarse steps, which makes keeping in step rougher
+        const step = dualClockStep();
+
+        dbgLog("Audio", "this browser's clock goes in steps of " + (!isFinite(step) ? "over 60" : step < 1 ? step.toFixed(3) : Math.round(step)) + " ms"
+            + (step >= 10 ? ", coarse: a guard against fingerprinting may round it, the timing here is rougher" : ""));
         dualClock = [];
         dualOffset = null;
         dualAnchor = null;
@@ -104622,7 +104690,20 @@
     // the interval the phone tells, put on the sound engine's clock a little
     // ahead, each once. Through the song's own engine where it has one, so
     // the beep comes out with the music
-    const WEB_BEEP_HZ = 1760;
+    // The tones, each kept in this browser: its own, and the Android
+    // device's, sent with every ask for beeps
+    const BEEP_TONES = [440, 660, 880, 1320, 1760, 2640];
+    let webBeepHz = 1760;
+    let phoneBeepHz = 880;
+
+    try {
+
+        webBeepHz = BEEP_TONES.indexOf(Number(localStorage.getItem("murekaBeepHz"))) >= 0 ? Number(localStorage.getItem("murekaBeepHz")) : 1760;
+        phoneBeepHz = BEEP_TONES.indexOf(Number(localStorage.getItem("murekaBeepHzPhone"))) >= 0
+            ? Number(localStorage.getItem("murekaBeepHzPhone")) : 880;
+    } catch (e) {
+        webBeepHz = 1760;
+    }
     let webBeepAt = -1;
     let webBeepCtx = null;
 
@@ -104701,7 +104782,7 @@
 
         webBeepAt = next;
         osc.type = "sine";
-        osc.frequency.value = WEB_BEEP_HZ;
+        osc.frequency.value = webBeepHz;
         g.gain.setValueAtTime(0, t);
         g.gain.linearRampToValueAtTime(level, t + 0.003);
         g.gain.setValueAtTime(level, t + 0.04);
@@ -104735,6 +104816,7 @@
         dualMsSync();
         dualWire();
         webBeepStep();
+        dualSongNote();
 
         if (dualCalHold) {
 
@@ -116875,6 +116957,15 @@
     // question
     let dualDelayTimer = 0;
 
+    // Beeps only, the music silent, as last ticked in this browser
+    let beepOnlyKept = false;
+
+    try {
+        beepOnlyKept = localStorage.getItem("murekaBeepOnly") === "1";
+    } catch (e) {
+        beepOnlyKept = false;
+    }
+
     function openDualDelay() {
 
         const box = $("menuItems");
@@ -116887,13 +116978,66 @@
         const beeps = document.createElement("div");
         const beepBtns = [];
         const slider = document.createElement("input");
+        const ends = document.createElement("div");
+        const endLo = document.createElement("span");
+        const endHi = document.createElement("span");
         let sliding = false;
+
+        // The slider shows a second of the range at a time, from half a
+        // second either way at first. Held at an end, it moves on a tenth
+        // of a second at a time that way, up to 5 s; let go, the part
+        // shown stays where it was moved
+        const SPAN = 1000;
+        let winLo = Math.abs(dualMs) <= SPAN / 2 ? -SPAN / 2 : Math.round((dualMs - SPAN / 2) / 50) * 50;
+        let edgeTimer = 0;
+
+        const setWindow = function () {
+
+            winLo = Math.max(-DUAL_MS_MOST, Math.min(DUAL_MS_MOST - SPAN, winLo));
+            slider.min = String(winLo);
+            slider.max = String(winLo + SPAN);
+            endLo.textContent = (winLo > 0 ? "+" : "") + winLo + " ms";
+            endHi.textContent = (winLo + SPAN > 0 ? "+" : "") + (winLo + SPAN) + " ms";
+        };
+        const fitWindow = function () {
+
+            if (dualMs < winLo || dualMs > winLo + SPAN) {
+
+                winLo = Math.round((dualMs - SPAN / 2) / 50) * 50;
+                setWindow();
+            }
+        };
+        const atEdge = function () {
+
+            const v = Number(slider.value);
+
+            return v >= winLo + SPAN - 10 && winLo + SPAN < DUAL_MS_MOST ? 1 : v <= winLo + 10 && winLo > -DUAL_MS_MOST ? -1 : 0;
+        };
+        const edgeStep = function () {
+
+            const way = atEdge();
+
+            if (!sliding || !way || !col.isConnected) {
+
+                clearInterval(edgeTimer);
+                edgeTimer = 0;
+                return;
+            }
+
+            winLo += way * 100;
+            setWindow();
+            slider.value = String(way > 0 ? winLo + SPAN : winLo);
+            setDualMs(Number(slider.value));
+            shown.textContent = dualMsText();
+        };
         const paint = function () {
 
             dualMsSync();
 
             // The slider where the delay is, left alone while it is moved
             if (!sliding) {
+
+                fitWindow();
                 slider.value = String(dualMs);
             }
 
@@ -116906,8 +117050,8 @@
                 b.el.classList.toggle("dim", b.every !== every);
             });
 
-            if (beepOnly.checked !== (every > 0 && !!state && state.beepOnly === true)) {
-                beepOnly.checked = every > 0 && !!state && state.beepOnly === true;
+            if (beepOnly.checked !== beepOnlyKept) {
+                beepOnly.checked = beepOnlyKept;
             }
             shown.textContent = dualMsText();
             speaker.textContent = "For " + dualSpeakerName(state);
@@ -116956,7 +117100,7 @@
 
             webBeepEngine();
             webBeepAt = -1;
-            send("syncBeep", { every: every, only: only && every > 0 });
+            send("syncBeep", { every: every, only: only && every > 0, hz: phoneBeepHz });
 
             if (state) {
 
@@ -116966,15 +117110,97 @@
 
             paint();
         };
+        // Kept in this browser for next time; ticked with no beeps, beeps
+        // every 2 s begin
         const beepOnly = uiTick("Beeps only, the music silent", function (on) {
 
             const every = state && state.dual === true ? Number(state.beepEvery) || 0 : 0;
 
-            askBeeps(on && !every ? 2 : every, on);
+            beepOnlyKept = on;
+
+            try {
+                localStorage.setItem("murekaBeepOnly", on ? "1" : "0");
+            } catch (e) {
+                // Kept this visit
+            }
+
+            if (every || on) {
+                askBeeps(on && !every ? 2 : every, on);
+            }
         });
 
         beepHead.className = "dualDelayTold";
-        beepHead.textContent = "Beeps to set it by ear: low from the Android device, high from this browser, heard as one when it is right";
+        beepHead.textContent = "Beeps to set it by ear, a tone from each, heard as one when it is right";
+
+        // A row of tones to pick, the one in use ringed, kept in this browser
+        const toneRow = function (head, get, set) {
+
+            const wrap = document.createElement("div");
+            const name = document.createElement("div");
+            const r = document.createElement("div");
+            const btns = [];
+
+            name.className = "dualDelayTold";
+            name.textContent = head;
+            r.className = "dualDelayRow";
+            BEEP_TONES.forEach(function (hz) {
+
+                const b = uiBtn(String(hz), function () {
+
+                    set(hz);
+                    btns.forEach(function (x) {
+
+                        x.el.classList.toggle("ring", x.hz === get());
+                        x.el.classList.toggle("dim", x.hz !== get());
+                    });
+                }, hz !== get());
+
+                b.setAttribute("aria-label", head + " " + hz + " Hz");
+
+                if (hz === get()) {
+                    b.classList.add("ring");
+                }
+
+                btns.push({ el: b, hz: hz });
+                r.appendChild(b);
+            });
+            wrap.appendChild(name);
+            wrap.appendChild(r);
+
+            return wrap;
+        };
+        const tones = document.createElement("div");
+
+        tones.appendChild(toneRow("Tone of the Android device, Hz", function () {
+            return phoneBeepHz;
+        }, function (hz) {
+
+            phoneBeepHz = hz;
+
+            try {
+                localStorage.setItem("murekaBeepHzPhone", String(hz));
+            } catch (e) {
+                // Kept this visit
+            }
+
+            const every = state && state.dual === true ? Number(state.beepEvery) || 0 : 0;
+
+            if (every) {
+                askBeeps(every, !!state.beepOnly);
+            }
+        }));
+        tones.appendChild(toneRow("Tone of this browser, Hz", function () {
+            return webBeepHz;
+        }, function (hz) {
+
+            webBeepHz = hz;
+
+            try {
+                localStorage.setItem("murekaBeepHz", String(hz));
+            } catch (e) {
+                // Kept this visit
+            }
+        }));
         beeps.className = "dualDelayRow dualBeepRow";
         [0, 1, 2, 3, 5].forEach(function (every) {
 
@@ -116992,31 +117218,41 @@
         row.appendChild(by("+1", 1));
         row.appendChild(by("+10", 10));
         row.appendChild(by("+100", 100));
-        // The whole range at once, 10 ms a step, for a speaker seconds late;
-        // the buttons for the last few ms
+        // A second of the range, 5 ms a step, moving on when held at an
+        // end; the buttons for the last few ms
         slider.type = "range";
         slider.className = "dualDelaySlider";
-        slider.min = String(-DUAL_MS_MOST);
-        slider.max = String(DUAL_MS_MOST);
-        slider.step = "10";
+        slider.step = "5";
         slider.setAttribute("aria-label", "How much later this browser plays, ms");
+        ends.className = "dualDelayEnds";
+        ends.appendChild(endLo);
+        ends.appendChild(endHi);
+        setWindow();
         slider.addEventListener("pointerdown", function () {
             sliding = true;
         });
         slider.addEventListener("input", function () {
 
+            sliding = true;
             setDualMs(Number(slider.value));
             shown.textContent = dualMsText();
+
+            if (atEdge() && !edgeTimer) {
+                edgeTimer = setInterval(edgeStep, 200);
+            }
         });
         slider.addEventListener("change", function () {
 
             sliding = false;
+            clearInterval(edgeTimer);
+            edgeTimer = 0;
             setDualMs(Number(slider.value));
             paint();
         });
         col.appendChild(speaker);
         col.appendChild(shown);
         col.appendChild(slider);
+        col.appendChild(ends);
         col.appendChild(row);
         col.appendChild(uiBtn("Back to 0 ms", function () {
 
@@ -117026,6 +117262,7 @@
         col.appendChild(beepHead);
         col.appendChild(beeps);
         col.appendChild(beepOnly.el);
+        col.appendChild(tones);
         col.appendChild(uiBtn("Measure with a microphone", function () {
             openDualCal();
         }, true));
