@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.393";
+    const VERSION = "2.0.1.394";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -17628,6 +17628,7 @@
         + ".mp-mn .mp-mn-num{flex:0 0 auto;color:#888;font-weight:400;font-variant-numeric:tabular-nums}"
         + ".mp-mn .mp-mn-title{flex:1 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;"
         + "font-weight:600;color:" + ACCENT + "}"
+        + ".mp-mn .mp-mn-badge{align-self:center;margin-left:0}"
         + ".mp-mn .mp-mn-body{overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}"
         + ".mp-mn .mp-mn-row{display:flex;align-items:center;gap:10px;width:100%;min-height:0;box-sizing:border-box;"
         + "padding:7px 10px;margin:0;border:none;border-radius:6px;background:transparent;box-shadow:none;"
@@ -17658,9 +17659,12 @@
         (document.head || document.documentElement).appendChild(style);
     }
 
-    // The menu's head: the song's number in the list, when it has one, and
-    // its title. A tap on it does nothing and leaves the menu open
-    function mnHead(head, number, title) {
+    // The menu's head: the song's number in the list, when it has one, its
+    // title and, for the account's own songs, the badge as in the list,
+    // Public, Draft, New or Shared, with its marks: T trimmed, R remix, N a
+    // note, a count of comments. badge: the list row's item, or null. A tap
+    // on it does nothing and leaves the menu open
+    function mnHead(head, number, title, badge) {
 
         const num = document.createElement("span");
         const name = document.createElement("span");
@@ -17677,6 +17681,18 @@
         }
 
         head.appendChild(name);
+
+        if (badge && badge.badge) {
+
+            const b = document.createElement("span");
+
+            srStyle();
+            b.className = "mp-sr-badge mp-mn-badge " + badge.badge;
+            b.textContent = badge.badge;
+            b.title = badge.badgeTitle || "";
+            srMarks(b, badge);
+            head.appendChild(b);
+        }
     }
 
     // The rating under the stars, in words, with Remove rating once there
@@ -44464,6 +44480,15 @@
             // What the web view's trimmer needs: the account's own song with a file
             canTrim: !creatorSource && !!songUrl(song),
             durationMs: Number(song.duration_milliseconds) || 0,
+
+            // The badge by the title as in the list, Public, Draft, New or
+            // Shared with its marks, for the account's own songs
+            head: creatorSource ? null : (function () {
+
+                const it = rowItemOf(song, { inSets: true });
+
+                return { badge: it.badge, badgeTitle: it.badgeTitle, trimmed: it.trimmed, remixed: it.remixed, note: it.note, comments: it.comments };
+            })(),
 
             // Where it comes up in the queue, for Remove from queue, and
             // where the queue is, for taking a part of it out
@@ -83449,7 +83474,7 @@
 
         const head = document.createElement("div");
 
-        mnHead(head, hostNumbers().get(song.song_id), song.title);
+        mnHead(head, hostNumbers().get(song.song_id), song.title, creatorSource ? null : rowItemOf(song, { inSets: true }));
         head.addEventListener("click", function (ev) {
             ev.stopPropagation();
         });
@@ -88395,6 +88420,14 @@
         border-top: 1px solid var(--line);
         margin-top: 6px;
         padding-top: 10px;
+    }
+
+    /* The badge after the title, as in the list */
+    #menuTitle .mp-mn-badge {
+        display: inline-block;
+        margin-left: 0.6em;
+        vertical-align: middle;
+        font-size: 0.7em;
     }
 
     /* The song's number in the list before its title */
@@ -98353,6 +98386,7 @@
         + ".mp-mn .mp-mn-num{flex:0 0 auto;color:#888;font-weight:400;font-variant-numeric:tabular-nums}"
         + ".mp-mn .mp-mn-title{flex:1 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;"
         + "font-weight:600;color:" + ACCENT + "}"
+        + ".mp-mn .mp-mn-badge{align-self:center;margin-left:0}"
         + ".mp-mn .mp-mn-body{overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}"
         + ".mp-mn .mp-mn-row{display:flex;align-items:center;gap:10px;width:100%;min-height:0;box-sizing:border-box;"
         + "padding:7px 10px;margin:0;border:none;border-radius:6px;background:transparent;box-shadow:none;"
@@ -98383,9 +98417,12 @@
         (document.head || document.documentElement).appendChild(style);
     }
 
-    // The menu's head: the song's number in the list, when it has one, and
-    // its title. A tap on it does nothing and leaves the menu open
-    function mnHead(head, number, title) {
+    // The menu's head: the song's number in the list, when it has one, its
+    // title and, for the account's own songs, the badge as in the list,
+    // Public, Draft, New or Shared, with its marks: T trimmed, R remix, N a
+    // note, a count of comments. badge: the list row's item, or null. A tap
+    // on it does nothing and leaves the menu open
+    function mnHead(head, number, title, badge) {
 
         const num = document.createElement("span");
         const name = document.createElement("span");
@@ -98402,6 +98439,18 @@
         }
 
         head.appendChild(name);
+
+        if (badge && badge.badge) {
+
+            const b = document.createElement("span");
+
+            srStyle();
+            b.className = "mp-sr-badge mp-mn-badge " + badge.badge;
+            b.textContent = badge.badge;
+            b.title = badge.badgeTitle || "";
+            srMarks(b, badge);
+            head.appendChild(b);
+        }
     }
 
     // The rating under the stars, in words, with Remove rating once there
@@ -120528,7 +120577,7 @@
 
         menuSong = m;
         box.textContent = "";
-        mnHead($("menuTitle"), m.number, m.title);
+        mnHead($("menuTitle"), m.number, m.title, m.head || null);
         paintMenuRating(heldRating(m.id, m.rating));
 
         box.appendChild(menuItem("play", "Play", function () {

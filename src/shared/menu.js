@@ -13,6 +13,7 @@
         + ".mp-mn .mp-mn-num{flex:0 0 auto;color:#888;font-weight:400;font-variant-numeric:tabular-nums}"
         + ".mp-mn .mp-mn-title{flex:1 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;"
         + "font-weight:600;color:" + ACCENT + "}"
+        + ".mp-mn .mp-mn-badge{align-self:center;margin-left:0}"
         + ".mp-mn .mp-mn-body{overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}"
         + ".mp-mn .mp-mn-row{display:flex;align-items:center;gap:10px;width:100%;min-height:0;box-sizing:border-box;"
         + "padding:7px 10px;margin:0;border:none;border-radius:6px;background:transparent;box-shadow:none;"
@@ -43,9 +44,12 @@
         (document.head || document.documentElement).appendChild(style);
     }
 
-    // The menu's head: the song's number in the list, when it has one, and
-    // its title. A tap on it does nothing and leaves the menu open
-    function mnHead(head, number, title) {
+    // The menu's head: the song's number in the list, when it has one, its
+    // title and, for the account's own songs, the badge as in the list,
+    // Public, Draft, New or Shared, with its marks: T trimmed, R remix, N a
+    // note, a count of comments. badge: the list row's item, or null. A tap
+    // on it does nothing and leaves the menu open
+    function mnHead(head, number, title, badge) {
 
         const num = document.createElement("span");
         const name = document.createElement("span");
@@ -62,6 +66,18 @@
         }
 
         head.appendChild(name);
+
+        if (badge && badge.badge) {
+
+            const b = document.createElement("span");
+
+            srStyle();
+            b.className = "mp-sr-badge mp-mn-badge " + badge.badge;
+            b.textContent = badge.badge;
+            b.title = badge.badgeTitle || "";
+            srMarks(b, badge);
+            head.appendChild(b);
+        }
     }
 
     // The rating under the stars, in words, with Remove rating once there
