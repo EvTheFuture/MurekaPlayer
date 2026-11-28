@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.389";
+    const VERSION = "2.0.1.390";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -75481,8 +75481,9 @@
     // so the player waits on its own: it looks at the feed every 15 s, as
     // the button for new songs does, and plays the generation as a song
     // made here with Play when ready: the take ready first at once, the
-    // other after it, both shown in the list as still generating till then.
-    // Ten minutes at most
+    // other after it, or with ?mode=after as Play next, both after the
+    // playing song, shown in the list as still generating till then. Ten
+    // minutes at most
     const PLAY_ASKED_MS = 10 * 60000;
     const PLAY_ASKED_LOOK_MS = 15000;
 
@@ -75518,8 +75519,9 @@
     }
 
     // A generation to play as it is ready, as a wish of the form: its songs
-    // known now go in at once, the rest as the looks find them
-    function playGeneration(feedId) {
+    // known now go in at once, the rest as the looks find them. mode "now"
+    // or "after" the playing song
+    function playGeneration(feedId, mode) {
 
         const key = String(feedId);
 
@@ -75530,8 +75532,8 @@
             }
         }
 
-        createWishes.push({ feedId: key, play: "now", setId: "", title: "", seen: [], newSet: "", nameFromSong: false,
-            until: Date.now() + PLAY_ASKED_MS, asked: true });
+        createWishes.push({ feedId: key, play: mode === "after" ? "after" : "now", setId: "", title: "", seen: [], newSet: "",
+            nameFromSong: false, until: Date.now() + PLAY_ASKED_MS, asked: true });
 
         const known = generationSongs(key);
 
@@ -75588,10 +75590,12 @@
 
                 if (newest && compareIds(newest, playAskedNext.after) > 0) {
 
+                    const mode = playAskedNext.mode;
+
                     playAskedNext = null;
-                    dbgLog("Song", "asked to play the next new song: generation " + newest + " found, plays when ready");
-                    showToast("The new song plays when it is ready", true);
-                    playGeneration(newest);
+                    dbgLog("Song", "asked to play the next new song: generation " + newest + " found, plays " + (mode === "after" ? "after the playing song" : "when ready"));
+                    showToast(mode === "after" ? "The new song plays after the playing song" : "The new song plays when it is ready", true);
+                    playGeneration(newest, mode);
                 }
             }
 
@@ -75613,11 +75617,13 @@
         }
     }
 
-    // What an address asked: { what: "next-new" | "latest" | "feed", id }.
-    // Answers at once what will be done, { ok, said }
+    // What an address asked: { what: "next-new" | "latest" | "feed", id,
+    // mode: "now" | "after" }. Answers at once what will be done, { ok, said }
     function hostPlayAsked(a) {
 
         const what = a && typeof a.what === "string" ? a.what : "";
+        const mode = a && a.mode === "after" ? "after" : "now";
+        const after = mode === "after" && !queueIdle() && !!currentSong;
 
         if (creatorSource) {
             return { ok: false, said: "The player shows another creator's songs, not your own" };
@@ -75625,15 +75631,16 @@
 
         if (what === "next-new") {
 
-            const after = newestFeedId();
+            const newest = newestFeedId();
 
-            playAskedNext = { after: after, until: Date.now() + PLAY_ASKED_MS };
-            dbgLog("Song", "asked to play the next new song, newer than generation " + (after || "none"));
-            showToast("The next new song plays when it is ready", true);
+            playAskedNext = { after: newest, until: Date.now() + PLAY_ASKED_MS, mode: mode };
+            dbgLog("Song", "asked to play the next new song" + (mode === "after" ? " after the playing song" : "") + ", newer than generation " + (newest || "none"));
+            showToast(mode === "after" ? "The next new song plays after the playing song" : "The next new song plays when it is ready", true);
             setStatus("Waiting for the next new song, up to 10 minutes");
             playAskedLookSoon();
 
-            return { ok: true, said: "Waiting for the next new song, it plays when it is ready, up to 10 minutes" };
+            return { ok: true, said: "Waiting for the next new song, it plays " + (mode === "after" ? "after the playing song once it is ready" : "when it is ready")
+                + ", up to 10 minutes" };
         }
 
         if (what === "latest") {
@@ -75648,10 +75655,10 @@
             const ready = songs.some(isUsableSong);
             const title = (songs[0] && songs[0].title) || "the newest song";
 
-            dbgLog("Song", "asked to play the newest generation " + newest + (ready ? "" : ", still generating"));
-            playGeneration(newest);
+            dbgLog("Song", "asked to play the newest generation " + newest + (ready ? "" : ", still generating") + (after ? ", after the playing song" : ""));
+            playGeneration(newest, mode);
 
-            return { ok: true, said: (ready ? "Playing " : "Plays when ready: ") + title };
+            return { ok: true, said: (after ? (ready ? "Plays next: " : "Plays next when ready: ") : (ready ? "Playing " : "Plays when ready: ")) + title };
         }
 
         if (what === "feed") {
@@ -75665,13 +75672,14 @@
             const songs = generationSongs(id);
             const ready = songs.some(isUsableSong);
 
-            dbgLog("Song", "asked to play generation " + id + (songs.length ? (ready ? ", ready" : ", still generating") : ", not seen yet, looked for"));
-            playGeneration(id);
+            dbgLog("Song", "asked to play generation " + id + (songs.length ? (ready ? ", ready" : ", still generating") : ", not seen yet, looked for")
+                + (after ? ", after the playing song" : ""));
+            playGeneration(id, mode);
 
             return {
                 ok: true,
-                said: songs.length ? (ready ? "Playing " : "Plays when ready: ") + (songs[0].title || "the song")
-                    : "Plays generation " + id + " when it is ready, up to 10 minutes"
+                said: songs.length ? (after ? (ready ? "Plays next: " : "Plays next when ready: ") : (ready ? "Playing " : "Plays when ready: ")) + (songs[0].title || "the song")
+                    : "Plays generation " + id + (after ? " after the playing song" : "") + " when it is ready, up to 10 minutes"
             };
         }
 

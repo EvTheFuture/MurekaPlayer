@@ -1054,7 +1054,7 @@ final class WebViewServer {
             // once what it will do
             if (playAddress) {
 
-                playAddress(out, path.substring("/play/".length()));
+                playAddress(out, path.substring("/play/".length()), param(query, "mode"));
                 return;
             }
 
@@ -2528,15 +2528,20 @@ final class WebViewServer {
         }
     }
 
-    // One of the addresses to play from, see the route. Answered as a short
+    // One of the addresses to play from, see the route. ?mode=after plays
+    // it after the playing song rather than at once. Answered as a short
     // line of text, for a voice assistant to read out or a browser to show,
     // with the player's own words
-    private void playAddress(OutputStream out, String what) throws IOException {
+    private void playAddress(OutputStream out, String what, String mode) throws IOException {
 
         String w = what.trim().toLowerCase(Locale.ROOT);
         JSONObject ask = new JSONObject();
 
         try {
+
+            String m = mode == null ? "" : mode.trim().toLowerCase(Locale.ROOT);
+
+            ask.put("mode", "after".equals(m) || "next".equals(m) ? "after" : "now");
 
             if ("next-new".equals(w) || "latest".equals(w)) {
                 ask.put("what", w);
@@ -2546,7 +2551,7 @@ final class WebViewServer {
                 ask.put("id", w);
             } else {
 
-                send(out, 404, "text/plain; charset=utf-8", bytes("Not an address to play from: /play/next-new, /play/latest or /play/<feed id>\n"));
+                send(out, 404, "text/plain; charset=utf-8", bytes("Not an address to play from: /play/next-new, /play/latest or /play/<feed id>, with ?mode=after to play after the playing song\n"));
                 return;
             }
         } catch (JSONException e) {
