@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.391";
+    const VERSION = "2.0.1.392";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -131550,6 +131550,25 @@
     arrangePhone();
     poll();
     requestAnimationFrame(tick);
+
+    // Opened by an address to play from, /play/latest say, in a browser:
+    // the player's answer shown as a toast over the page, the address put
+    // back to the page's own so a reload does not show it again
+    try {
+
+        const asked = new URLSearchParams(location.search);
+        const said = asked.get("said");
+
+        if (said) {
+
+            history.replaceState(null, "", location.pathname);
+            setTimeout(function () {
+                toast(said.slice(0, 200), asked.get("bad") === "1" ? "bad" : "ok", 6000);
+            }, 600);
+        }
+    } catch (e) {
+        // Without the answer, the page as it is
+    }
 })();
 </script>
 </body>

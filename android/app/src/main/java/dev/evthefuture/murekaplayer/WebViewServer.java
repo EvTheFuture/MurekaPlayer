@@ -1054,7 +1054,7 @@ final class WebViewServer {
             // once what it will do
             if (playAddress) {
 
-                playAddress(out, path.substring("/play/".length()), param(query, "mode"));
+                playAddress(out, path.substring("/play/".length()), param(query, "mode"), "navigate".equals(fetchMode));
                 return;
             }
 
@@ -2530,9 +2530,10 @@ final class WebViewServer {
 
     // One of the addresses to play from, see the route. ?mode=after plays
     // it after the playing song rather than at once. Answered as a short
-    // line of text, for a voice assistant to read out or a browser to show,
-    // with the player's own words
-    private void playAddress(OutputStream out, String what, String mode) throws IOException {
+    // line of text, for a voice assistant to read out, in the player's own
+    // words. A browser opening it, the car's say, is sent on to the web
+    // view's page instead, which shows the words as a toast
+    private void playAddress(OutputStream out, String what, String mode, boolean page) throws IOException {
 
         String w = what.trim().toLowerCase(Locale.ROOT);
         JSONObject ask = new JSONObject();
@@ -2575,6 +2576,17 @@ final class WebViewServer {
             } catch (JSONException e) {
                 said = "The player's answer could not be read";
             }
+        }
+
+        if (page) {
+
+            String where = "/?said=" + java.net.URLEncoder.encode(said, "UTF-8") + (ok ? "" : "&bad=1");
+            String head = "HTTP/1.1 303 See Other\r\nLocation: " + where + "\r\n"
+                + "Content-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
+
+            out.write(head.getBytes(StandardCharsets.US_ASCII));
+            out.flush();
+            return;
         }
 
         send(out, ok ? 200 : 409, "text/plain; charset=utf-8", bytes(said + "\n"));
