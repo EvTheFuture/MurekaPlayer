@@ -954,9 +954,20 @@ final class WebViewServer {
             boolean pageItself = "GET".equals(method) && ("/".equals(path) || "/index.html".equals(path));
             boolean signing = "POST".equals(method) && ("/login".equals(path) || "/logout".equals(path));
 
-            // A script with the key may send commands and ask whether this
-            // is the player, nothing else
-            boolean script = (("POST".equals(method) && "/cmd".equals(path)) || ("GET".equals(method) && "/ping".equals(path)))
+            // An address to play from, opened by a voice assistant say,
+            // may carry the script's key as ?key= as it cannot send a header
+            boolean playAddress = "GET".equals(method) && path.startsWith("/play/");
+
+            if (playAddress && scriptKey == null) {
+
+                String k = param(query, "key");
+
+                scriptKey = k == null ? null : k.trim().toLowerCase(Locale.ROOT);
+            }
+
+            // A script with the key may send commands, ask whether this is
+            // the player and open the addresses to play from, nothing else
+            boolean script = (("POST".equals(method) && "/cmd".equals(path)) || ("GET".equals(method) && "/ping".equals(path)) || playAddress)
                 && WebLogin.scriptValid(context, scriptKey);
 
             if (!appScreen && !pageItself && !signing && !script && WebLogin.on(context) && !WebLogin.valid(context, key)) {
@@ -1036,6 +1047,17 @@ final class WebViewServer {
 
             // The certificate for https: what is kept, and one brought in or
             // taken away, which with a password set needs it too
+            // Songs played as they are made, asked by opening an address, a
+            // voice assistant in the car say: /play/next-new waits for the
+            // next generation, /play/<feed id> for that one, /play/latest
+            // plays the newest. The player does the waiting and answers at
+            // once what it will do
+            if (playAddress) {
+
+                playAddress(out, path.substring("/play/".length()));
+                return;
+            }
+
             if ("GET".equals(method) && "/tls".equals(path)) {
 
                 JSONObject info = TlsKeys.info(context, TLS_PORT);
@@ -2504,6 +2526,53 @@ final class WebViewServer {
         } catch (JSONException e) {
             return "";
         }
+    }
+
+    // One of the addresses to play from, see the route. Answered as a short
+    // line of text, for a voice assistant to read out or a browser to show,
+    // with the player's own words
+    private void playAddress(OutputStream out, String what) throws IOException {
+
+        String w = what.trim().toLowerCase(Locale.ROOT);
+        JSONObject ask = new JSONObject();
+
+        try {
+
+            if ("next-new".equals(w) || "latest".equals(w)) {
+                ask.put("what", w);
+            } else if (w.matches("[0-9]{1,30}")) {
+
+                ask.put("what", "feed");
+                ask.put("id", w);
+            } else {
+
+                send(out, 404, "text/plain; charset=utf-8", bytes("Not an address to play from: /play/next-new, /play/latest or /play/<feed id>\n"));
+                return;
+            }
+        } catch (JSONException e) {
+
+            send(out, 500, "text/plain; charset=utf-8", bytes("Could not ask the player\n"));
+            return;
+        }
+
+        String json = Hub.request("__murekaHostPlayAsked", ask.toString(), 4000);
+        String said = "The player did not answer";
+        boolean ok = false;
+
+        if (json != null && !json.isEmpty()) {
+
+            try {
+
+                JSONObject r = new JSONObject(json);
+
+                ok = r.optBoolean("ok", false);
+                said = r.optString("said", ok ? "OK" : "Not done");
+            } catch (JSONException e) {
+                said = "The player's answer could not be read";
+            }
+        }
+
+        send(out, ok ? 200 : 409, "text/plain; charset=utf-8", bytes(said + "\n"));
     }
 
     // A certificate brought in, as PEM or as PKCS #12, or the one kept taken

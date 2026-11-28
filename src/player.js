@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.388";
+    const VERSION = "2.0.1.389";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -51302,6 +51302,7 @@
         window.__murekaHostImportApply = hostImportApply;
         window.__murekaHostShareLine = hostShareLine;
         window.__murekaHostList = hostList;
+        window.__murekaHostPlayAsked = hostPlayAsked;
         window.__murekaHostQueue = hostQueue;
         window.__murekaHostPanel = hostPanel;
         window.__murekaHostSongMenu = hostSongMenu;
@@ -75472,6 +75473,209 @@
 
         createWishes.push({ feedId: feedId, play: d.playMode, setId: setId, title: (d.setName || d.title).trim(), seen: [], newSet: "",
             nameFromSong: d.nameFromSong === true, until: Date.now() + 15 * 60000 });
+    }
+
+    // ---- Songs played as they are made, asked by opening an address ----
+    // A voice assistant in the car, say, opens /play/next-new, /play/latest
+    // or /play/<feed id> on the web view. A generation takes some minutes,
+    // so the player waits on its own: it looks at the feed every 15 s, as
+    // the button for new songs does, and plays the generation as a song
+    // made here with Play when ready: the take ready first at once, the
+    // other after it, both shown in the list as still generating till then.
+    // Ten minutes at most
+    const PLAY_ASKED_MS = 10 * 60000;
+    const PLAY_ASKED_LOOK_MS = 15000;
+
+    // The next generation waited for: newer than the newest there was when
+    // asked, null for none
+    let playAskedNext = null;
+    let playAskedTimer = 0;
+    let playAskedBusy = false;
+
+    // The newest generation known here, ready or still being made
+    function newestFeedId() {
+
+        let best = "";
+
+        for (const s of cache.songs.concat(pendingList())) {
+
+            const id = s && s.feed_id !== undefined && s.feed_id !== null ? String(s.feed_id) : "";
+
+            if (id && (!best || compareIds(id, best) > 0)) {
+                best = id;
+            }
+        }
+
+        return best;
+    }
+
+    // The songs of a generation known here, in the list's order
+    function generationSongs(feedId) {
+
+        return cache.songs.concat(pendingList()).filter(function (s) {
+            return s && String(s.feed_id) === String(feedId);
+        });
+    }
+
+    // A generation to play as it is ready, as a wish of the form: its songs
+    // known now go in at once, the rest as the looks find them
+    function playGeneration(feedId) {
+
+        const key = String(feedId);
+
+        for (let i = createWishes.length - 1; i >= 0; i -= 1) {
+
+            if (createWishes[i].feedId === key && createWishes[i].asked) {
+                createWishes.splice(i, 1);
+            }
+        }
+
+        createWishes.push({ feedId: key, play: "now", setId: "", title: "", seen: [], newSet: "", nameFromSong: false,
+            until: Date.now() + PLAY_ASKED_MS, asked: true });
+
+        const known = generationSongs(key);
+
+        if (known.length > 0) {
+            createGrant(known);
+        }
+
+        playAskedLookSoon();
+    }
+
+    // The looks at the feed while something asked for waits
+    function playAskedLookSoon() {
+
+        if (!playAskedTimer) {
+            playAskedTimer = setInterval(playAskedLook, PLAY_ASKED_LOOK_MS);
+        }
+    }
+
+    async function playAskedLook() {
+
+        const now = Date.now();
+        const waiting = createWishes.filter(function (w) {
+            return w.asked && now <= w.until && w.seen.length < 2;
+        });
+
+        if (playAskedNext && now > playAskedNext.until) {
+
+            dbgLog("Song", "asked to play the next new song: none came in 10 minutes, no longer waited for");
+            playAskedNext = null;
+        }
+
+        if (!playAskedNext && waiting.length === 0) {
+
+            clearInterval(playAskedTimer);
+            playAskedTimer = 0;
+            return;
+        }
+
+        if (playAskedBusy || running || creatorSource || offlineMode()) {
+            return;
+        }
+
+        playAskedBusy = true;
+
+        try {
+
+            // The newest songs read as the button for new songs does, those
+            // still generating shown as such
+            await run(true);
+
+            if (playAskedNext) {
+
+                const newest = newestFeedId();
+
+                if (newest && compareIds(newest, playAskedNext.after) > 0) {
+
+                    playAskedNext = null;
+                    dbgLog("Song", "asked to play the next new song: generation " + newest + " found, plays when ready");
+                    showToast("The new song plays when it is ready", true);
+                    playGeneration(newest);
+                }
+            }
+
+            for (const w of createWishes.slice()) {
+
+                if (w.asked && w.seen.length < 2) {
+
+                    const known = generationSongs(w.feedId);
+
+                    if (known.length > 0) {
+                        createGrant(known);
+                    }
+                }
+            }
+        } catch (e) {
+            dbgLog("Song", "looking for the song asked to play: " + errText(e));
+        } finally {
+            playAskedBusy = false;
+        }
+    }
+
+    // What an address asked: { what: "next-new" | "latest" | "feed", id }.
+    // Answers at once what will be done, { ok, said }
+    function hostPlayAsked(a) {
+
+        const what = a && typeof a.what === "string" ? a.what : "";
+
+        if (creatorSource) {
+            return { ok: false, said: "The player shows another creator's songs, not your own" };
+        }
+
+        if (what === "next-new") {
+
+            const after = newestFeedId();
+
+            playAskedNext = { after: after, until: Date.now() + PLAY_ASKED_MS };
+            dbgLog("Song", "asked to play the next new song, newer than generation " + (after || "none"));
+            showToast("The next new song plays when it is ready", true);
+            setStatus("Waiting for the next new song, up to 10 minutes");
+            playAskedLookSoon();
+
+            return { ok: true, said: "Waiting for the next new song, it plays when it is ready, up to 10 minutes" };
+        }
+
+        if (what === "latest") {
+
+            const newest = newestFeedId();
+
+            if (!newest) {
+                return { ok: false, said: "No songs in the library yet" };
+            }
+
+            const songs = generationSongs(newest);
+            const ready = songs.some(isUsableSong);
+            const title = (songs[0] && songs[0].title) || "the newest song";
+
+            dbgLog("Song", "asked to play the newest generation " + newest + (ready ? "" : ", still generating"));
+            playGeneration(newest);
+
+            return { ok: true, said: (ready ? "Playing " : "Plays when ready: ") + title };
+        }
+
+        if (what === "feed") {
+
+            const id = String(a.id || "").replace(/[^0-9]/g, "");
+
+            if (!id) {
+                return { ok: false, said: "No generation given" };
+            }
+
+            const songs = generationSongs(id);
+            const ready = songs.some(isUsableSong);
+
+            dbgLog("Song", "asked to play generation " + id + (songs.length ? (ready ? ", ready" : ", still generating") : ", not seen yet, looked for"));
+            playGeneration(id);
+
+            return {
+                ok: true,
+                said: songs.length ? (ready ? "Playing " : "Plays when ready: ") + (songs[0].title || "the song")
+                    : "Plays generation " + id + " when it is ready, up to 10 minutes"
+            };
+        }
+
+        return { ok: false, said: "Not something to play" };
     }
 
     // The set the form asked for, there before the songs are sent, so the
