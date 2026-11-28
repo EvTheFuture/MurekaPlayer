@@ -1054,7 +1054,7 @@ final class WebViewServer {
             // once what it will do
             if (playAddress) {
 
-                playAddress(out, path.substring("/play/".length()), param(query, "mode"), "navigate".equals(fetchMode));
+                playAddress(out, path.substring("/play/".length()), param(query, "mode"));
                 return;
             }
 
@@ -2529,11 +2529,11 @@ final class WebViewServer {
     }
 
     // One of the addresses to play from, see the route. ?mode=after plays
-    // it after the playing song rather than at once. Answered as a short
-    // line of text, for a voice assistant to read out, in the player's own
-    // words. A browser opening it, the car's say, is sent on to the web
-    // view's page instead, which shows the words as a toast
-    private void playAddress(OutputStream out, String what, String mode, boolean page) throws IOException {
+    // it after the playing song rather than at once. Done, and whatever
+    // opened it, the car's browser say, sent on to the web view's own page,
+    // which shows the player's answer as a toast: the address only starts
+    // something, the page is what is shown
+    private void playAddress(OutputStream out, String what, String mode) throws IOException {
 
         String w = what.trim().toLowerCase(Locale.ROOT);
         JSONObject ask = new JSONObject();
@@ -2552,12 +2552,12 @@ final class WebViewServer {
                 ask.put("id", w);
             } else {
 
-                send(out, 404, "text/plain; charset=utf-8", bytes("Not an address to play from: /play/next-new, /play/latest or /play/<feed id>, with ?mode=after to play after the playing song\n"));
+                toPage(out, "Not an address to play from: /play/next-new, /play/latest or /play/<feed id>", false);
                 return;
             }
         } catch (JSONException e) {
 
-            send(out, 500, "text/plain; charset=utf-8", bytes("Could not ask the player\n"));
+            toPage(out, "Could not ask the player", false);
             return;
         }
 
@@ -2578,18 +2578,19 @@ final class WebViewServer {
             }
         }
 
-        if (page) {
+        toPage(out, said, ok);
+    }
 
-            String where = "/?said=" + java.net.URLEncoder.encode(said, "UTF-8") + (ok ? "" : "&bad=1");
-            String head = "HTTP/1.1 303 See Other\r\nLocation: " + where + "\r\n"
-                + "Content-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
+    // On to the web view's own page, the words for its toast along, so a
+    // reload there does not do it again
+    private static void toPage(OutputStream out, String said, boolean ok) throws IOException {
 
-            out.write(head.getBytes(StandardCharsets.US_ASCII));
-            out.flush();
-            return;
-        }
+        String where = "/?said=" + java.net.URLEncoder.encode(said, "UTF-8") + (ok ? "" : "&bad=1");
+        String head = "HTTP/1.1 303 See Other\r\nLocation: " + where + "\r\n"
+            + "Content-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
 
-        send(out, ok ? 200 : 409, "text/plain; charset=utf-8", bytes(said + "\n"));
+        out.write(head.getBytes(StandardCharsets.US_ASCII));
+        out.flush();
     }
 
     // A certificate brought in, as PEM or as PKCS #12, or the one kept taken
