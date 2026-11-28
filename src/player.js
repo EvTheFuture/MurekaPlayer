@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.387";
+    const VERSION = "2.0.1.388";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -83449,20 +83449,20 @@
                 createFromSongMenu(song);
             }, "create");
 
-            // The song itself as the one Create remixes
-            if (songUrl(song)) {
-
-                addMenuRow("Remix", CTRL_ACCENT, function () {
-                    remixFromSongMenu(song);
-                }, "shuffle");
-            }
-
             // Cut the start or the end off, Mureka makes a new song of it
             if (songUrl(song)) {
 
                 addMenuRow("Trim", CTRL_ACCENT, function () {
                     openTrimmer(song);
                 }, "scissors");
+            }
+
+            // The song itself as the one Create remixes
+            if (songUrl(song)) {
+
+                addMenuRow("Remix", CTRL_ACCENT, function () {
+                    remixFromSongMenu(song);
+                }, "shuffle");
             }
 
             addMenuRow("Set cover", CTRL_ACCENT, function () {
@@ -123998,6 +123998,16 @@
                 act("createFrom").then(openCreatePop);
             }, "accent"));
 
+            // Cut the start or the end off, Mureka makes a new song of it
+            if (m.canTrim) {
+
+                box.appendChild(menuItem("scissors", "Trim", function () {
+
+                    close();
+                    openTrimmer(m);
+                }, "accent"));
+            }
+
             // The song itself as the one Create remixes, its part chosen in
             // the trimmer here first, as when picked from the library
             if (m.canTrim) {
@@ -124014,16 +124024,6 @@
                             toast(r && r.why ? r.why : "The song could not be remixed", "");
                         }
                     });
-                }, "accent"));
-            }
-
-            // Cut the start or the end off, Mureka makes a new song of it
-            if (m.canTrim) {
-
-                box.appendChild(menuItem("scissors", "Trim", function () {
-
-                    close();
-                    openTrimmer(m);
                 }, "accent"));
             }
 
