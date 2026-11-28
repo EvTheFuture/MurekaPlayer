@@ -40367,6 +40367,25 @@
                 act("createFrom").then(openCreatePop);
             }, "accent"));
 
+            // The song itself as the one Create remixes, its part chosen in
+            // the trimmer here first, as when picked from the library
+            if (m.canTrim) {
+
+                box.appendChild(menuItem("shuffle", "Remix", function () {
+
+                    close();
+                    openCreatePop();
+                    crAsk({ op: "librarySong", id: m.id }).then(function (r) {
+
+                        if (r && r.ok && r.item) {
+                            crRemixPart(r.item, null);
+                        } else {
+                            toast(r && r.why ? r.why : "The song could not be remixed", "");
+                        }
+                    });
+                }, "accent"));
+            }
+
             // Cut the start or the end off, Mureka makes a new song of it
             if (m.canTrim) {
 

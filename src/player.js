@@ -240,7 +240,7 @@
 
     // Player version, shown in the panel header so an update is easy to confirm
     // Keep this in sync with the version field in manifest.json
-    const VERSION = "2.0.1.386";
+    const VERSION = "2.0.1.387";
 
     // When the player started, for the startup times in the debug log
     const PLAYER_START = Date.now();
@@ -76653,6 +76653,27 @@
         createFromSong(song);
     }
 
+    // From a song's menu: the song itself remixed in Create, as when picked
+    // from the library there, its part chosen first. The rest of the form
+    // stays as it was
+    function remixFromSongMenu(song) {
+
+        if (createBusy) {
+
+            showToast("Create is busy, try again in a moment", false);
+            return;
+        }
+
+        if (!songUrl(song)) {
+
+            showToast("Mureka has no file of this song to remix", false);
+            return;
+        }
+
+        openCreate();
+        createUseResource(Object.assign(createLibrarySongOf(song), { via: "library" }), null, true);
+    }
+
     // ---- The page on the phone ----
 
     function openCreate() {
@@ -79901,6 +79922,15 @@
             createResources(String(a.last || "0").replace(/[^0-9]/g, "") || "0").then(function (page) {
                 reply({ ok: true, list: page.list, last: page.last, more: page.more });
             }, failed);
+        } else if (op === "librarySong") {
+
+            // One song of the library by its id, to remix from its menu
+            const id = String(a.id || "").replace(/[^0-9]/g, "");
+            const song = (ownLibrary().songs || []).find(function (x) {
+                return String(x.song_id) === id;
+            });
+
+            reply(song && songUrl(song) ? { ok: true, item: createLibrarySongOf(song) } : { ok: false, why: "Mureka has no file of this song to remix" });
         } else if (op === "librarySongs") {
 
             reply({ ok: true, list: createLibrarySongs(String(a.find || "").slice(0, 100), 80), playing: currentSong ? String(currentSong.song_id) : "" });
@@ -83418,6 +83448,14 @@
             addMenuRow("Use in Create", CTRL_ACCENT, function () {
                 createFromSongMenu(song);
             }, "create");
+
+            // The song itself as the one Create remixes
+            if (songUrl(song)) {
+
+                addMenuRow("Remix", CTRL_ACCENT, function () {
+                    remixFromSongMenu(song);
+                }, "shuffle");
+            }
 
             // Cut the start or the end off, Mureka makes a new song of it
             if (songUrl(song)) {
@@ -123959,6 +123997,25 @@
                 close();
                 act("createFrom").then(openCreatePop);
             }, "accent"));
+
+            // The song itself as the one Create remixes, its part chosen in
+            // the trimmer here first, as when picked from the library
+            if (m.canTrim) {
+
+                box.appendChild(menuItem("shuffle", "Remix", function () {
+
+                    close();
+                    openCreatePop();
+                    crAsk({ op: "librarySong", id: m.id }).then(function (r) {
+
+                        if (r && r.ok && r.item) {
+                            crRemixPart(r.item, null);
+                        } else {
+                            toast(r && r.why ? r.why : "The song could not be remixed", "");
+                        }
+                    });
+                }, "accent"));
+            }
 
             // Cut the start or the end off, Mureka makes a new song of it
             if (m.canTrim) {
