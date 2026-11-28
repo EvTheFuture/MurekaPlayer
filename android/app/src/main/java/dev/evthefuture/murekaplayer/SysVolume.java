@@ -347,33 +347,31 @@ final class SysVolume {
             }
 
             // The step moved from outside the app, not while a step of its
-            // own is still waiting to be put in. With the buttons going
-            // through more steps, no press of them moves it: it is Android's
-            // or the speaker's, a Bluetooth speaker giving its own level say,
-            // and the level kept is put back. Else it may be the phone's own
-            // buttons, or Android or the speaker all the same, so it counts
-            // as one of the finer steps that way from the level kept, never
-            // as the whole of the new step with the player at its full
-            // sound, which from a low level was many times louder
+            // own is still waiting to be put in: the car's or a speaker's
+            // own volume over Bluetooth, the phone's buttons, or Android.
+            // Followed by as many dB as the phone's steps lie apart, from the
+            // level kept: the car's buttons work as they always did, and a
+            // step put in by a speaker by itself, from a level kept under the
+            // first step, is a step's few dB louder, not the whole of the new
+            // step with the player at its full sound, many times louder
             if (fineOn && !training && fineStep >= 0 && level != fineStep && max > 0 && stepWaiting < 0) {
 
-                int dir = level > fineStep ? 1 : -1;
+                int type = outputType();
+                boolean own = hasCurve(type, max);
                 float was = finePct;
+                float by = stepDb(level, max, type, own) - stepDb(fineStep, max, type, own);
+                float to = pctForDb(fineDb(was, max, type, own) + by, max, type, own);
 
-                if (buttonsOn()) {
-
-                    Hub.note("Volume", "step " + level + " from " + fineStep + " put in by Android or the speaker, the buttons go"
-                        + " through more steps, back to the " + Math.round(was * 10) / 10f + "% kept");
-                    applyFine();
-                    Hub.setVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC), max);
-                    return;
+                // At least one of the finer steps that way
+                if (level > fineStep && to <= was || level < fineStep && to >= was) {
+                    to = fineNext(was, level > fineStep ? 1 : -1, max);
                 }
 
                 fineBeforePress = was;
                 finePressAt = SystemClock.uptimeMillis();
-                finePct = fineNext(was, dir, max);
-                Hub.note("Volume", "step " + level + " from " + fineStep + " by the phone's buttons, Android or the speaker: one finer step "
-                    + (dir > 0 ? "up" : "down") + ", " + Math.round(was * 10) / 10f + "% to " + Math.round(finePct * 10) / 10f + "%");
+                finePct = to;
+                Hub.note("Volume", "step " + level + " from " + fineStep + " by the car, a speaker, the phone's buttons or Android: "
+                    + (by > 0 ? "+" : "") + Math.round(by * 10) / 10f + " dB, " + Math.round(was * 10) / 10f + "% to " + Math.round(to * 10) / 10f + "%");
                 applyFine();
                 Hub.setVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC), max);
                 return;
@@ -682,6 +680,27 @@ final class SysVolume {
         float gain = (float) Math.pow(10, -down / 20);
 
         return new float[] { step, Math.max(0, Math.min(1, gain)) };
+    }
+
+    // The level in percent heard at a level in dB, the nearest of the
+    // finer steps, found by halving as the level only grows with the percent
+    private static float pctForDb(float db, int max, int type, boolean own) {
+
+        float lo = 0;
+        float hi = 100;
+
+        for (int i = 0; i < 30; i++) {
+
+            float mid = (lo + hi) / 2;
+
+            if (fineDb(mid, max, type, own) < db) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+
+        return snapFine(hi, max);
     }
 
     // The level heard at a level in percent, in dB, as the plan makes it
